@@ -50,17 +50,15 @@ const styles = StyleSheet.create({
     color: '#8a877f',
   },
   logoutButton: {
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#222',
+    backgroundColor: '#e8ff47',
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
     marginBottom: 16,
   },
   logoutText: {
-    color: '#8a877f',
+    color: '#080808',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });
