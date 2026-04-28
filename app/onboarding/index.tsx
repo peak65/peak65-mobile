@@ -219,15 +219,24 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   const callGenerateAssessment = useCallback(async (userId: string) => {
     setApiError(false);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
       const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
         body: JSON.stringify({ userId }),
+        signal: controller.signal,
       });
-      if (!res.ok) throw new Error(`status ${res.status}`);
+      clearTimeout(timeout);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       navigation.replace('Dashboard');
-    } catch {
+    } catch (err) {
+      clearTimeout(timeout);
+      console.error('[generate-assessment] failed:', err);
       setApiError(true);
     }
   }, [navigation]);
@@ -346,6 +355,7 @@ export default function OnboardingScreen({ navigation }: Props) {
         <Text style={styles.sublabel}>Select all that apply</Text>
         {/* Wrapped in ScrollView so all options are accessible on small screens */}
         <ScrollView
+          scrollEnabled
           nestedScrollEnabled
           showsVerticalScrollIndicator={false}
           style={styles.multiScroll}
@@ -814,7 +824,7 @@ const styles = StyleSheet.create({
 
   // Multi-select inner scroll
   multiScroll: {
-    flexGrow: 0,
+    maxHeight: '60%',
   },
   multiOptions: {
     gap: 10,
