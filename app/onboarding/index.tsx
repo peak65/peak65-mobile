@@ -589,12 +589,11 @@ const styles = StyleSheet.create({
   // Content
   scrollContent: {
     flexGrow: 1,
+    justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 12,
+    paddingVertical: 20,
   },
   stepContent: {
-    flex: 1,
     gap: 10,
   },
   label: {
@@ -681,7 +680,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   continueBtnDisabled: {
-    backgroundColor: '#1e1e1e',
+    opacity: 0.4,
   },
   continueBtnText: {
     color: BLACK,
