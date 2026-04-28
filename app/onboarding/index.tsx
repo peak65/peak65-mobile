@@ -76,8 +76,8 @@ const TOP_ALIGNED_STEPS: StepKey[] = [
   'stationWeaknesses', 'hyroxEquipment', 'generalEquipment', 'bodyFatRange',
 ];
 
-// Multi-select steps need a bounded container so their inner ScrollView can flex
-const MULTI_SELECT_STEPS: StepKey[] = ['stationWeaknesses', 'hyroxEquipment', 'generalEquipment'];
+// Steps that need a bounded container so their inner ScrollView can flex to fill it
+const SCROLLABLE_STEPS: StepKey[] = ['stationWeaknesses', 'hyroxEquipment', 'generalEquipment', 'bodyFatRange'];
 
 const LOADING_MESSAGES = [
   'Analyzing your training history...',
@@ -160,7 +160,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   const canContinue    = isStepComplete(currentKey, data);
   const isLastStep     = step === totalSteps - 1;
   const topAligned     = TOP_ALIGNED_STEPS.includes(currentKey);
-  const isMultiSelect  = MULTI_SELECT_STEPS.includes(currentKey);
+  const isScrollableStep = SCROLLABLE_STEPS.includes(currentKey);
 
   // Seed race_date to 30 days from now when first entering that step
   useEffect(() => {
@@ -327,22 +327,46 @@ export default function OnboardingScreen({ navigation }: Props) {
     label: string,
     field: keyof OnboardingData,
     options: { label: string; value: string }[],
+    scrollable = false,
   ) {
     const selected = data[field] as string;
+    const optionList = options.map(opt => (
+      <TouchableOpacity
+        key={opt.value}
+        style={[styles.option, selected === opt.value && styles.optionSelected]}
+        onPress={() => setSingle(field, opt.value)}
+      >
+        <Text style={[styles.optionText, selected === opt.value && styles.optionTextSelected]}>
+          {opt.label}
+        </Text>
+      </TouchableOpacity>
+    ));
+
+    if (scrollable) {
+      return (
+        <View style={[styles.stepContent, { flex: 1 }]}>
+          {renderLabel(label)}
+          <View style={styles.optionsScrollOuter}>
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 20 }}
+              showsVerticalScrollIndicator={true}
+              bounces={true}
+              alwaysBounceVertical={true}
+            >
+              <View style={styles.multiOptions}>
+                {optionList}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      );
+    }
+
     return (
       <View style={styles.stepContent}>
         {renderLabel(label)}
-        {options.map(opt => (
-          <TouchableOpacity
-            key={opt.value}
-            style={[styles.option, selected === opt.value && styles.optionSelected]}
-            onPress={() => setSingle(field, opt.value)}
-          >
-            <Text style={[styles.optionText, selected === opt.value && styles.optionTextSelected]}>
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {optionList}
       </View>
     );
   }
@@ -357,24 +381,29 @@ export default function OnboardingScreen({ navigation }: Props) {
       <View style={[styles.stepContent, { flex: 1 }]}>
         {renderLabel(label)}
         <Text style={styles.sublabel}>Select all that apply</Text>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          style={styles.multiScroll}
-        >
-          <View style={styles.multiOptions}>
-            {options.map(opt => (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.option, selected.includes(opt) && styles.optionSelected]}
-                onPress={() => toggleMulti(field, opt)}
-              >
-                <Text style={[styles.optionText, selected.includes(opt) && styles.optionTextSelected]}>
-                  {opt}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </ScrollView>
+        <View style={styles.optionsScrollOuter}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 20 }}
+            showsVerticalScrollIndicator={true}
+            bounces={true}
+            alwaysBounceVertical={true}
+          >
+            <View style={styles.multiOptions}>
+              {options.map(opt => (
+                <TouchableOpacity
+                  key={opt}
+                  style={[styles.option, selected.includes(opt) && styles.optionSelected]}
+                  onPress={() => toggleMulti(field, opt)}
+                >
+                  <Text style={[styles.optionText, selected.includes(opt) && styles.optionTextSelected]}>
+                    {opt}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
       </View>
     );
   }
@@ -568,6 +597,7 @@ export default function OnboardingScreen({ navigation }: Props) {
             { label: '30%+',               value: '30%+' },
             { label: "Unsure / I don't know", value: 'unsure' },
           ],
+          true,
         );
 
       case 'fitnessGoal':
@@ -670,7 +700,7 @@ export default function OnboardingScreen({ navigation }: Props) {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {isMultiSelect ? (
+        {isScrollableStep ? (
           <View style={styles.multiSelectContainer}>
             {renderCurrentStep()}
           </View>
@@ -837,13 +867,13 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
 
-  // Inner scroll for multi-select options — flex: 1 works because parent is bounded
-  multiScroll: {
+  // Outer wrapper for scrollable option lists — flex: 1 so inner ScrollView can fill it
+  optionsScrollOuter: {
     flex: 1,
+    overflow: 'hidden',
   },
   multiOptions: {
     gap: 10,
-    paddingBottom: 8,
   },
 
   // Body weight unit toggle
