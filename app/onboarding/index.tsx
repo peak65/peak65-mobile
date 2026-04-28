@@ -76,6 +76,9 @@ const TOP_ALIGNED_STEPS: StepKey[] = [
   'stationWeaknesses', 'hyroxEquipment', 'generalEquipment', 'bodyFatRange',
 ];
 
+// Multi-select steps need a bounded container so their inner ScrollView can flex
+const MULTI_SELECT_STEPS: StepKey[] = ['stationWeaknesses', 'hyroxEquipment', 'generalEquipment'];
+
 const LOADING_MESSAGES = [
   'Analyzing your training history...',
   'Designing your assessment week...',
@@ -150,13 +153,14 @@ export default function OnboardingScreen({ navigation }: Props) {
   const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
   const [androidPickerOpen, setAndroidPickerOpen] = useState(false);
 
-  const steps       = getSteps(data.goal);
-  const totalSteps  = steps.length;
-  const currentKey  = steps[step];
-  const progress    = (step + 1) / totalSteps;
-  const canContinue = isStepComplete(currentKey, data);
-  const isLastStep  = step === totalSteps - 1;
-  const topAligned  = TOP_ALIGNED_STEPS.includes(currentKey);
+  const steps          = getSteps(data.goal);
+  const totalSteps     = steps.length;
+  const currentKey     = steps[step];
+  const progress       = (step + 1) / totalSteps;
+  const canContinue    = isStepComplete(currentKey, data);
+  const isLastStep     = step === totalSteps - 1;
+  const topAligned     = TOP_ALIGNED_STEPS.includes(currentKey);
+  const isMultiSelect  = MULTI_SELECT_STEPS.includes(currentKey);
 
   // Seed race_date to 30 days from now when first entering that step
   useEffect(() => {
@@ -350,13 +354,10 @@ export default function OnboardingScreen({ navigation }: Props) {
   ) {
     const selected = data[field];
     return (
-      <View style={styles.stepContent}>
+      <View style={[styles.stepContent, { flex: 1 }]}>
         {renderLabel(label)}
         <Text style={styles.sublabel}>Select all that apply</Text>
-        {/* Wrapped in ScrollView so all options are accessible on small screens */}
         <ScrollView
-          scrollEnabled
-          nestedScrollEnabled
           showsVerticalScrollIndicator={false}
           style={styles.multiScroll}
         >
@@ -664,22 +665,28 @@ export default function OnboardingScreen({ navigation }: Props) {
         <View style={styles.backBtn} />
       </View>
 
-      {/* Scrollable question area */}
+      {/* Question area — bounded View for multi-select, ScrollView for everything else */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={[
-            styles.scrollContent,
-            topAligned && styles.scrollContentTop,
-          ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {renderCurrentStep()}
-        </ScrollView>
+        {isMultiSelect ? (
+          <View style={styles.multiSelectContainer}>
+            {renderCurrentStep()}
+          </View>
+        ) : (
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={[
+              styles.scrollContent,
+              topAligned && styles.scrollContentTop,
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {renderCurrentStep()}
+          </ScrollView>
+        )}
 
         {/* Footer */}
         <View style={styles.footer}>
@@ -822,9 +829,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Multi-select inner scroll
+  // Multi-select bounded container (replaces outer ScrollView for these steps)
+  multiSelectContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+
+  // Inner scroll for multi-select options — flex: 1 works because parent is bounded
   multiScroll: {
-    maxHeight: '60%',
+    flex: 1,
   },
   multiOptions: {
     gap: 10,
