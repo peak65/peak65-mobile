@@ -161,14 +161,20 @@ export default function RootLayout() {
   const [appState, setAppState] = useState<AppState>('loading');
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setAppState(await resolveAppState(session));
-    });
-
+    // INITIAL_SESSION fires after the Supabase client finishes reading the
+    // persisted session from AsyncStorage — the earliest safe point to query.
+    // getSession() can race against that read and return null even when a
+    // valid session exists, causing the user to be routed to onboarding.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === 'INITIAL_SESSION') return;
-        setAppState('loading');
+        // Token refresh doesn't change routing — skip to avoid remounting the navigator.
+        if (event === 'TOKEN_REFRESHED') return;
+
+        // For INITIAL_SESSION the state is already 'loading' (initial useState),
+        // so we don't need to set it again. For all other events reset to loading
+        // so the navigator unmounts cleanly before the new route is determined.
+        if (event !== 'INITIAL_SESSION') setAppState('loading');
+
         setAppState(await resolveAppState(session));
       }
     );
