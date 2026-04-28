@@ -1,14 +1,10 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { supabase } from '../../lib/supabase';
-import type { MainStackParamList } from '../_layout';
 
-type Props = NativeStackScreenProps<MainStackParamList, 'Dashboard'>;
-
-export default function DashboardScreen(_props: Props) {
+export default function DashboardScreen() {
   async function handleLogout() {
     await supabase.auth.signOut();
     // onAuthStateChange in _layout.tsx will switch back to AuthNavigator

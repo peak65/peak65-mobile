@@ -263,7 +263,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       clearTimeout(timeout);
       console.log('[generate-assessment] response status:', res.status);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      navigation.replace('Dashboard');
+      navigation.replace('Tabs');
     } catch (err) {
       clearTimeout(timeout);
       console.log('[generate-assessment] error:', JSON.stringify(err));

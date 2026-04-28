@@ -21,6 +21,25 @@ const SUPABASE_ANON_KEY =
     weight_unit text,
     body_fat_percentage numeric
   );
+
+  create table if not exists public.programs (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references auth.users(id) on delete cascade,
+    created_at timestamp with time zone default now(),
+    week_start_date date,
+    days jsonb
+  );
+
+  create table if not exists public.session_logs (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references auth.users(id) on delete cascade,
+    program_id uuid references public.programs(id),
+    day_index integer,
+    rpe integer,
+    duration integer,
+    notes text,
+    completed_at timestamp with time zone default now()
+  );
 */
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {

@@ -9,13 +9,11 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
-import type { MainStackParamList } from '../_layout';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type Props = NativeStackScreenProps<MainStackParamList, 'Checkin'>;
+type Props = object;
 
 type Checkin = {
   id: string;
@@ -118,7 +116,8 @@ const chartStyles = StyleSheet.create({
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export default function CheckinScreen({ navigation }: Props) {
+export default function CheckinScreen(_props: Props) {
+  const navigation = { goBack: () => {} };
   const [weightUnit, setWeightUnit]  = useState<'lbs' | 'kg'>('lbs');
   const [weight, setWeight]          = useState('');
   const [bodyFat, setBodyFat]        = useState('');

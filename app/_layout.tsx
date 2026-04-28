@@ -1,16 +1,53 @@
 import React, { useEffect, useState } from 'react';
+import { Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from '../lib/supabase';
 import LoginScreen from './auth/login';
 import SignupScreen from './auth/signup';
-import DashboardScreen from './(main)/dashboard';
-import CheckinScreen from './(main)/checkin';
 import OnboardingScreen from './onboarding/index';
+import GeneratingScreen from './(main)/generating';
+import HomeScreen from './(main)/home';
+import ProgramScreen from './(main)/program';
+import HistoryScreen from './(main)/history';
+import ProfileScreen from './(main)/profile';
 
-// --- Type definitions exported so screens can use them ---
+// ─── Shared types used across screens ────────────────────────────────────────
+
+export type ExerciseItem = {
+  name: string;
+  type: 'strength' | 'cardio' | 'mobility';
+  sets?: number;
+  reps?: string;
+  rest_seconds?: number;
+  distance?: string;
+  zone?: string;
+  duration?: string;
+  note?: string;
+};
+
+export type ProgramDay = {
+  day_index: number;
+  session_type: string;
+  intensity: 'easy' | 'moderate' | 'hard' | 'rest';
+  is_rest: boolean;
+  warm_up: ExerciseItem[];
+  main_work: ExerciseItem[];
+  cool_down: ExerciseItem[];
+};
+
+export type Program = {
+  id: string;
+  user_id: string;
+  created_at: string;
+  week_start_date: string;
+  days: ProgramDay[];
+};
+
+// ─── Nav param lists ──────────────────────────────────────────────────────────
 
 export type AuthStackParamList = {
   Login: undefined;
@@ -19,66 +56,115 @@ export type AuthStackParamList = {
 
 export type MainStackParamList = {
   Onboarding: undefined;
-  Dashboard: undefined;
-  Checkin: undefined;
+  Generating: undefined;
+  Tabs: undefined;
 };
 
-// --- Stack navigators ---
+export type TabParamList = {
+  Home: undefined;
+  Program: undefined;
+  History: undefined;
+  Profile: undefined;
+};
+
+// ─── Navigators ───────────────────────────────────────────────────────────────
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const MainStack = createNativeStackNavigator<MainStackParamList>();
+const Tab      = createBottomTabNavigator<TabParamList>();
+
+const YELLOW = '#e8ff47';
+const GREY   = '#8a877f';
+
+const TAB_ICONS: Record<keyof TabParamList, string> = {
+  Home:    '⌂',
+  Program: '▦',
+  History: '◷',
+  Profile: '◉',
+};
+
+function MainTabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: '#111111',
+          borderTopWidth: 0,
+          elevation: 0,
+          shadowOpacity: 0,
+        },
+        tabBarActiveTintColor: YELLOW,
+        tabBarInactiveTintColor: GREY,
+        tabBarIcon: ({ color }) => (
+          <Text style={{ color, fontSize: 20, lineHeight: 24 }}>
+            {TAB_ICONS[route.name as keyof TabParamList]}
+          </Text>
+        ),
+      })}
+    >
+      <Tab.Screen name="Home"    component={HomeScreen} />
+      <Tab.Screen name="Program" component={ProgramScreen} />
+      <Tab.Screen name="History" component={HistoryScreen} />
+      <Tab.Screen name="Profile" component={ProfileScreen} />
+    </Tab.Navigator>
+  );
+}
 
 function AuthNavigator() {
   return (
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
-      <AuthStack.Screen name="Login" component={LoginScreen} />
+      <AuthStack.Screen name="Login"  component={LoginScreen} />
       <AuthStack.Screen name="Signup" component={SignupScreen} />
     </AuthStack.Navigator>
   );
 }
 
-function MainNavigator({ onboardingComplete }: { onboardingComplete: boolean }) {
+function MainNavigator({ initialRoute }: { initialRoute: keyof MainStackParamList }) {
   return (
-    <MainStack.Navigator
-      screenOptions={{ headerShown: false }}
-      initialRouteName={onboardingComplete ? 'Dashboard' : 'Onboarding'}
-    >
+    <MainStack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
       <MainStack.Screen name="Onboarding" component={OnboardingScreen} />
-      <MainStack.Screen name="Dashboard" component={DashboardScreen} />
-      <MainStack.Screen name="Checkin" component={CheckinScreen} />
+      <MainStack.Screen name="Generating" component={GeneratingScreen} />
+      <MainStack.Screen name="Tabs"       component={MainTabs} />
     </MainStack.Navigator>
   );
 }
 
-// --- Root layout ---
+// ─── App state resolution ─────────────────────────────────────────────────────
 
-type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'authenticated';
+type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'generating' | 'authenticated';
 
-// Resolves the full app state from a session in one async step,
-// so the navigator never renders with partially-updated state.
 async function resolveAppState(session: Session | null): Promise<AppState> {
   if (!session) return 'unauthenticated';
 
-  const { data } = await supabase
+  const { data: profile } = await supabase
     .from('profiles')
     .select('first_name')
     .eq('id', session.user.id)
     .single();
 
-  return data?.first_name ? 'authenticated' : 'onboarding';
+  if (!profile?.first_name) return 'onboarding';
+
+  const { data: program } = await supabase
+    .from('programs')
+    .select('id')
+    .eq('user_id', session.user.id)
+    .limit(1)
+    .maybeSingle();
+
+  return program ? 'authenticated' : 'generating';
 }
+
+// ─── Root layout ──────────────────────────────────────────────────────────────
 
 export default function RootLayout() {
   const [appState, setAppState] = useState<AppState>('loading');
 
   useEffect(() => {
-    // Check the session once on mount and resolve the full app state.
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setAppState(await resolveAppState(session));
     });
 
-    // React to future auth events (sign-in, sign-out, token refresh).
-    // Skip INITIAL_SESSION — that's already handled by getSession() above.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === 'INITIAL_SESSION') return;
@@ -90,14 +176,24 @@ export default function RootLayout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Hold the splash until we know exactly where to send the user.
   if (appState === 'loading') return null;
+
+  if (appState === 'unauthenticated') {
+    return (
+      <NavigationContainer>
+        <AuthNavigator />
+      </NavigationContainer>
+    );
+  }
+
+  const initialRoute: keyof MainStackParamList =
+    appState === 'authenticated' ? 'Tabs' :
+    appState === 'generating'    ? 'Generating' :
+                                   'Onboarding';
 
   return (
     <NavigationContainer>
-      {appState === 'unauthenticated'
-        ? <AuthNavigator />
-        : <MainNavigator onboardingComplete={appState === 'authenticated'} />}
+      <MainNavigator initialRoute={initialRoute} />
     </NavigationContainer>
   );
 }

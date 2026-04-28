@@ -1,0 +1,236 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { supabase } from '../../lib/supabase';
+import type { Program, ProgramDay, ExerciseItem } from '../_layout';
+
+const YELLOW    = '#e8ff47';
+const BLACK     = '#080808';
+const OFF_WHITE = '#f0ede8';
+const GREY      = '#8a877f';
+const CARD_BG   = '#111111';
+const GREEN     = '#44ff88';
+
+const DAY_NAMES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+
+const INTENSITY_DOT: Record<string, string> = {
+  easy: '🟢', moderate: '🟡', hard: '🔴', rest: '⚫',
+};
+
+function todayDayIndex(weekStartDate: string): number {
+  const start = new Date(weekStartDate + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff  = Math.floor((today.getTime() - start.getTime()) / 86_400_000);
+  return diff >= 0 ? diff % 7 : new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
+}
+
+function exerciseDetail(ex: ExerciseItem): string {
+  if (ex.type === 'strength') {
+    return `${ex.sets ?? '?'} × ${ex.reps ?? '?'}${ex.rest_seconds ? ` • ${ex.rest_seconds / 60}min rest` : ''}`;
+  }
+  return [ex.distance, ex.zone, ex.duration].filter(Boolean).join(' • ');
+}
+
+function DayCard({
+  day, isToday, isComplete,
+}: {
+  day: ProgramDay; isToday: boolean; isComplete: boolean;
+}) {
+  const [expanded, setExpanded] = useState(isToday);
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.85}
+      style={[styles.dayCard, isToday && styles.dayCardToday]}
+      onPress={() => setExpanded(e => !e)}
+    >
+      <View style={styles.dayCardHeader}>
+        <View style={styles.dayCardLeft}>
+          <Text style={[styles.dayName, isToday && { color: YELLOW }]}>
+            {DAY_NAMES[day.day_index] ?? `Day ${day.day_index + 1}`}
+          </Text>
+          {isComplete && <Text style={styles.checkmark}> ✓</Text>}
+        </View>
+        <View style={styles.dayCardRight}>
+          <Text style={styles.intensityDot}>{INTENSITY_DOT[day.intensity] ?? '⚫'}</Text>
+          <Text style={styles.sessionType}>{day.session_type}</Text>
+          <Text style={styles.chevron}>{expanded ? '▲' : '▼'}</Text>
+        </View>
+      </View>
+
+      {expanded && !day.is_rest && (
+        <View style={styles.expandedContent}>
+          {[
+            { label: 'WARM-UP',   items: day.warm_up,   phase: 'warm_up'   },
+            { label: 'MAIN WORK', items: day.main_work,  phase: 'main_work' },
+            { label: 'COOL-DOWN', items: day.cool_down,  phase: 'cool_down' },
+          ].map(({ label, items, phase }) => {
+            if (!items?.length) return null;
+            return (
+              <View key={label} style={styles.section}>
+                <Text style={styles.sectionLabel}>{label}</Text>
+                {items.map((ex, i) => (
+                  <View key={i} style={[styles.exRow,
+                    { borderLeftColor: phase === 'main_work' ? YELLOW : GREY }]}>
+                    <Text style={styles.exName}>{ex.name}</Text>
+                    <Text style={styles.exDetail}>{exerciseDetail(ex)}</Text>
+                  </View>
+                ))}
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      {expanded && day.is_rest && (
+        <View style={styles.expandedContent}>
+          <Text style={styles.restNote}>Recovery day — prioritize sleep and nutrition.</Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+export default function ProgramScreen() {
+  const [program, setProgram]           = useState<Program | null>(null);
+  const [completedDays, setCompletedDays] = useState<Set<number>>(new Set());
+  const [weekOffset, setWeekOffset]     = useState(0);
+  const [todayIdx, setTodayIdx]         = useState(0);
+  const [loading, setLoading]           = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data: authData } = await supabase.auth.getUser();
+    if (!authData.user) { setLoading(false); return; }
+
+    const [progRes, logsRes] = await Promise.all([
+      supabase.from('programs').select('*')
+        .eq('user_id', authData.user.id)
+        .order('created_at', { ascending: false })
+        .limit(1).maybeSingle(),
+      supabase.from('session_logs').select('day_index, completed_at')
+        .eq('user_id', authData.user.id),
+    ]);
+
+    const prog = progRes.data as Program | null;
+    setProgram(prog);
+
+    if (prog?.week_start_date) {
+      setTodayIdx(todayDayIndex(prog.week_start_date));
+    }
+
+    // Which days have a log for the current week
+    if (logsRes.data && prog?.week_start_date) {
+      const weekStart = new Date(prog.week_start_date + 'T00:00:00');
+      const weekEnd   = new Date(weekStart.getTime() + 7 * 86_400_000);
+      const done = new Set(
+        logsRes.data
+          .filter(l => {
+            const d = new Date(l.completed_at);
+            return d >= weekStart && d < weekEnd;
+          })
+          .map(l => l.day_index as number)
+      );
+      setCompletedDays(done);
+    }
+
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ActivityIndicator color={YELLOW} style={{ flex: 1 }} />
+      </SafeAreaView>
+    );
+  }
+
+  const weekNum = (program?.week_start_date
+    ? Math.floor(
+        (new Date().getTime() - new Date(program.week_start_date + 'T00:00:00').getTime())
+        / (7 * 86_400_000)
+      ) + 1
+    : 1) + weekOffset;
+
+  const days = program?.days ?? [];
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        <Text style={styles.heading}>MY PROGRAM</Text>
+
+        {/* Week selector */}
+        <View style={styles.weekRow}>
+          <TouchableOpacity onPress={() => setWeekOffset(o => o - 1)}
+            style={styles.weekArrow}>
+            <Text style={styles.weekArrowText}>‹</Text>
+          </TouchableOpacity>
+          <Text style={styles.weekLabel}>Week {Math.max(1, weekNum)}</Text>
+          <TouchableOpacity onPress={() => setWeekOffset(o => Math.min(0, o + 1))}
+            style={styles.weekArrow}>
+            <Text style={[styles.weekArrowText, weekOffset >= 0 && { color: '#333' }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        {days.length === 0 ? (
+          <Text style={styles.emptyText}>No program found.</Text>
+        ) : (
+          <View style={styles.dayList}>
+            {days.map(day => (
+              <DayCard
+                key={day.day_index}
+                day={day}
+                isToday={weekOffset === 0 && day.day_index === todayIdx}
+                isComplete={completedDays.has(day.day_index)}
+              />
+            ))}
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: BLACK },
+  heading: {
+    color: OFF_WHITE, fontSize: 24, fontWeight: '800',
+    paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8,
+  },
+
+  weekRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 24, paddingVertical: 12,
+  },
+  weekArrow: { padding: 8 },
+  weekArrowText: { color: OFF_WHITE, fontSize: 28, fontWeight: '300' },
+  weekLabel: { color: OFF_WHITE, fontSize: 17, fontWeight: '700', minWidth: 80, textAlign: 'center' },
+
+  dayList: { paddingHorizontal: 16, gap: 10 },
+  dayCard: { backgroundColor: CARD_BG, borderRadius: 14, padding: 16 },
+  dayCardToday: { borderLeftWidth: 3, borderLeftColor: YELLOW },
+
+  dayCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  dayCardLeft: { flexDirection: 'row', alignItems: 'center' },
+  dayCardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dayName: { color: OFF_WHITE, fontSize: 15, fontWeight: '700' },
+  checkmark: { color: GREEN, fontSize: 14 },
+  intensityDot: { fontSize: 12 },
+  sessionType: { color: GREY, fontSize: 13 },
+  chevron: { color: GREY, fontSize: 12, marginLeft: 4 },
+
+  expandedContent: { marginTop: 16, gap: 14 },
+  section: { gap: 8 },
+  sectionLabel: {
+    color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase',
+  },
+  exRow: { borderLeftWidth: 3, paddingLeft: 10, gap: 2 },
+  exName: { color: OFF_WHITE, fontSize: 14, fontWeight: '600' },
+  exDetail: { color: GREY, fontSize: 13 },
+  restNote: { color: GREY, fontSize: 14, fontStyle: 'italic' },
+  emptyText: { color: GREY, textAlign: 'center', marginTop: 40, fontSize: 15 },
+});
