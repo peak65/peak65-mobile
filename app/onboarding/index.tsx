@@ -478,6 +478,9 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      {/* Logo */}
+      <Text style={styles.logo}>Peak 65</Text>
+
       {/* Header: back arrow + progress bar */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -540,6 +543,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: BLACK,
+  },
+
+  // Logo
+  logo: {
+    color: YELLOW,
+    fontSize: 36,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: -1,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
 
   // Header
@@ -667,7 +681,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   continueBtnDisabled: {
-    opacity: 0.3,
+    backgroundColor: '#1e1e1e',
   },
   continueBtnText: {
     color: BLACK,
