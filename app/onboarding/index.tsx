@@ -26,14 +26,21 @@ type OnboardingData = {
   age: string;
   gender: string;
   goal: 'hyrox' | 'general_fitness' | '';
+  // Hyrox-specific
   hyrox_experience: string;
   hyrox_division: string;
   hyrox_goal_time: string;
   race_date: Date | null;
   station_weaknesses: string[];
+  // Shared fitness fields
   run_confidence: string;
   equipment_access: string[];
-  experience_level: string;
+  // General fitness-specific
+  current_training_days: string;
+  body_weight: string;
+  weight_unit: 'lbs' | 'kg';
+  fitness_goal: string;
+  // Shared scheduling
   rest_days: string;
   session_length: string;
   availability: string;
@@ -43,82 +50,97 @@ type StepKey =
   | 'firstName' | 'lastName' | 'age' | 'gender' | 'goal'
   | 'hyroxExperience' | 'hyroxDivision' | 'hyroxGoalTime' | 'raceDate'
   | 'stationWeaknesses' | 'runConfidence' | 'hyroxEquipment'
-  | 'experienceLevel' | 'generalEquipment'
+  | 'generalTrainingDays' | 'generalRunConfidence' | 'generalEquipment'
+  | 'bodyWeight' | 'fitnessGoal'
   | 'restDays' | 'sessionLength' | 'availability';
 
 // ─── Step Definitions ─────────────────────────────────────────────────────────
 
 const BASE_STEPS: StepKey[] = ['firstName', 'lastName', 'age', 'gender', 'goal'];
+
 const HYROX_STEPS: StepKey[] = [
   'hyroxExperience', 'hyroxDivision', 'hyroxGoalTime', 'raceDate',
   'stationWeaknesses', 'runConfidence', 'hyroxEquipment',
 ];
-const GENERAL_STEPS: StepKey[] = ['experienceLevel', 'generalEquipment'];
+
+const GENERAL_STEPS: StepKey[] = [
+  'generalTrainingDays', 'generalRunConfidence', 'generalEquipment',
+  'bodyWeight', 'fitnessGoal',
+];
+
 const SHARED_STEPS: StepKey[] = ['restDays', 'sessionLength', 'availability'];
 
 function getSteps(goal: string): StepKey[] {
-  if (goal === 'hyrox') return [...BASE_STEPS, ...HYROX_STEPS, ...SHARED_STEPS];
+  if (goal === 'hyrox')           return [...BASE_STEPS, ...HYROX_STEPS,   ...SHARED_STEPS];
   if (goal === 'general_fitness') return [...BASE_STEPS, ...GENERAL_STEPS, ...SHARED_STEPS];
-  return [...BASE_STEPS, ...HYROX_STEPS, ...SHARED_STEPS]; // show max length before goal chosen
+  return [...BASE_STEPS, ...HYROX_STEPS, ...SHARED_STEPS]; // use max length before goal is picked
 }
 
 function isStepComplete(key: StepKey, d: OnboardingData): boolean {
   switch (key) {
-    case 'firstName':          return d.first_name.trim().length > 0;
-    case 'lastName':           return d.last_name.trim().length > 0;
+    case 'firstName':            return d.first_name.trim().length > 0;
+    case 'lastName':             return d.last_name.trim().length > 0;
     case 'age': {
       const n = parseInt(d.age, 10);
       return !isNaN(n) && n >= 13 && n <= 99;
     }
-    case 'gender':             return d.gender !== '';
-    case 'goal':               return d.goal !== '';
-    case 'hyroxExperience':    return d.hyrox_experience !== '';
-    case 'hyroxDivision':      return d.hyrox_division !== '';
-    case 'hyroxGoalTime':      return d.hyrox_goal_time !== '';
-    case 'raceDate':           return true; // always enabled — "skip" clears date
-    case 'stationWeaknesses':  return d.station_weaknesses.length > 0;
-    case 'runConfidence':      return d.run_confidence !== '';
-    case 'hyroxEquipment':     return d.equipment_access.length > 0;
-    case 'experienceLevel':    return d.experience_level !== '';
-    case 'generalEquipment':   return d.equipment_access.length > 0;
-    case 'restDays':           return d.rest_days !== '';
-    case 'sessionLength':      return d.session_length !== '';
-    case 'availability':       return d.availability !== '';
-    default:                   return false;
+    case 'gender':               return d.gender !== '';
+    case 'goal':                 return d.goal !== '';
+    case 'hyroxExperience':      return d.hyrox_experience !== '';
+    case 'hyroxDivision':        return d.hyrox_division !== '';
+    case 'hyroxGoalTime':        return d.hyrox_goal_time !== '';
+    case 'raceDate':             return true; // always enabled — "skip" sets null
+    case 'stationWeaknesses':    return d.station_weaknesses.length > 0;
+    case 'runConfidence':        return d.run_confidence !== '';
+    case 'hyroxEquipment':       return d.equipment_access.length > 0;
+    case 'generalTrainingDays':  return d.current_training_days !== '';
+    case 'generalRunConfidence': return d.run_confidence !== '';
+    case 'generalEquipment':     return d.equipment_access.length > 0;
+    case 'bodyWeight': {
+      const w = parseFloat(d.body_weight);
+      return !isNaN(w) && w > 0;
+    }
+    case 'fitnessGoal':          return d.fitness_goal !== '';
+    case 'restDays':             return d.rest_days !== '';
+    case 'sessionLength':        return d.session_length !== '';
+    case 'availability':         return d.availability !== '';
+    default:                     return false;
   }
 }
 
 // ─── Colours ──────────────────────────────────────────────────────────────────
 
-const YELLOW   = '#e8ff47';
-const BLACK    = '#080808';
+const YELLOW    = '#e8ff47';
+const BLACK     = '#080808';
 const OFF_WHITE = '#f0ede8';
-const GREY     = '#8a877f';
+const GREY      = '#8a877f';
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Initial state ────────────────────────────────────────────────────────────
 
 const INITIAL: OnboardingData = {
   first_name: '', last_name: '', age: '', gender: '', goal: '',
   hyrox_experience: '', hyrox_division: '', hyrox_goal_time: '',
   race_date: null, station_weaknesses: [], run_confidence: '',
-  equipment_access: [], experience_level: '',
+  equipment_access: [], current_training_days: '',
+  body_weight: '', weight_unit: 'lbs', fitness_goal: '',
   rest_days: '', session_length: '', availability: '',
 };
 
-export default function OnboardingScreen({ navigation }: Props) {
-  const [step, setStep]             = useState(0);
-  const [data, setData]             = useState<OnboardingData>(INITIAL);
-  const [saving, setSaving]         = useState(false);
+// ─── Component ───────────────────────────────────────────────────────────────
+
+export default function OnboardingScreen({ navigation: _navigation }: Props) {
+  const [step, setStep]               = useState(0);
+  const [data, setData]               = useState<OnboardingData>(INITIAL);
+  const [saving, setSaving]           = useState(false);
   const [showLoading, setShowLoading] = useState(false);
-  // Android needs an explicit toggle; iOS shows date picker inline
   const [androidPickerOpen, setAndroidPickerOpen] = useState(false);
 
-  const steps         = getSteps(data.goal);
-  const totalSteps    = steps.length;
-  const currentKey    = steps[step];
-  const progress      = (step + 1) / totalSteps;
-  const canContinue   = isStepComplete(currentKey, data);
-  const isLastStep    = step === totalSteps - 1;
+  const steps       = getSteps(data.goal);
+  const totalSteps  = steps.length;
+  const currentKey  = steps[step];
+  const progress    = (step + 1) / totalSteps;
+  const canContinue = isStepComplete(currentKey, data);
+  const isLastStep  = step === totalSteps - 1;
 
   // Seed race_date to 30 days from now when the step is first entered
   useEffect(() => {
@@ -128,7 +150,6 @@ export default function OnboardingScreen({ navigation }: Props) {
         race_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       }));
     }
-    // Reset Android picker state when moving to a new step
     setAndroidPickerOpen(false);
   }, [currentKey]);
 
@@ -179,28 +200,30 @@ export default function OnboardingScreen({ navigation }: Props) {
     if (!authData.user) { setSaving(false); return; }
 
     await supabase.from('profiles').upsert({
-      id:                 authData.user.id,
-      first_name:         data.first_name,
-      last_name:          data.last_name,
-      age:                parseInt(data.age, 10),
-      gender:             data.gender,
-      goal:               data.goal,
-      hyrox_experience:   data.hyrox_experience   || null,
-      hyrox_division:     data.hyrox_division      || null,
-      hyrox_goal_time:    data.hyrox_goal_time     || null,
-      race_date:          data.race_date ? data.race_date.toISOString().split('T')[0] : null,
-      station_weaknesses: data.station_weaknesses.length > 0 ? data.station_weaknesses : null,
-      run_confidence:     data.run_confidence      || null,
-      equipment_access:   data.equipment_access.length > 0 ? data.equipment_access : null,
-      experience_level:   data.experience_level    || null,
-      rest_days:          data.rest_days ? parseInt(data.rest_days, 10) : null,
-      session_length:     data.session_length      || null,
-      availability:       data.availability        || null,
+      id:                    authData.user.id,
+      first_name:            data.first_name,
+      last_name:             data.last_name,
+      age:                   parseInt(data.age, 10),
+      gender:                data.gender,
+      goal:                  data.goal,
+      hyrox_experience:      data.hyrox_experience      || null,
+      hyrox_division:        data.hyrox_division         || null,
+      hyrox_goal_time:       data.hyrox_goal_time        || null,
+      race_date:             data.race_date ? data.race_date.toISOString().split('T')[0] : null,
+      station_weaknesses:    data.station_weaknesses.length > 0 ? data.station_weaknesses : null,
+      run_confidence:        data.run_confidence         || null,
+      equipment_access:      data.equipment_access.length > 0 ? data.equipment_access : null,
+      current_training_days: data.current_training_days  || null,
+      body_weight:           data.body_weight ? parseFloat(data.body_weight) : null,
+      weight_unit:           data.body_weight ? data.weight_unit : null,
+      fitness_goal:          data.fitness_goal            || null,
+      rest_days:             data.rest_days ? parseInt(data.rest_days, 10) : null,
+      session_length:        data.session_length          || null,
+      availability:          data.availability            || null,
     });
 
     setSaving(false);
-    // TODO: Replace navigation below with AI program generation call once ready.
-    navigation.replace('Dashboard');
+    // Loading screen stays visible — AI program generation will be wired up next session.
   }
 
   // ── Render helpers ─────────────────────────────────────────────────────────
@@ -212,7 +235,8 @@ export default function OnboardingScreen({ navigation }: Props) {
   function renderTextInput(
     label: string,
     field: keyof OnboardingData,
-    keyboardType: 'default' | 'number-pad' = 'default',
+    keyboardType: 'default' | 'number-pad' | 'decimal-pad' = 'default',
+    placeholder = '',
   ) {
     const value = data[field] as string;
     const ageError =
@@ -229,6 +253,7 @@ export default function OnboardingScreen({ navigation }: Props) {
           keyboardType={keyboardType}
           autoCapitalize={keyboardType === 'default' ? 'words' : 'none'}
           autoFocus
+          placeholder={placeholder}
           placeholderTextColor={GREY}
           selectionColor={YELLOW}
         />
@@ -337,6 +362,40 @@ export default function OnboardingScreen({ navigation }: Props) {
     );
   }
 
+  function renderBodyWeightStep() {
+    return (
+      <View style={styles.stepContent}>
+        {renderLabel('What is your body weight?')}
+
+        {/* Unit toggle */}
+        <View style={styles.unitToggleRow}>
+          {(['lbs', 'kg'] as const).map(unit => (
+            <TouchableOpacity
+              key={unit}
+              style={[styles.unitBtn, data.weight_unit === unit && styles.unitBtnSelected]}
+              onPress={() => setData(prev => ({ ...prev, weight_unit: unit }))}
+            >
+              <Text style={[styles.unitBtnText, data.weight_unit === unit && styles.unitBtnTextSelected]}>
+                {unit}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <TextInput
+          style={styles.textInput}
+          value={data.body_weight}
+          onChangeText={text => setData(prev => ({ ...prev, body_weight: text }))}
+          keyboardType="decimal-pad"
+          placeholder={data.weight_unit === 'lbs' ? 'e.g. 170' : 'e.g. 77'}
+          placeholderTextColor={GREY}
+          selectionColor={YELLOW}
+          autoFocus
+        />
+      </View>
+    );
+  }
+
   // ── Step dispatcher ────────────────────────────────────────────────────────
 
   function renderCurrentStep() {
@@ -352,9 +411,8 @@ export default function OnboardingScreen({ navigation }: Props) {
 
       case 'gender':
         return renderSingleSelect('What is your gender?', 'gender', [
-          { label: 'Male',              value: 'Male' },
-          { label: 'Female',            value: 'Female' },
-          { label: 'Prefer not to say', value: 'Prefer not to say' },
+          { label: 'Male',   value: 'Male' },
+          { label: 'Female', value: 'Female' },
         ]);
 
       case 'goal':
@@ -362,6 +420,8 @@ export default function OnboardingScreen({ navigation }: Props) {
           { label: 'Train for Hyrox', value: 'hyrox' },
           { label: 'General Fitness', value: 'general_fitness' },
         ]);
+
+      // ── Hyrox path ──────────────────────────────────────────────────────────
 
       case 'hyroxExperience':
         return renderSingleSelect("What's your current Hyrox level?", 'hyrox_experience', [
@@ -387,10 +447,10 @@ export default function OnboardingScreen({ navigation }: Props) {
 
       case 'hyroxGoalTime':
         return renderSingleSelect("What's your goal finish time?", 'hyrox_goal_time', [
-          { label: 'Sub 1:05 (Elite)',          value: 'Sub 1:05 (Elite)' },
-          { label: 'Sub 1:15 (Competitive)',    value: 'Sub 1:15 (Competitive)' },
+          { label: 'Sub 1:05 (Elite)',           value: 'Sub 1:05 (Elite)' },
+          { label: 'Sub 1:15 (Competitive)',     value: 'Sub 1:15 (Competitive)' },
           { label: 'Sub 1:30 (Strong Finisher)', value: 'Sub 1:30 (Strong Finisher)' },
-          { label: 'Just finish strong',        value: 'Just finish strong' },
+          { label: 'Just finish strong',         value: 'Just finish strong' },
         ]);
 
       case 'raceDate':
@@ -419,24 +479,47 @@ export default function OnboardingScreen({ navigation }: Props) {
            'Ski Erg', 'Row Erg', 'Sled', 'Assault Bike', 'Full Gym Access'],
         );
 
-      case 'experienceLevel':
+      // ── General Fitness path ─────────────────────────────────────────────────
+
+      case 'generalTrainingDays':
         return renderSingleSelect(
-          'How would you describe your training experience?',
-          'experience_level',
+          'How many days per week do you currently train?',
+          'current_training_days',
           [
-            { label: 'Beginner (new to structured training)',               value: 'Beginner' },
-            { label: 'Intermediate (1-2 years consistent training)',        value: 'Intermediate' },
-            { label: 'Advanced (3+ years, comfortable with complex movements)', value: 'Advanced' },
+            { label: '1-2 days', value: '1-2 days' },
+            { label: '3-4 days', value: '3-4 days' },
+            { label: '5+ days',  value: '5+ days' },
           ],
         );
 
+      case 'generalRunConfidence':
+        return renderSingleSelect('How do you feel about your running?', 'run_confidence', [
+          { label: 'Running is my strength', value: 'Running is my strength' },
+          { label: 'Running is average',     value: 'Running is average' },
+          { label: 'Running is my weakness', value: 'Running is my weakness' },
+        ]);
+
       case 'generalEquipment':
+        // Ski Erg + Row Erg included; Sled excluded (Hyrox-specific)
         return renderMultiSelect(
           'What equipment do you have access to?',
           'equipment_access',
           ['Barbell + Rack', 'Dumbbells', 'Kettlebells', 'Pull-up Bar',
-           'Assault Bike', 'Full Gym Access', 'No Equipment'],
+           'Ski Erg', 'Row Erg', 'Assault Bike', 'Full Gym Access', 'No Equipment'],
         );
+
+      case 'bodyWeight':
+        return renderBodyWeightStep();
+
+      case 'fitnessGoal':
+        return renderSingleSelect('What is your primary goal?', 'fitness_goal', [
+          { label: 'Lose body fat',       value: 'Lose body fat' },
+          { label: 'Build muscle',        value: 'Build muscle' },
+          { label: 'Improve performance', value: 'Improve performance' },
+          { label: 'All of the above',    value: 'All of the above' },
+        ]);
+
+      // ── Shared scheduling ────────────────────────────────────────────────────
 
       case 'restDays':
         return renderSingleSelect('How many rest days per week do you want?', 'rest_days', [
@@ -447,15 +530,14 @@ export default function OnboardingScreen({ navigation }: Props) {
 
       case 'sessionLength':
         return renderSingleSelect('How much time do you have per session?', 'session_length', [
-          { label: '60 min', value: '60 min' },
-          { label: '90 min', value: '90 min' },
+          { label: 'About 1 hour',        value: '60' },
+          { label: 'About 1.5–2 hours',   value: '90' },
         ]);
 
       case 'availability':
         return renderSingleSelect('When are you available to train?', 'availability', [
-          { label: 'Mornings (AM)',   value: 'Mornings (AM)' },
-          { label: 'Evenings (PM)',   value: 'Evenings (PM)' },
-          { label: 'Both (AM + PM)', value: 'Both (AM + PM)' },
+          { label: 'Once a day',            value: 'once' },
+          { label: 'Twice a day (AM + PM)', value: 'twice' },
         ]);
 
       default:
@@ -496,7 +578,6 @@ export default function OnboardingScreen({ navigation }: Props) {
           <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
         </View>
 
-        {/* Spacer mirrors the back button so the bar stays centred */}
         <View style={styles.backBtn} />
       </View>
 
@@ -628,7 +709,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  // Options
+  // Options (single + multi select)
   option: {
     backgroundColor: '#111',
     borderWidth: 1,
@@ -649,6 +730,33 @@ const styles = StyleSheet.create({
   optionTextSelected: {
     color: BLACK,
     fontWeight: '600',
+  },
+
+  // Body weight unit toggle
+  unitToggleRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  unitBtn: {
+    flex: 1,
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#262626',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  unitBtnSelected: {
+    backgroundColor: YELLOW,
+    borderColor: YELLOW,
+  },
+  unitBtnText: {
+    color: OFF_WHITE,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  unitBtnTextSelected: {
+    color: BLACK,
   },
 
   // Date picker (iOS inline)
