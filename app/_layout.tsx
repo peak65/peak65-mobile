@@ -137,11 +137,15 @@ type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'generating' | 'a
 async function resolveAppState(session: Session | null): Promise<AppState> {
   if (!session) return 'unauthenticated';
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('first_name')
     .eq('id', session.user.id)
-    .single();
+    .maybeSingle();
+
+  console.log('[resolveAppState] userId:', session.user.id);
+  console.log('[resolveAppState] profile:', JSON.stringify(profile));
+  console.log('[resolveAppState] profileError:', JSON.stringify(profileError));
 
   if (!profile?.first_name) return 'onboarding';
 
