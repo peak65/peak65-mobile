@@ -254,9 +254,9 @@ export default function OnboardingScreen({ navigation }: Props) {
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      console.log('[generate-assessment] timeout fired after 60s');
+      console.log('[generate-assessment] timeout fired after 120s');
       controller.abort();
-    }, 60_000);
+    }, 120_000);
 
     try {
       const res = await fetchPromise;
