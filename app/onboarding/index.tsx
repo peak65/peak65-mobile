@@ -224,7 +224,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   const callGenerateAssessment = useCallback(async (userId: string) => {
     setApiError(false);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const timeout = setTimeout(() => controller.abort(), 60_000);
     try {
       const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
         method: 'POST',
@@ -513,15 +513,15 @@ export default function OnboardingScreen({ navigation }: Props) {
 
       case 'hyroxExperience':
         return renderSingleSelect("What's your current Hyrox level?", 'hyrox_experience', [
-          { label: 'Never done a Hyrox', value: 'Never done a Hyrox' },
-          { label: 'Under 1:30',         value: 'Under 1:30' },
-          { label: '1:30 - 1:15',        value: '1:30 - 1:15' },
-          { label: '1:15 - 1:05',        value: '1:15 - 1:05' },
-          { label: 'Sub 1:05',           value: 'Sub 1:05' },
+          { label: 'Never done a Hyrox', value: 'never'    },
+          { label: 'Over 1:30',          value: 'over_130' },
+          { label: '1:15 – 1:30',        value: '115_130'  },
+          { label: '1:05 – 1:15',        value: '105_115'  },
+          { label: 'Sub 1:05',           value: 'sub_105'  },
         ]);
 
       case 'hyroxDivision': {
-        const label = data.hyrox_experience === 'Never done a Hyrox'
+        const label = data.hyrox_experience === 'never'
           ? 'Which division do you want to train for?'
           : 'Which division do you compete in?';
         return renderSingleSelect(label, 'hyrox_division', [
