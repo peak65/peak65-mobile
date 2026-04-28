@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -32,13 +32,14 @@ type OnboardingData = {
   hyrox_goal_time: string;
   race_date: Date | null;
   station_weaknesses: string[];
-  // Shared fitness fields
-  run_confidence: string;
+  // Shared across both paths
+  weekly_mileage: string;
   equipment_access: string[];
   // General fitness-specific
   current_training_days: string;
   body_weight: string;
   weight_unit: 'lbs' | 'kg';
+  body_fat_range: string;
   fitness_goal: string;
   // Shared scheduling
   rest_days: string;
@@ -49,9 +50,9 @@ type OnboardingData = {
 type StepKey =
   | 'firstName' | 'lastName' | 'age' | 'gender' | 'goal'
   | 'hyroxExperience' | 'hyroxDivision' | 'hyroxGoalTime' | 'raceDate'
-  | 'stationWeaknesses' | 'runConfidence' | 'hyroxEquipment'
-  | 'generalTrainingDays' | 'generalRunConfidence' | 'generalEquipment'
-  | 'bodyWeight' | 'fitnessGoal'
+  | 'stationWeaknesses' | 'weeklyMileage' | 'hyroxEquipment'
+  | 'generalTrainingDays' | 'generalEquipment'
+  | 'bodyWeight' | 'bodyFatRange' | 'fitnessGoal'
   | 'restDays' | 'sessionLength' | 'availability';
 
 // ─── Step Definitions ─────────────────────────────────────────────────────────
@@ -60,15 +61,27 @@ const BASE_STEPS: StepKey[] = ['firstName', 'lastName', 'age', 'gender', 'goal']
 
 const HYROX_STEPS: StepKey[] = [
   'hyroxExperience', 'hyroxDivision', 'hyroxGoalTime', 'raceDate',
-  'stationWeaknesses', 'runConfidence', 'hyroxEquipment',
+  'stationWeaknesses', 'weeklyMileage', 'hyroxEquipment',
 ];
 
 const GENERAL_STEPS: StepKey[] = [
-  'generalTrainingDays', 'generalRunConfidence', 'generalEquipment',
-  'bodyWeight', 'fitnessGoal',
+  'generalTrainingDays', 'weeklyMileage', 'generalEquipment',
+  'bodyWeight', 'bodyFatRange', 'fitnessGoal',
 ];
 
 const SHARED_STEPS: StepKey[] = ['restDays', 'sessionLength', 'availability'];
+
+// Steps with many options that need top-aligned (not centered) scroll content
+const TOP_ALIGNED_STEPS: StepKey[] = [
+  'stationWeaknesses', 'hyroxEquipment', 'generalEquipment', 'bodyFatRange',
+];
+
+const LOADING_MESSAGES = [
+  'Analyzing your training history...',
+  'Designing your assessment week...',
+  'Calibrating your zones...',
+  'Almost ready...',
+];
 
 function getSteps(goal: string): StepKey[] {
   if (goal === 'hyrox')           return [...BASE_STEPS, ...HYROX_STEPS,   ...SHARED_STEPS];
@@ -78,33 +91,33 @@ function getSteps(goal: string): StepKey[] {
 
 function isStepComplete(key: StepKey, d: OnboardingData): boolean {
   switch (key) {
-    case 'firstName':            return d.first_name.trim().length > 0;
-    case 'lastName':             return d.last_name.trim().length > 0;
+    case 'firstName':           return d.first_name.trim().length > 0;
+    case 'lastName':            return d.last_name.trim().length > 0;
     case 'age': {
       const n = parseInt(d.age, 10);
       return !isNaN(n) && n >= 13 && n <= 99;
     }
-    case 'gender':               return d.gender !== '';
-    case 'goal':                 return d.goal !== '';
-    case 'hyroxExperience':      return d.hyrox_experience !== '';
-    case 'hyroxDivision':        return d.hyrox_division !== '';
-    case 'hyroxGoalTime':        return d.hyrox_goal_time !== '';
-    case 'raceDate':             return true; // always enabled — "skip" sets null
-    case 'stationWeaknesses':    return d.station_weaknesses.length > 0;
-    case 'runConfidence':        return d.run_confidence !== '';
-    case 'hyroxEquipment':       return d.equipment_access.length > 0;
-    case 'generalTrainingDays':  return d.current_training_days !== '';
-    case 'generalRunConfidence': return d.run_confidence !== '';
-    case 'generalEquipment':     return d.equipment_access.length > 0;
+    case 'gender':              return d.gender !== '';
+    case 'goal':                return d.goal !== '';
+    case 'hyroxExperience':     return d.hyrox_experience !== '';
+    case 'hyroxDivision':       return d.hyrox_division !== '';
+    case 'hyroxGoalTime':       return d.hyrox_goal_time !== '';
+    case 'raceDate':            return true; // always enabled — "skip" sets null
+    case 'stationWeaknesses':   return d.station_weaknesses.length > 0;
+    case 'weeklyMileage':       return d.weekly_mileage !== '';
+    case 'hyroxEquipment':      return d.equipment_access.length > 0;
+    case 'generalTrainingDays': return d.current_training_days !== '';
+    case 'generalEquipment':    return d.equipment_access.length > 0;
     case 'bodyWeight': {
       const w = parseFloat(d.body_weight);
       return !isNaN(w) && w > 0;
     }
-    case 'fitnessGoal':          return d.fitness_goal !== '';
-    case 'restDays':             return d.rest_days !== '';
-    case 'sessionLength':        return d.session_length !== '';
-    case 'availability':         return d.availability !== '';
-    default:                     return false;
+    case 'bodyFatRange':        return d.body_fat_range !== '';
+    case 'fitnessGoal':         return d.fitness_goal !== '';
+    case 'restDays':            return d.rest_days !== '';
+    case 'sessionLength':       return d.session_length !== '';
+    case 'availability':        return d.availability !== '';
+    default:                    return false;
   }
 }
 
@@ -120,19 +133,21 @@ const GREY      = '#8a877f';
 const INITIAL: OnboardingData = {
   first_name: '', last_name: '', age: '', gender: '', goal: '',
   hyrox_experience: '', hyrox_division: '', hyrox_goal_time: '',
-  race_date: null, station_weaknesses: [], run_confidence: '',
+  race_date: null, station_weaknesses: [], weekly_mileage: '',
   equipment_access: [], current_training_days: '',
-  body_weight: '', weight_unit: 'lbs', fitness_goal: '',
+  body_weight: '', weight_unit: 'lbs', body_fat_range: '', fitness_goal: '',
   rest_days: '', session_length: '', availability: '',
 };
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export default function OnboardingScreen({ navigation: _navigation }: Props) {
+export default function OnboardingScreen({ navigation }: Props) {
   const [step, setStep]               = useState(0);
   const [data, setData]               = useState<OnboardingData>(INITIAL);
   const [saving, setSaving]           = useState(false);
   const [showLoading, setShowLoading] = useState(false);
+  const [apiError, setApiError]       = useState(false);
+  const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
   const [androidPickerOpen, setAndroidPickerOpen] = useState(false);
 
   const steps       = getSteps(data.goal);
@@ -141,8 +156,9 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
   const progress    = (step + 1) / totalSteps;
   const canContinue = isStepComplete(currentKey, data);
   const isLastStep  = step === totalSteps - 1;
+  const topAligned  = TOP_ALIGNED_STEPS.includes(currentKey);
 
-  // Seed race_date to 30 days from now when the step is first entered
+  // Seed race_date to 30 days from now when first entering that step
   useEffect(() => {
     if (currentKey === 'raceDate' && data.race_date === null) {
       setData(prev => ({
@@ -152,6 +168,15 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
     }
     setAndroidPickerOpen(false);
   }, [currentKey]);
+
+  // Cycle motivational messages every 3 s while loading
+  useEffect(() => {
+    if (!showLoading || apiError) return;
+    const id = setInterval(() => {
+      setLoadingMsgIdx(i => (i + 1) % LOADING_MESSAGES.length);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [showLoading, apiError]);
 
   // ── Navigation ─────────────────────────────────────────────────────────────
 
@@ -190,6 +215,28 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
     });
   }
 
+  // ── API call ───────────────────────────────────────────────────────────────
+
+  const callGenerateAssessment = useCallback(async (userId: string) => {
+    setApiError(false);
+    try {
+      const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      navigation.replace('Dashboard');
+    } catch {
+      setApiError(true);
+    }
+  }, [navigation]);
+
+  async function handleRetry() {
+    const { data: authData } = await supabase.auth.getUser();
+    if (authData.user) await callGenerateAssessment(authData.user.id);
+  }
+
   // ── Submit ─────────────────────────────────────────────────────────────────
 
   async function handleSubmit() {
@@ -211,11 +258,12 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
       hyrox_goal_time:       data.hyrox_goal_time        || null,
       race_date:             data.race_date ? data.race_date.toISOString().split('T')[0] : null,
       station_weaknesses:    data.station_weaknesses.length > 0 ? data.station_weaknesses : null,
-      run_confidence:        data.run_confidence         || null,
+      weekly_mileage:        data.weekly_mileage          || null,
       equipment_access:      data.equipment_access.length > 0 ? data.equipment_access : null,
       current_training_days: data.current_training_days  || null,
       body_weight:           data.body_weight ? parseFloat(data.body_weight) : null,
       weight_unit:           data.body_weight ? data.weight_unit : null,
+      body_fat_range:        data.body_fat_range          || null,
       fitness_goal:          data.fitness_goal            || null,
       rest_days:             data.rest_days ? parseInt(data.rest_days, 10) : null,
       session_length:        data.session_length          || null,
@@ -223,7 +271,7 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
     });
 
     setSaving(false);
-    // Loading screen stays visible — AI program generation will be wired up next session.
+    await callGenerateAssessment(authData.user.id);
   }
 
   // ── Render helpers ─────────────────────────────────────────────────────────
@@ -257,9 +305,7 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
           placeholderTextColor={GREY}
           selectionColor={YELLOW}
         />
-        {ageError && (
-          <Text style={styles.errorText}>Age must be between 13 and 99</Text>
-        )}
+        {ageError && <Text style={styles.errorText}>Age must be between 13 and 99</Text>}
       </View>
     );
   }
@@ -298,17 +344,26 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
       <View style={styles.stepContent}>
         {renderLabel(label)}
         <Text style={styles.sublabel}>Select all that apply</Text>
-        {options.map(opt => (
-          <TouchableOpacity
-            key={opt}
-            style={[styles.option, selected.includes(opt) && styles.optionSelected]}
-            onPress={() => toggleMulti(field, opt)}
-          >
-            <Text style={[styles.optionText, selected.includes(opt) && styles.optionTextSelected]}>
-              {opt}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {/* Wrapped in ScrollView so all options are accessible on small screens */}
+        <ScrollView
+          nestedScrollEnabled
+          showsVerticalScrollIndicator={false}
+          style={styles.multiScroll}
+        >
+          <View style={styles.multiOptions}>
+            {options.map(opt => (
+              <TouchableOpacity
+                key={opt}
+                style={[styles.option, selected.includes(opt) && styles.optionSelected]}
+                onPress={() => toggleMulti(field, opt)}
+              >
+                <Text style={[styles.optionText, selected.includes(opt) && styles.optionTextSelected]}>
+                  {opt}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -322,7 +377,6 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
     return (
       <View style={styles.stepContent}>
         {renderLabel('When is your next Hyrox race?')}
-
         {Platform.OS === 'ios' ? (
           <DateTimePicker
             value={pickerDate}
@@ -338,10 +392,7 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
           />
         ) : (
           <>
-            <TouchableOpacity
-              style={styles.option}
-              onPress={() => setAndroidPickerOpen(true)}
-            >
+            <TouchableOpacity style={styles.option} onPress={() => setAndroidPickerOpen(true)}>
               <Text style={styles.optionText}>{formattedDate}</Text>
             </TouchableOpacity>
             {androidPickerOpen && (
@@ -366,8 +417,6 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
     return (
       <View style={styles.stepContent}>
         {renderLabel('What is your body weight?')}
-
-        {/* Unit toggle */}
         <View style={styles.unitToggleRow}>
           {(['lbs', 'kg'] as const).map(unit => (
             <TouchableOpacity
@@ -381,7 +430,6 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
             </TouchableOpacity>
           ))}
         </View>
-
         <TextInput
           style={styles.textInput}
           value={data.body_weight}
@@ -464,13 +512,6 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
            'Burpee Broad Jumps', 'Farmers Carry', 'Sandbag Lunges', 'Wall Balls', 'Running'],
         );
 
-      case 'runConfidence':
-        return renderSingleSelect('How do you feel about your running?', 'run_confidence', [
-          { label: 'Running is my strength', value: 'Running is my strength' },
-          { label: 'Running is average',     value: 'Running is average' },
-          { label: 'Running is my weakness', value: 'Running is my weakness' },
-        ]);
-
       case 'hyroxEquipment':
         return renderMultiSelect(
           'What equipment do you have access to?',
@@ -492,15 +533,7 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
           ],
         );
 
-      case 'generalRunConfidence':
-        return renderSingleSelect('How do you feel about your running?', 'run_confidence', [
-          { label: 'Running is my strength', value: 'Running is my strength' },
-          { label: 'Running is average',     value: 'Running is average' },
-          { label: 'Running is my weakness', value: 'Running is my weakness' },
-        ]);
-
       case 'generalEquipment':
-        // Ski Erg + Row Erg included; Sled excluded (Hyrox-specific)
         return renderMultiSelect(
           'What equipment do you have access to?',
           'equipment_access',
@@ -511,13 +544,43 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
       case 'bodyWeight':
         return renderBodyWeightStep();
 
+      case 'bodyFatRange':
+        return renderSingleSelect(
+          'What is your current body fat %?',
+          'body_fat_range',
+          [
+            { label: 'Under 10%',           value: 'Under 10%' },
+            { label: '10–15%',              value: '10-15%' },
+            { label: '15–20%',              value: '15-20%' },
+            { label: '20–25%',              value: '20-25%' },
+            { label: '25–30%',              value: '25-30%' },
+            { label: '30%+',               value: '30%+' },
+            { label: "Unsure / I don't know", value: 'unsure' },
+          ],
+        );
+
       case 'fitnessGoal':
         return renderSingleSelect('What is your primary goal?', 'fitness_goal', [
-          { label: 'Lose body fat',       value: 'Lose body fat' },
-          { label: 'Build muscle',        value: 'Build muscle' },
-          { label: 'Improve performance', value: 'Improve performance' },
-          { label: 'All of the above',    value: 'All of the above' },
+          { label: 'Look better',          value: 'look_better' },
+          { label: 'Get stronger',         value: 'get_stronger' },
+          { label: 'Improve performance',  value: 'improve_performance' },
+          { label: 'All-around fitness',   value: 'all_around' },
         ]);
+
+      // ── Shared (both paths) ──────────────────────────────────────────────────
+
+      case 'weeklyMileage':
+        return renderSingleSelect(
+          'How many miles per week do you currently run?',
+          'weekly_mileage',
+          [
+            { label: '0 miles',     value: '0' },
+            { label: '1–10 miles',  value: '1-10' },
+            { label: '11–20 miles', value: '11-20' },
+            { label: '21–30 miles', value: '21-30' },
+            { label: '30+ miles',   value: '30+' },
+          ],
+        );
 
       // ── Shared scheduling ────────────────────────────────────────────────────
 
@@ -530,8 +593,8 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
 
       case 'sessionLength':
         return renderSingleSelect('How much time do you have per session?', 'session_length', [
-          { label: 'About 1 hour',        value: '60' },
-          { label: 'About 1.5–2 hours',   value: '90' },
+          { label: 'About 1 hour',      value: '60' },
+          { label: 'About 1.5–2 hours', value: '90' },
         ]);
 
       case 'availability':
@@ -549,10 +612,20 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
 
   if (showLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={YELLOW} />
-        <Text style={styles.loadingText}>Building your program...</Text>
-      </View>
+      <SafeAreaView style={styles.loadingScreen} edges={['top', 'bottom']}>
+        <Text style={styles.logo}>Peak 65</Text>
+        <View style={styles.loadingBody}>
+          {!apiError && <ActivityIndicator size="large" color={YELLOW} style={{ marginBottom: 28 }} />}
+          <Text style={styles.loadingTitle}>Building your program...</Text>
+          {apiError ? (
+            <TouchableOpacity onPress={handleRetry} style={styles.retryBtn}>
+              <Text style={styles.retryText}>Something went wrong. Tap to try again.</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.loadingSubtext}>{LOADING_MESSAGES[loadingMsgIdx]}</Text>
+          )}
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -588,21 +661,23 @@ export default function OnboardingScreen({ navigation: _navigation }: Props) {
       >
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            topAligned && styles.scrollContentTop,
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           {renderCurrentStep()}
         </ScrollView>
 
-        {/* Footer: optional skip + Continue */}
+        {/* Footer */}
         <View style={styles.footer}>
           {currentKey === 'raceDate' && (
             <TouchableOpacity style={styles.skipBtn} onPress={skipRaceDate}>
               <Text style={styles.skipText}>I don't have a race yet</Text>
             </TouchableOpacity>
           )}
-
           <TouchableOpacity
             style={[styles.continueBtn, !canContinue && styles.continueBtnDisabled]}
             onPress={handleNext}
@@ -674,6 +749,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 20,
   },
+  // For steps with many options — start from top, don't center
+  scrollContentTop: {
+    justifyContent: 'flex-start',
+    paddingTop: 8,
+  },
   stepContent: {
     gap: 10,
   },
@@ -730,6 +810,15 @@ const styles = StyleSheet.create({
   optionTextSelected: {
     color: BLACK,
     fontWeight: '600',
+  },
+
+  // Multi-select inner scroll
+  multiScroll: {
+    flexGrow: 0,
+  },
+  multiOptions: {
+    gap: 10,
+    paddingBottom: 8,
   },
 
   // Body weight unit toggle
@@ -796,18 +885,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Loading
-  loadingContainer: {
+  // Loading screen
+  loadingScreen: {
     flex: 1,
     backgroundColor: BLACK,
+    paddingHorizontal: 24,
+  },
+  loadingBody: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 20,
   },
-  loadingText: {
+  loadingTitle: {
     color: OFF_WHITE,
-    fontSize: 20,
-    fontWeight: '600',
-    letterSpacing: 0.2,
+    fontSize: 22,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  loadingSubtext: {
+    color: GREY,
+    fontSize: 15,
+    textAlign: 'center',
+  },
+  retryBtn: {
+    marginTop: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  retryText: {
+    color: YELLOW,
+    fontSize: 15,
+    textAlign: 'center',
+    textDecorationLine: 'underline',
   },
 });

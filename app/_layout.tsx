@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import LoginScreen from './auth/login';
 import SignupScreen from './auth/signup';
 import DashboardScreen from './(main)/dashboard';
+import CheckinScreen from './(main)/checkin';
 import OnboardingScreen from './onboarding/index';
 
 // --- Type definitions exported so screens can use them ---
@@ -19,6 +20,7 @@ export type AuthStackParamList = {
 export type MainStackParamList = {
   Onboarding: undefined;
   Dashboard: undefined;
+  Checkin: undefined;
 };
 
 // --- Stack navigators ---
@@ -43,6 +45,7 @@ function MainNavigator({ onboardingComplete }: { onboardingComplete: boolean }) 
     >
       <MainStack.Screen name="Onboarding" component={OnboardingScreen} />
       <MainStack.Screen name="Dashboard" component={DashboardScreen} />
+      <MainStack.Screen name="Checkin" component={CheckinScreen} />
     </MainStack.Navigator>
   );
 }
