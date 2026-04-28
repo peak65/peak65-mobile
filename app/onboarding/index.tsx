@@ -284,7 +284,7 @@ export default function OnboardingScreen({ navigation }: Props) {
     const { data: authData } = await supabase.auth.getUser();
     if (!authData.user) { setSaving(false); return; }
 
-    await supabase.from('profiles').upsert({
+    const { data: upsertData, error: upsertError } = await supabase.from('profiles').upsert({
       id:                    authData.user.id,
       first_name:            data.first_name,
       last_name:             data.last_name,
@@ -307,6 +307,9 @@ export default function OnboardingScreen({ navigation }: Props) {
       session_length:        data.session_length          || null,
       availability:          data.availability            || null,
     });
+
+    console.log('[onboarding] upsert data:', JSON.stringify(upsertData));
+    console.log('[onboarding] upsert error:', JSON.stringify(upsertError));
 
     setSaving(false);
     await callGenerateAssessment();
