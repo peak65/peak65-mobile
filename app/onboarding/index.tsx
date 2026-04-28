@@ -221,8 +221,15 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   // ── API call ───────────────────────────────────────────────────────────────
 
-  const callGenerateAssessment = useCallback(async (userId: string) => {
+  const callGenerateAssessment = useCallback(async () => {
     setApiError(false);
+
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData.user?.id;
+    console.log('[generate-assessment] userId:', userId);
+    if (!userId) { setApiError(true); return; }
+
+    console.log('[generate-assessment] starting fetch...');
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60_000);
     try {
@@ -236,18 +243,18 @@ export default function OnboardingScreen({ navigation }: Props) {
         signal: controller.signal,
       });
       clearTimeout(timeout);
+      console.log('[generate-assessment] response status:', res.status);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       navigation.replace('Dashboard');
     } catch (err) {
       clearTimeout(timeout);
-      console.error('[generate-assessment] failed:', err);
+      console.log('[generate-assessment] error:', JSON.stringify(err));
       setApiError(true);
     }
   }, [navigation]);
 
   async function handleRetry() {
-    const { data: authData } = await supabase.auth.getUser();
-    if (authData.user) await callGenerateAssessment(authData.user.id);
+    await callGenerateAssessment();
   }
 
   // ── Submit ─────────────────────────────────────────────────────────────────
@@ -284,7 +291,7 @@ export default function OnboardingScreen({ navigation }: Props) {
     });
 
     setSaving(false);
-    await callGenerateAssessment(authData.user.id);
+    await callGenerateAssessment();
   }
 
   // ── Render helpers ─────────────────────────────────────────────────────────
