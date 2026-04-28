@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Session } from '@supabase/supabase-js';
+import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from '../lib/supabase';
 import LoginScreen from './auth/login';
@@ -52,53 +52,52 @@ function MainNavigator({ onboardingComplete }: { onboardingComplete: boolean }) 
 
 // --- Root layout ---
 
-async function fetchOnboardingComplete(userId: string): Promise<boolean> {
+type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'authenticated';
+
+// Resolves the full app state from a session in one async step,
+// so the navigator never renders with partially-updated state.
+async function resolveAppState(session: Session | null): Promise<AppState> {
+  if (!session) return 'unauthenticated';
+
   const { data } = await supabase
     .from('profiles')
     .select('first_name')
-    .eq('id', userId)
+    .eq('id', session.user.id)
     .single();
-  return !!data?.first_name;
+
+  return data?.first_name ? 'authenticated' : 'onboarding';
 }
 
 export default function RootLayout() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [onboardingComplete, setOnboardingComplete] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [appState, setAppState] = useState<AppState>('loading');
 
   useEffect(() => {
-    // On mount: resolve session, then check profile if logged in
+    // Check the session once on mount and resolve the full app state.
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      if (session) {
-        setOnboardingComplete(await fetchOnboardingComplete(session.user.id));
-      }
-      setLoading(false);
+      setAppState(await resolveAppState(session));
     });
 
-    // On auth state changes (sign-in / sign-out), re-check profile
+    // React to future auth events (sign-in, sign-out, token refresh).
+    // Skip INITIAL_SESSION — that's already handled by getSession() above.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session);
-        if (session) {
-          setOnboardingComplete(await fetchOnboardingComplete(session.user.id));
-        } else {
-          setOnboardingComplete(false);
-        }
+      async (event, session) => {
+        if (event === 'INITIAL_SESSION') return;
+        setAppState('loading');
+        setAppState(await resolveAppState(session));
       }
     );
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // Don't render until session + profile check are both done
-  if (loading) return null;
+  // Hold the splash until we know exactly where to send the user.
+  if (appState === 'loading') return null;
 
   return (
     <NavigationContainer>
-      {session
-        ? <MainNavigator onboardingComplete={onboardingComplete} />
-        : <AuthNavigator />}
+      {appState === 'unauthenticated'
+        ? <AuthNavigator />
+        : <MainNavigator onboardingComplete={appState === 'authenticated'} />}
     </NavigationContainer>
   );
 }
