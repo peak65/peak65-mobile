@@ -229,19 +229,37 @@ export default function OnboardingScreen({ navigation }: Props) {
     console.log('[generate-assessment] userId:', userId);
     if (!userId) { setApiError(true); return; }
 
-    console.log('[generate-assessment] starting fetch...');
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
+
+    // Distinguish timeout-triggered aborts from any unexpected early abort
+    let timedOut = false;
+    controller.signal.addEventListener('abort', () => {
+      if (!timedOut) {
+        console.log('[generate-assessment] aborted early - reason:', controller.signal.reason);
+      }
+    });
+
+    console.log('[generate-assessment] starting fetch...');
+
+    // Kick off the fetch first so it is in flight before the timer is armed
+    const fetchPromise = fetch('https://peak65.vercel.app/api/generate-assessment', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ userId }),
+      signal: controller.signal,
+    });
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      console.log('[generate-assessment] timeout fired after 60s');
+      controller.abort();
+    }, 60_000);
+
     try {
-      const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({ userId }),
-        signal: controller.signal,
-      });
+      const res = await fetchPromise;
       clearTimeout(timeout);
       console.log('[generate-assessment] response status:', res.status);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
