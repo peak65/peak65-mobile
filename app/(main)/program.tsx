@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
-import type { Program, ProgramDay, ExerciseItem } from '../_layout';
+import type { Program, ProgramDay, ExerciseItem, ProgramSession } from '../_layout';
 
 const YELLOW    = '#e8ff47';
 const BLACK     = '#080808';
@@ -17,11 +17,36 @@ const INTENSITY_DOT: Record<string, string> = {
   easy: '🟢', moderate: '🟡', hard: '🔴', rest: '⚫',
 };
 
-function exerciseDetail(ex: ExerciseItem): string {
-  if (ex.type === 'strength') {
-    return `${ex.sets ?? '?'} × ${ex.reps ?? '?'}${ex.rest_seconds ? ` • ${ex.rest_seconds / 60}min rest` : ''}`;
-  }
-  return [ex.distance, ex.zone, ex.duration].filter(Boolean).join(' • ');
+function SessionCard({ session }: { session: ProgramSession }) {
+  return (
+    <View style={styles.sessionBlock}>
+      <View style={styles.sessionHeaderRow}>
+        <Text style={styles.sessionName}>{session.name}</Text>
+        <Text style={styles.sessionMeta}>{session.time} · {session.duration_minutes} min</Text>
+      </View>
+      {!!session.description && (
+        <Text style={styles.sessionDesc}>{session.description}</Text>
+      )}
+      {(session.blocks ?? []).map((block, bi) => (
+        <View key={bi} style={styles.section}>
+          <Text style={styles.sectionLabel}>{block.block_name}</Text>
+          {(block.exercises ?? []).map((ex, ei) => {
+            let detail = '';
+            if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
+            else if (ex.reps) detail = ex.reps;
+            const note = ex.notes || ex.note;
+            return (
+              <View key={ei} style={[styles.exRow, { borderLeftColor: YELLOW }]}>
+                <Text style={styles.exName}>{ex.name}</Text>
+                {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
+                {!!note && <Text style={styles.exDetail}>{note}</Text>}
+              </View>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
 }
 
 function DayCard({
@@ -30,6 +55,7 @@ function DayCard({
   day: ProgramDay; isToday: boolean; isComplete: boolean;
 }) {
   const [expanded, setExpanded] = useState(isToday);
+  const isRest = day.type === 'rest' || !day.sessions?.length;
 
   return (
     <TouchableOpacity
@@ -45,39 +71,20 @@ function DayCard({
           {isComplete && <Text style={styles.checkmark}> ✓</Text>}
         </View>
         <View style={styles.dayCardRight}>
-          <Text style={styles.intensityDot}>{INTENSITY_DOT[day.intensity] ?? '⚫'}</Text>
-          <Text style={styles.sessionType}>{day.session_type}</Text>
+          <Text style={styles.sessionType}>{day.type}</Text>
           <Text style={styles.chevron}>{expanded ? '▲' : '▼'}</Text>
         </View>
       </View>
 
-      {expanded && !day.is_rest && (
+      {expanded && (
         <View style={styles.expandedContent}>
-          {[
-            { label: 'WARM-UP',   items: day.warm_up,   phase: 'warm_up'   },
-            { label: 'MAIN WORK', items: day.main_work,  phase: 'main_work' },
-            { label: 'COOL-DOWN', items: day.cool_down,  phase: 'cool_down' },
-          ].map(({ label, items, phase }) => {
-            if (!items?.length) return null;
-            return (
-              <View key={label} style={styles.section}>
-                <Text style={styles.sectionLabel}>{label}</Text>
-                {items.map((ex, i) => (
-                  <View key={i} style={[styles.exRow,
-                    { borderLeftColor: phase === 'main_work' ? YELLOW : GREY }]}>
-                    <Text style={styles.exName}>{ex.name}</Text>
-                    <Text style={styles.exDetail}>{exerciseDetail(ex)}</Text>
-                  </View>
-                ))}
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      {expanded && day.is_rest && (
-        <View style={styles.expandedContent}>
-          <Text style={styles.restNote}>Recovery day — prioritize sleep and nutrition.</Text>
+          {isRest ? (
+            <Text style={styles.restNote}>Rest — recover well.</Text>
+          ) : (
+            (day.sessions ?? []).map((session, si) => (
+              <SessionCard key={si} session={session} />
+            ))
+          )}
         </View>
       )}
     </TouchableOpacity>
@@ -214,7 +221,14 @@ const styles = StyleSheet.create({
   sessionType: { color: GREY, fontSize: 13 },
   chevron: { color: GREY, fontSize: 12, marginLeft: 4 },
 
-  expandedContent: { marginTop: 16, gap: 14 },
+  expandedContent: { marginTop: 16, gap: 16 },
+
+  sessionBlock: { gap: 10 },
+  sessionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  sessionName: { color: OFF_WHITE, fontSize: 14, fontWeight: '700', flex: 1 },
+  sessionMeta: { color: GREY, fontSize: 12 },
+  sessionDesc: { color: GREY, fontSize: 13, lineHeight: 18 },
+
   section: { gap: 8 },
   sectionLabel: {
     color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase',
