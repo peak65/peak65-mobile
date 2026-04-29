@@ -43,6 +43,7 @@ type OnboardingData = {
   fitness_goal: string;
   // Shared scheduling
   rest_days: string;
+  rest_day_preferences: string[];
   session_length: string;
   availability: string;
 };
@@ -53,7 +54,7 @@ type StepKey =
   | 'stationWeaknesses' | 'weeklyMileage' | 'hyroxEquipment'
   | 'generalTrainingDays' | 'generalEquipment'
   | 'bodyWeight' | 'bodyFatRange' | 'fitnessGoal'
-  | 'restDays' | 'sessionLength' | 'availability';
+  | 'restDays' | 'restDayPreferences' | 'sessionLength' | 'availability';
 
 // ─── Step Definitions ─────────────────────────────────────────────────────────
 
@@ -69,11 +70,11 @@ const GENERAL_STEPS: StepKey[] = [
   'bodyWeight', 'bodyFatRange', 'fitnessGoal',
 ];
 
-const SHARED_STEPS: StepKey[] = ['restDays', 'sessionLength', 'availability'];
+const SHARED_STEPS: StepKey[] = ['restDays', 'restDayPreferences', 'sessionLength', 'availability'];
 
 // Steps with many options that need top-aligned (not centered) scroll content
 const TOP_ALIGNED_STEPS: StepKey[] = [
-  'stationWeaknesses', 'hyroxEquipment', 'generalEquipment', 'bodyFatRange',
+  'stationWeaknesses', 'hyroxEquipment', 'generalEquipment', 'bodyFatRange', 'restDayPreferences',
 ];
 
 // Steps that need a bounded container so their inner ScrollView can flex to fill it
@@ -118,6 +119,7 @@ function isStepComplete(key: StepKey, d: OnboardingData): boolean {
     case 'bodyFatRange':        return d.body_fat_range !== '';
     case 'fitnessGoal':         return d.fitness_goal !== '';
     case 'restDays':            return d.rest_days !== '';
+    case 'restDayPreferences':  return d.rest_day_preferences.length === parseInt(d.rest_days, 10);
     case 'sessionLength':       return d.session_length !== '';
     case 'availability':        return d.availability !== '';
     default:                    return false;
@@ -139,7 +141,7 @@ const INITIAL: OnboardingData = {
   race_date: null, station_weaknesses: [], weekly_mileage: '',
   equipment_access: [], current_training_days: '',
   body_weight: '', weight_unit: 'lbs', body_fat_range: '', fitness_goal: '',
-  rest_days: '', session_length: '', availability: '',
+  rest_days: '', rest_day_preferences: [], session_length: '', availability: '',
 };
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -218,6 +220,23 @@ export default function OnboardingScreen({ navigation }: Props) {
       };
     });
   }
+
+  function toggleRestDay(day: string) {
+    const max = parseInt(data.rest_days, 10);
+    setData(prev => {
+      const arr = prev.rest_day_preferences;
+      if (arr.includes(day)) return { ...prev, rest_day_preferences: arr.filter(d => d !== day) };
+      if (arr.length >= max) return prev;
+      return { ...prev, rest_day_preferences: [...arr, day] };
+    });
+  }
+
+  // Clear day selections if the rest_days count changes
+  useEffect(() => {
+    if (data.rest_days !== '') {
+      setData(prev => ({ ...prev, rest_day_preferences: [] }));
+    }
+  }, [data.rest_days]);
 
   // ── API call ───────────────────────────────────────────────────────────────
 
@@ -304,6 +323,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       body_fat_range:        data.body_fat_range          || null,
       fitness_goal:          data.fitness_goal            || null,
       rest_days:             data.rest_days ? parseInt(data.rest_days, 10) : null,
+      rest_day_preferences:  data.rest_day_preferences.length > 0 ? data.rest_day_preferences : null,
       session_length:        data.session_length          || null,
       availability:          data.availability            || null,
     });
@@ -659,6 +679,30 @@ export default function OnboardingScreen({ navigation }: Props) {
           { label: '2', value: '2' },
           { label: '3', value: '3' },
         ]);
+
+      case 'restDayPreferences': {
+        const max = parseInt(data.rest_days, 10);
+        const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        return (
+          <View style={styles.stepContent}>
+            {renderLabel(`Which day${max > 1 ? 's' : ''} do you want to rest?`)}
+            <Text style={styles.sublabel}>
+              {`Choose ${max} — ${data.rest_day_preferences.length} of ${max} selected`}
+            </Text>
+            {DAYS.map(day => (
+              <TouchableOpacity
+                key={day}
+                style={[styles.option, data.rest_day_preferences.includes(day) && styles.optionSelected]}
+                onPress={() => toggleRestDay(day)}
+              >
+                <Text style={[styles.optionText, data.rest_day_preferences.includes(day) && styles.optionTextSelected]}>
+                  {day}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        );
+      }
 
       case 'sessionLength':
         return renderSingleSelect('How much time do you have per session?', 'session_length', [
