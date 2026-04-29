@@ -13,18 +13,9 @@ const GREY      = '#8a877f';
 const CARD_BG   = '#111111';
 const GREEN     = '#44ff88';
 
-const DAY_NAMES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
-
 const INTENSITY_DOT: Record<string, string> = {
   easy: '🟢', moderate: '🟡', hard: '🔴', rest: '⚫',
 };
-
-function todayDayIndex(weekStartDate: string): number {
-  const start = new Date(weekStartDate + 'T00:00:00');
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const diff  = Math.floor((today.getTime() - start.getTime()) / 86_400_000);
-  return diff >= 0 ? diff % 7 : new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
-}
 
 function exerciseDetail(ex: ExerciseItem): string {
   if (ex.type === 'strength') {
@@ -49,7 +40,7 @@ function DayCard({
       <View style={styles.dayCardHeader}>
         <View style={styles.dayCardLeft}>
           <Text style={[styles.dayName, isToday && { color: YELLOW }]}>
-            {DAY_NAMES[day.day_index] ?? `Day ${day.day_index + 1}`}
+            {day.day}
           </Text>
           {isComplete && <Text style={styles.checkmark}> ✓</Text>}
         </View>
@@ -97,7 +88,7 @@ export default function ProgramScreen() {
   const [program, setProgram]           = useState<Program | null>(null);
   const [completedDays, setCompletedDays] = useState<Set<number>>(new Set());
   const [weekOffset, setWeekOffset]     = useState(0);
-  const [todayIdx, setTodayIdx]         = useState(0);
+  const [todayName, setTodayName]       = useState('');
   const [loading, setLoading]           = useState(true);
 
   const load = useCallback(async () => {
@@ -117,8 +108,8 @@ export default function ProgramScreen() {
     const prog = progRes.data as Program | null;
     setProgram(prog);
 
-    if (prog?.week_start_date) {
-      setTodayIdx(todayDayIndex(prog.week_start_date));
+    if (prog) {
+      setTodayName(new Date().toLocaleDateString('en-US', { weekday: 'long' }));
     }
 
     // Which days have a log for the current week
@@ -182,10 +173,10 @@ export default function ProgramScreen() {
           <View style={styles.dayList}>
             {days.map(day => (
               <DayCard
-                key={day.day_index}
+                key={day.day}
                 day={day}
-                isToday={weekOffset === 0 && day.day_index === todayIdx}
-                isComplete={completedDays.has(day.day_index)}
+                isToday={weekOffset === 0 && day.day === todayName}
+                isComplete={completedDays.has(day.day_index ?? -1)}
               />
             ))}
           </View>

@@ -30,7 +30,8 @@ export type ExerciseItem = {
 };
 
 export type ProgramDay = {
-  day_index: number;
+  day: string;
+  day_index?: number;
   session_type: string;
   intensity: 'easy' | 'moderate' | 'hard' | 'rest';
   is_rest: boolean;

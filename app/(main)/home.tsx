@@ -145,9 +145,9 @@ export default function HomeScreen() {
     const prog = programRes.data as Program | null;
     setProgram(prog);
 
-    if (prog?.program_data?.days && prog.week_start_date) {
-      const idx = todayDayIndex(prog.week_start_date);
-      setTodayDay(prog.program_data.days.find(d => d.day_index === idx) ?? prog.program_data.days[idx] ?? null);
+    if (prog?.program_data?.days) {
+      const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+      setTodayDay(prog.program_data.days.find(d => d.day === todayStr) ?? null);
     }
 
     const logs = logsRes.data ?? [];
