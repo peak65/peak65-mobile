@@ -24,11 +24,24 @@ type Profile = {
   rest_days: number | null;
   session_length: string | null;
   availability: string | null;
-  equipment_access: string[] | null;
+  equipment_access: string[] | string | null;
+  station_weaknesses: string[] | string | null;
   body_weight: number | null;
   weight_unit: string | null;
   body_fat_range: string | null;
 };
+
+// Postgres text[] can arrive as a JS array, a "{a,b}" string, or null.
+function toStringArray(val: string[] | string | null | undefined): string[] {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  const match = val.match(/^\{(.*)\}$/s);
+  if (match) {
+    if (!match[1].length) return [];
+    return match[1].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+  }
+  return [];
+}
 
 // ─── Picker modal ─────────────────────────────────────────────────────────────
 
@@ -238,7 +251,7 @@ export default function ProfileScreen() {
         <MultiSelectModal
           title="Equipment Access"
           options={EQUIPMENT_OPTIONS}
-          values={profile?.equipment_access ?? []}
+          values={toStringArray(profile?.equipment_access)}
           onSave={vs => updateProfile({ equipment_access: vs })}
           onClose={() => setPicker(null)}
         />
@@ -263,7 +276,7 @@ export default function ProfileScreen() {
           <SettingRow label="Rest Days" value={profile?.rest_days != null ? `${profile.rest_days} day${profile.rest_days !== 1 ? 's' : ''}` : ''} onPress={() => setPicker('rest')} />
           <SettingRow label="Session Length" value={profile?.session_length === '60' ? '~1 hour' : profile?.session_length === '90' ? '~1.5–2 hours' : profile?.session_length ?? ''} onPress={() => setPicker('length')} />
           <SettingRow label="Availability" value={profile?.availability === 'once' ? 'Once a day' : profile?.availability === 'twice' ? 'Twice a day' : profile?.availability ?? ''} onPress={() => setPicker('availability')} />
-          <SettingRow label="Equipment" value={(profile?.equipment_access ?? []).join(', ')} onPress={() => setPicker('equipment')} />
+          <SettingRow label="Equipment" value={toStringArray(profile?.equipment_access).join(', ')} onPress={() => setPicker('equipment')} />
         </View>
 
         {/* Wearables section */}
