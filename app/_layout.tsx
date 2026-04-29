@@ -19,7 +19,7 @@ import ProfileScreen from './(main)/profile';
 
 export type ExerciseItem = {
   name: string;
-  type: 'strength' | 'cardio' | 'mobility';
+  type?: 'strength' | 'cardio' | 'mobility';
   sets?: number;
   reps?: string;
   rest_seconds?: number;
@@ -27,17 +27,33 @@ export type ExerciseItem = {
   zone?: string;
   duration?: string;
   note?: string;
+  notes?: string;
+};
+
+export type SessionBlock = {
+  block_name: string;
+  exercises: ExerciseItem[];
+};
+
+export type ProgramSession = {
+  name: string;
+  time: string;
+  duration_minutes: number;
+  description: string;
+  blocks: SessionBlock[];
 };
 
 export type ProgramDay = {
   day: string;
   day_index?: number;
-  session_type: string;
-  intensity: 'easy' | 'moderate' | 'hard' | 'rest';
-  is_rest: boolean;
-  warm_up: ExerciseItem[];
-  main_work: ExerciseItem[];
-  cool_down: ExerciseItem[];
+  type: string;
+  sessions: ProgramSession[];
+  session_type?: string;
+  intensity?: 'easy' | 'moderate' | 'hard' | 'rest';
+  is_rest?: boolean;
+  warm_up?: ExerciseItem[];
+  main_work?: ExerciseItem[];
+  cool_down?: ExerciseItem[];
 };
 
 export type Program = {

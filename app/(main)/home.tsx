@@ -64,13 +64,18 @@ function fmtSeconds(s: number) {
 
 function ExerciseRow({ ex, phase }: { ex: ExerciseItem; phase: string }) {
   const borderColor = phase === 'main_work' ? YELLOW : GREY;
-  const detail = ex.type === 'strength'
-    ? `${ex.sets ?? '?'} sets × ${ex.reps ?? '?'} reps${ex.rest_seconds ? ` • ${ex.rest_seconds / 60} min rest` : ''}`
-    : `${ex.distance ?? ''}${ex.zone ? ` • ${ex.zone}` : ''}${ex.duration ? ` • ${ex.duration}` : ''}`.replace(/^•\s*/, '').trim();
+  let detail = '';
+  if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
+  else if (ex.reps) detail = ex.reps;
+  else if (ex.distance || ex.zone || ex.duration) {
+    detail = [ex.distance, ex.zone, ex.duration].filter(Boolean).join(' • ');
+  }
+  const note = ex.notes || ex.note;
   return (
     <View style={[styles.exRow, { borderLeftColor: borderColor }]}>
       <Text style={styles.exName}>{ex.name}</Text>
       {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
+      {!!note && <Text style={styles.exDetail}>{note}</Text>}
     </View>
   );
 }
@@ -110,11 +115,13 @@ export default function HomeScreen() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Exercise tracking (set-by-set)
-  const allExercises = todayDay ? [
-    ...((todayDay.warm_up || []).map(e => ({ ...e, _phase: 'warm_up'  }))),
-    ...((todayDay.main_work || []).map(e => ({ ...e, _phase: 'main_work' }))),
-    ...((todayDay.cool_down || []).map(e => ({ ...e, _phase: 'cool_down' }))),
-  ] : [];
+  const allExercises = todayDay
+    ? (todayDay.sessions ?? []).flatMap(s =>
+        (s.blocks ?? []).flatMap(b =>
+          (b.exercises ?? []).map(e => ({ ...e, _phase: b.block_name }))
+        )
+      )
+    : [];
 
   const [exIdx, setExIdx]               = useState(0);
   const [setIdx, setSetIdx]             = useState(0);
@@ -271,7 +278,7 @@ export default function HomeScreen() {
 
   // ── Swap run ─────────────────────────────────────────────────────────────────
 
-  const hasCardio = todayDay?.main_work?.some(e => e.type === 'cardio');
+  const hasCardio = false;
 
   // ── Render helpers ───────────────────────────────────────────────────────────
 
@@ -496,42 +503,43 @@ export default function HomeScreen() {
 
         {/* Today's workout */}
         <Text style={styles.todayHeader}>TODAY</Text>
-        {todayDay ? (
+        {!todayDay ? (
+          <View style={styles.noProgram}>
+            <Text style={styles.noProgramText}>No program found.</Text>
+          </View>
+        ) : todayDay.type === 'rest' || !todayDay.sessions?.length ? (
+          <View style={styles.noProgram}>
+            <Text style={styles.noProgramText}>Rest day — recover well.</Text>
+          </View>
+        ) : (
           <>
-            <Text style={styles.todaySubtitle}>{todayDay.session_type}</Text>
-            <View style={styles.sessionCard}>
-              <SectionBlock label="WARM-UP"   items={todayDay.warm_up}   phase="warm_up" />
-              <SectionBlock label="MAIN WORK" items={todayDay.main_work?.map(e =>
-                swappedCardio && e.type === 'cardio'
-                  ? { ...e, name: swappedCardio, zone: 'Swapped', duration: e.duration }
-                  : e
-              ) ?? []} phase="main_work" />
-              <SectionBlock label="COOL-DOWN" items={todayDay.cool_down} phase="cool_down" />
-            </View>
+            {(todayDay.sessions ?? []).map((session, si) => (
+              <View key={si}>
+                <View style={styles.sessionHeader}>
+                  <Text style={styles.sessionName}>{session.name}</Text>
+                  <Text style={styles.sessionMeta}>{session.time} · {session.duration_minutes} min</Text>
+                </View>
+                {!!session.description && (
+                  <Text style={styles.sessionDesc}>{session.description}</Text>
+                )}
+                <View style={styles.sessionCard}>
+                  {(session.blocks ?? []).map((block, bi) => (
+                    <SectionBlock key={bi} label={block.block_name} items={block.exercises} phase="main_work" />
+                  ))}
+                </View>
+              </View>
+            ))}
 
             {sessionPhase === 'idle' ? (
-              <>
-                <TouchableOpacity style={styles.primaryBtn} onPress={startSession}>
-                  <Text style={styles.primaryBtnText}>START SESSION</Text>
-                </TouchableOpacity>
-                {hasCardio && !todayDay.is_rest && (
-                  <TouchableOpacity style={styles.swapBtn} onPress={() => setSwapModalOpen(true)}>
-                    <Text style={styles.swapBtnText}>SWAP RUN</Text>
-                  </TouchableOpacity>
-                )}
-              </>
+              <TouchableOpacity style={styles.primaryBtn} onPress={startSession}>
+                <Text style={styles.primaryBtnText}>START SESSION</Text>
+              </TouchableOpacity>
             ) : (
               <View style={[styles.primaryBtn, { opacity: 0.6 }]}>
                 <Text style={styles.primaryBtnText}>IN PROGRESS • {fmtSeconds(elapsed)}</Text>
               </View>
             )}
           </>
-        ) : (
-          <View style={styles.noProgram}>
-            <Text style={styles.noProgramText}>
-              {program ? 'Rest day — recover well.' : 'No program found.'}
-            </Text>
-          </View>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -595,6 +603,14 @@ const styles = StyleSheet.create({
   exRow: { borderLeftWidth: 3, paddingLeft: 10, gap: 2 },
   exName: { color: OFF_WHITE, fontSize: 15, fontWeight: '600' },
   exDetail: { color: GREY, fontSize: 13 },
+
+  sessionHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline',
+    paddingHorizontal: 20, marginBottom: 6,
+  },
+  sessionName: { color: OFF_WHITE, fontSize: 16, fontWeight: '700', flex: 1 },
+  sessionMeta: { color: GREY, fontSize: 12 },
+  sessionDesc: { color: GREY, fontSize: 13, paddingHorizontal: 20, marginBottom: 12, lineHeight: 18 },
 
   noProgram: { paddingHorizontal: 20, paddingVertical: 24 },
   noProgramText: { color: GREY, fontSize: 15, textAlign: 'center' },
