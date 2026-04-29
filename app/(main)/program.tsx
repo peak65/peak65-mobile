@@ -174,6 +174,31 @@ function StrengthLogCard({
   );
 }
 
+// ─── Mark-complete card (Z2 / cardio / regular sessions) ─────────────────────
+
+function MarkCompleteCard({
+  saved, saving, onSave,
+}: {
+  saved: boolean; saving: boolean; onSave: () => void;
+}) {
+  if (saved) {
+    return (
+      <View style={styles.completeConfirm}>
+        <Text style={styles.completeConfirmText}>Session complete. Good work.</Text>
+      </View>
+    );
+  }
+  return (
+    <TouchableOpacity
+      style={[styles.trialBtn, saving && styles.trialBtnDisabled]}
+      onPress={onSave}
+      disabled={saving}
+    >
+      <Text style={styles.trialBtnText}>{saving ? 'SAVING...' : 'MARK COMPLETE'}</Text>
+    </TouchableOpacity>
+  );
+}
+
 // ─── Day card ─────────────────────────────────────────────────────────────────
 
 function DayCard({
@@ -210,6 +235,17 @@ function DayCard({
   const [strengthSaved, setStrengthSaved]   = useState(false);
   const [strengthSaving, setStrengthSaving] = useState(false);
 
+  // ── Mark-complete state (cardio / Z2 / regular sessions) ────────────────────
+  const completeAlreadySaved = savedTrials.has(`${day.day}:session_complete`);
+  const [completeSaved, setCompleteSaved]   = useState<Record<number, boolean>>(() => {
+    const init: Record<number, boolean> = {};
+    (day.sessions ?? []).forEach((s, i) => {
+      if (!s.log_result && !isStrengthSession(s)) init[i] = completeAlreadySaved;
+    });
+    return init;
+  });
+  const [completeSaving, setCompleteSaving] = useState(false);
+
   async function saveTrialResult(si: number, session: ProgramSession) {
     if (!userId || !trialValues[si]?.trim()) return;
     setTrialSaving(true);
@@ -226,6 +262,23 @@ function DayCard({
     });
     setTrialSaved(prev => ({ ...prev, [si]: true }));
     setTrialSaving(false);
+  }
+
+  async function markSessionComplete(si: number, sessionName: string) {
+    if (!userId) return;
+    setCompleteSaving(true);
+    await supabase.from('session_logs').insert({
+      user_id:      userId,
+      program_id:   programId,
+      day_name:     day.day,
+      week_number:  weekNumber,
+      session_name: sessionName,
+      log_field:    'session_complete',
+      completed:    true,
+      completed_at: new Date().toISOString(),
+    });
+    setCompleteSaved(prev => ({ ...prev, [si]: true }));
+    setCompleteSaving(false);
   }
 
   async function saveStrengthResults(sessionName: string) {
@@ -297,7 +350,13 @@ function DayCard({
                     onChange={v => setTrialValues(prev => ({ ...prev, [si]: v }))}
                     onSave={() => saveTrialResult(si, session)}
                   />
-                ) : null}
+                ) : (
+                  <MarkCompleteCard
+                    saved={completeSaved[si] ?? false}
+                    saving={completeSaving}
+                    onSave={() => markSessionComplete(si, session.name)}
+                  />
+                )}
               </View>
             ))
           )}
@@ -508,6 +567,9 @@ const styles = StyleSheet.create({
   trialBtn:        { backgroundColor: YELLOW, borderRadius: 8, paddingVertical: 13, alignItems: 'center' },
   trialBtnDisabled:{ opacity: 0.45 },
   trialBtnText:    { color: BLACK, fontSize: 14, fontWeight: '700' },
+
+  completeConfirm:     { paddingVertical: 8, alignItems: 'center' },
+  completeConfirmText: { color: YELLOW, fontSize: 14, fontWeight: '600' },
 
   trialSavedRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   trialSavedValue: { color: YELLOW, fontSize: 20, fontWeight: '700' },

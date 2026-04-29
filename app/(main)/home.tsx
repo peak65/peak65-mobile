@@ -54,7 +54,7 @@ function weekNumber(weekStartDate: string | undefined): number {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function ExerciseRow({ ex, highlight }: { ex: ExerciseItem; highlight?: boolean }) {
+function ExerciseRow({ ex }: { ex: ExerciseItem }) {
   let detail = '';
   if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
   else if (ex.reps) detail = ex.reps;
@@ -63,7 +63,7 @@ function ExerciseRow({ ex, highlight }: { ex: ExerciseItem; highlight?: boolean 
   }
   const note = ex.notes || ex.note;
   return (
-    <View style={[styles.exRow, { borderLeftColor: highlight ? YELLOW : GREY }]}>
+    <View style={styles.exRow}>
       <Text style={styles.exName}>{ex.name}</Text>
       {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
       {!!note  && <Text style={styles.exDetail}>{note}</Text>}
@@ -71,12 +71,12 @@ function ExerciseRow({ ex, highlight }: { ex: ExerciseItem; highlight?: boolean 
   );
 }
 
-function SectionBlock({ label, items, highlight }: { label: string; items: ExerciseItem[]; highlight?: boolean }) {
+function SectionBlock({ label, items }: { label: string; items: ExerciseItem[] }) {
   if (!items?.length) return null;
   return (
     <View style={styles.sectionBlock}>
       <Text style={styles.sectionLabel}>{label}</Text>
-      {items.map((ex, i) => <ExerciseRow key={i} ex={ex} highlight={highlight} />)}
+      {items.map((ex, i) => <ExerciseRow key={i} ex={ex} />)}
     </View>
   );
 }
@@ -377,23 +377,20 @@ export default function HomeScreen() {
           <>
             {sessions.map((session, si) => (
               <View key={si}>
-                {/* Session header */}
-                <View style={styles.sessionHeader}>
-                  <Text style={styles.sessionName}>{session.name}</Text>
-                  <Text style={styles.sessionMeta}>{session.time} · {session.duration_minutes} min</Text>
-                </View>
-                {!!session.description && (
-                  <Text style={styles.sessionDesc}>{session.description}</Text>
-                )}
-
-                {/* Blocks */}
+                {/* Session card — header + blocks together */}
                 <View style={styles.sessionCard}>
+                  <View style={styles.sessionHeaderRow}>
+                    <Text style={styles.sessionName}>{session.name}</Text>
+                    <Text style={styles.sessionMeta}>{session.time} · {session.duration_minutes} min</Text>
+                  </View>
+                  {!!session.description && (
+                    <Text style={styles.sessionDesc}>{session.description}</Text>
+                  )}
                   {(session.blocks ?? []).map((block, bi) => (
                     <SectionBlock
                       key={bi}
                       label={block.block_name}
                       items={block.exercises}
-                      highlight={block.block_name.toLowerCase().includes('main')}
                     />
                   ))}
                 </View>
@@ -457,9 +454,8 @@ export default function HomeScreen() {
                   <Text style={styles.primaryBtnText}>SAVING...</Text>
                 </View>
               ) : (
-                /* done */
                 <View style={styles.donePanel}>
-                  <Text style={styles.doneText}>Session logged. Keep moving.</Text>
+                  <Text style={styles.doneText}>Session complete. Good work.</Text>
                 </View>
               )
             )}
@@ -532,36 +528,35 @@ const styles = StyleSheet.create({
   emptyBlock: { paddingHorizontal: 20, paddingVertical: 24 },
   emptyText: { color: GREY, fontSize: 15, textAlign: 'center' },
 
-  sessionHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline',
-    paddingHorizontal: 20, marginBottom: 6,
-  },
-  sessionName: { color: OFF_WHITE, fontSize: 16, fontWeight: '700', flex: 1 },
-  sessionMeta: { color: GREY, fontSize: 12 },
-  sessionDesc: { color: GREY, fontSize: 13, paddingHorizontal: 20, marginBottom: 12, lineHeight: 18 },
-
   sessionCard: {
     marginHorizontal: 16, backgroundColor: CARD_BG, borderRadius: 16, padding: 16,
-    gap: 16, marginBottom: 14,
+    gap: 14, marginBottom: 14,
   },
+  sessionHeaderRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline',
+  },
+  sessionName: { color: OFF_WHITE, fontSize: 15, fontWeight: '700', flex: 1 },
+  sessionMeta: { color: GREY, fontSize: 12 },
+  sessionDesc: { color: GREY, fontSize: 13, lineHeight: 18 },
+
   sectionBlock: { gap: 8 },
   sectionLabel: {
     color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase',
   },
-  exRow: { borderLeftWidth: 3, paddingLeft: 10, gap: 2 },
-  exName: { color: OFF_WHITE, fontSize: 15, fontWeight: '600' },
+  exRow: { borderLeftWidth: 3, borderLeftColor: YELLOW, paddingLeft: 10, gap: 2 },
+  exName: { color: OFF_WHITE, fontSize: 14, fontWeight: '600' },
   exDetail: { color: GREY, fontSize: 13 },
 
   // Trial log card
   trialCard: {
-    marginHorizontal: 16, marginBottom: 14, backgroundColor: CARD_BG,
-    borderRadius: 16, padding: 16, gap: 12, borderLeftWidth: 3, borderLeftColor: YELLOW,
+    marginHorizontal: 16, marginBottom: 14, backgroundColor: '#111800',
+    borderRadius: 12, padding: 14, gap: 10, borderLeftWidth: 3, borderLeftColor: YELLOW,
   },
-  trialLabel: { color: OFF_WHITE, fontSize: 14, fontWeight: '600' },
+  trialLabel: { color: OFF_WHITE, fontSize: 13, fontWeight: '600' },
   trialInput: {
-    backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a',
-    borderRadius: 10, paddingHorizontal: 16, paddingVertical: 14,
-    color: OFF_WHITE, fontSize: 20, fontWeight: '700',
+    backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#2a2a2a',
+    borderRadius: 8, paddingHorizontal: 14, paddingVertical: 12,
+    color: OFF_WHITE, fontSize: 18, fontWeight: '700',
   },
   trialConfirm: { color: YELLOW, fontSize: 14, fontWeight: '600' },
 
