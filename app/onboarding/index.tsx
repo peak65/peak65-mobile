@@ -63,7 +63,7 @@ const BASE_STEPS: StepKey[] = ['firstName', 'lastName', 'age', 'gender', 'goal']
 
 const HYROX_STEPS: StepKey[] = [
   'hyroxExperience', 'hyroxDivision', 'hyroxGoalTime', 'raceDate',
-  'stationWeaknesses', 'weeklyMileage', 'hyroxEquipment',
+  'stationWeaknesses', 'trainingHistory', 'weeklyMileage', 'hyroxEquipment',
 ];
 
 const GENERAL_STEPS: StepKey[] = [
@@ -91,7 +91,7 @@ const LOADING_MESSAGES = [
 function getSteps(goal: string): StepKey[] {
   if (goal === 'hyrox')           return [...BASE_STEPS, ...HYROX_STEPS,   ...SHARED_STEPS];
   if (goal === 'general_fitness') return [...BASE_STEPS, ...GENERAL_STEPS, ...SHARED_STEPS];
-  return [...BASE_STEPS, ...HYROX_STEPS, ...SHARED_STEPS]; // use max length before goal is picked
+  return [...BASE_STEPS, ...HYROX_STEPS, ...SHARED_STEPS]; // max-length estimate before goal is picked
 }
 
 function isStepComplete(key: StepKey, d: OnboardingData): boolean {
@@ -618,7 +618,7 @@ export default function OnboardingScreen({ navigation }: Props) {
           'Which Hyrox stations are your biggest weakness?',
           'station_weaknesses',
           ['Ski Erg', 'Row Erg', 'Sled Push', 'Sled Pull',
-           'Burpee Broad Jumps', 'Farmers Carry', 'Sandbag Lunges', 'Wall Balls', 'Running'],
+           'Burpee Broad Jumps', 'Farmers Carry', 'Sandbag Lunges', 'Wall Balls', 'Unsure'],
         );
 
       case 'hyroxEquipment':
