@@ -114,11 +114,6 @@ export default function ProgramScreen() {
         .eq('user_id', authData.user.id),
     ]);
 
-    console.log('[program] userId:', authData.user.id);
-    console.log('[program] progRes.data:', JSON.stringify(progRes.data));
-    console.log('[program] progRes.error:', JSON.stringify(progRes.error));
-    console.log('[program] days field:', JSON.stringify((progRes.data as any)?.days));
-
     const prog = progRes.data as Program | null;
     setProgram(prog);
 
@@ -161,7 +156,7 @@ export default function ProgramScreen() {
       ) + 1
     : 1) + weekOffset;
 
-  const days = program?.days ?? [];
+  const days = program?.program_data?.days ?? [];
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

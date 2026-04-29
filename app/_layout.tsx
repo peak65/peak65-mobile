@@ -44,7 +44,9 @@ export type Program = {
   user_id: string;
   created_at: string;
   week_start_date: string;
-  days: ProgramDay[];
+  program_data: {
+    days: ProgramDay[];
+  };
 };
 
 // ─── Nav param lists ──────────────────────────────────────────────────────────

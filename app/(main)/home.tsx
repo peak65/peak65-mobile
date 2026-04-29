@@ -145,9 +145,9 @@ export default function HomeScreen() {
     const prog = programRes.data as Program | null;
     setProgram(prog);
 
-    if (prog?.days && prog.week_start_date) {
+    if (prog?.program_data?.days && prog.week_start_date) {
       const idx = todayDayIndex(prog.week_start_date);
-      setTodayDay(prog.days.find(d => d.day_index === idx) ?? prog.days[idx] ?? null);
+      setTodayDay(prog.program_data.days.find(d => d.day_index === idx) ?? prog.program_data.days[idx] ?? null);
     }
 
     const logs = logsRes.data ?? [];
