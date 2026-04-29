@@ -37,6 +37,7 @@ type OnboardingData = {
   equipment_access: string[];
   // General fitness-specific
   current_training_days: string;
+  training_history: string;
   body_weight: string;
   weight_unit: 'lbs' | 'kg';
   body_fat_range: string;
@@ -52,7 +53,7 @@ type StepKey =
   | 'firstName' | 'lastName' | 'age' | 'gender' | 'goal'
   | 'hyroxExperience' | 'hyroxDivision' | 'hyroxGoalTime' | 'raceDate'
   | 'stationWeaknesses' | 'weeklyMileage' | 'hyroxEquipment'
-  | 'generalTrainingDays' | 'generalEquipment'
+  | 'generalTrainingDays' | 'trainingHistory' | 'generalEquipment'
   | 'bodyWeight' | 'bodyFatRange' | 'fitnessGoal'
   | 'restDays' | 'restDayPreferences' | 'sessionLength' | 'availability';
 
@@ -66,7 +67,7 @@ const HYROX_STEPS: StepKey[] = [
 ];
 
 const GENERAL_STEPS: StepKey[] = [
-  'generalTrainingDays', 'weeklyMileage', 'generalEquipment',
+  'generalTrainingDays', 'trainingHistory', 'weeklyMileage', 'generalEquipment',
   'bodyWeight', 'bodyFatRange', 'fitnessGoal',
 ];
 
@@ -111,6 +112,7 @@ function isStepComplete(key: StepKey, d: OnboardingData): boolean {
     case 'weeklyMileage':       return d.weekly_mileage !== '';
     case 'hyroxEquipment':      return d.equipment_access.length > 0;
     case 'generalTrainingDays': return d.current_training_days !== '';
+    case 'trainingHistory':     return d.training_history !== '';
     case 'generalEquipment':    return d.equipment_access.length > 0;
     case 'bodyWeight': {
       const w = parseFloat(d.body_weight);
@@ -140,9 +142,26 @@ const INITIAL: OnboardingData = {
   hyrox_experience: '', hyrox_division: '', hyrox_goal_time: '',
   race_date: null, station_weaknesses: [], weekly_mileage: '',
   equipment_access: [], current_training_days: '',
+  training_history: '',
   body_weight: '', weight_unit: 'lbs', body_fat_range: '', fitness_goal: '',
   rest_days: '', rest_day_preferences: [], session_length: '', availability: '',
 };
+
+// ─── Fitness level derivation ─────────────────────────────────────────────────
+
+function deriveFitnessLevel(
+  trainingDays: string,
+  weeklyMileage: string,
+  trainingHistory: string,
+): 'beginner' | 'intermediate' | 'advanced' {
+  if (trainingHistory === 'Less than 6 months') return 'beginner';
+  if (trainingDays === '1-2 days' && (weeklyMileage === '0' || weeklyMileage === '1-10')) return 'beginner';
+  if (
+    trainingHistory === '2+ years' &&
+    (trainingDays === '5+ days' || weeklyMileage === '21-30' || weeklyMileage === '30+')
+  ) return 'advanced';
+  return 'intermediate';
+}
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -318,6 +337,8 @@ export default function OnboardingScreen({ navigation }: Props) {
       weekly_mileage:        data.weekly_mileage          || null,
       equipment_access:      data.equipment_access.length > 0 ? data.equipment_access : null,
       current_training_days: data.current_training_days  || null,
+      training_history:      data.training_history       || null,
+      fitness_level:         deriveFitnessLevel(data.current_training_days, data.weekly_mileage, data.training_history),
       body_weight:           data.body_weight ? parseFloat(data.body_weight) : null,
       weight_unit:           data.body_weight ? data.weight_unit : null,
       body_fat_range:        data.body_fat_range          || null,
@@ -618,6 +639,17 @@ export default function OnboardingScreen({ navigation }: Props) {
             { label: '1-2 days', value: '1-2 days' },
             { label: '3-4 days', value: '3-4 days' },
             { label: '5+ days',  value: '5+ days' },
+          ],
+        );
+
+      case 'trainingHistory':
+        return renderSingleSelect(
+          'How long have you been training consistently?',
+          'training_history',
+          [
+            { label: 'Less than 6 months', value: 'Less than 6 months' },
+            { label: '6 months – 2 years', value: '6 months – 2 years' },
+            { label: '2+ years',           value: '2+ years' },
           ],
         );
 
