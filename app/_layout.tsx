@@ -6,6 +6,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from '../lib/supabase';
+import { detectCandidates } from '../lib/sessionMatcher';
 import LoginScreen from './auth/login';
 import SignupScreen from './auth/signup';
 import OnboardingScreen from './onboarding/index';
@@ -14,6 +15,8 @@ import HomeScreen from './(main)/home';
 import ProgramScreen from './(main)/program';
 import HistoryScreen from './(main)/history';
 import ProfileScreen from './(main)/profile';
+import LiveWorkoutScreen from './(main)/live-workout';
+import WaitingScreen from './(main)/waiting';
 
 // ─── Shared types used across screens ────────────────────────────────────────
 
@@ -22,12 +25,14 @@ export type ExerciseItem = {
   type?: 'strength' | 'cardio' | 'mobility';
   sets?: number;
   reps?: string;
+  rest?: string;
   rest_seconds?: number;
   distance?: string;
   zone?: string;
   duration?: string;
   note?: string;
   notes?: string;
+  superset_id?: string | null;
 };
 
 export type SessionBlock = {
@@ -41,6 +46,9 @@ export type ProgramSession = {
   duration_minutes: number;
   description: string;
   blocks: SessionBlock[];
+  log_result?: boolean;
+  log_label?: string;
+  log_field?: string;
 };
 
 export type ProgramDay = {
@@ -61,6 +69,7 @@ export type Program = {
   user_id: string;
   created_at: string;
   week_start_date: string;
+  week_number: number;
   program_data: {
     days: ProgramDay[];
   };
@@ -77,6 +86,8 @@ export type MainStackParamList = {
   Onboarding: undefined;
   Generating: undefined;
   Tabs: undefined;
+  LiveWorkout: { sessionJson: string; programId: string; weekNumber: number; dayName: string };
+  Waiting: undefined;
 };
 
 export type TabParamList = {
@@ -142,9 +153,11 @@ function AuthNavigator() {
 function MainNavigator({ initialRoute }: { initialRoute: keyof MainStackParamList }) {
   return (
     <MainStack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
-      <MainStack.Screen name="Onboarding" component={OnboardingScreen} />
-      <MainStack.Screen name="Generating" component={GeneratingScreen} />
-      <MainStack.Screen name="Tabs"       component={MainTabs} />
+      <MainStack.Screen name="Onboarding"   component={OnboardingScreen} />
+      <MainStack.Screen name="Generating"   component={GeneratingScreen} />
+      <MainStack.Screen name="Tabs"         component={MainTabs} />
+      <MainStack.Screen name="LiveWorkout"  component={LiveWorkoutScreen} />
+      <MainStack.Screen name="Waiting"      component={WaitingScreen} />
     </MainStack.Navigator>
   );
 }
@@ -165,6 +178,19 @@ async function resolveAppState(session: Session | null): Promise<AppState> {
   console.log('[resolveAppState] userId:', session.user.id);
   console.log('[resolveAppState] profile:', JSON.stringify(profile));
   console.log('[resolveAppState] profileError:', JSON.stringify(profileError));
+
+  // Profile query errored — session is likely stale or DB access was denied.
+  if (profileError) {
+    await supabase.auth.signOut();
+    return 'unauthenticated';
+  }
+
+  // Verify the user still exists in Supabase Auth (catches deleted-user cached sessions).
+  const { error: userError } = await supabase.auth.getUser();
+  if (userError) {
+    await supabase.auth.signOut();
+    return 'unauthenticated';
+  }
 
   if (!profile?.first_name) return 'onboarding';
 
@@ -198,7 +224,11 @@ export default function RootLayout() {
         // so the navigator unmounts cleanly before the new route is determined.
         if (event !== 'INITIAL_SESSION') setAppState('loading');
 
-        setAppState(await resolveAppState(session));
+        const newState = await resolveAppState(session);
+        setAppState(newState);
+        if (newState === 'authenticated' && session?.user?.id) {
+          detectCandidates(session.user.id).catch(() => {});
+        }
       }
     );
 
