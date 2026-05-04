@@ -15,6 +15,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList } from '../_layout';
+import SliderWithScrollLock from '../../components/SliderWithScrollLock';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,9 @@ type OnboardingData = {
   last_name: string;
   age: string;
   gender: string;
+  preferred_units: 'imperial' | 'metric';
+  height_cm: number;   // always stored as cm regardless of display units
+  weight_kg: number;   // always stored as kg regardless of display units
   goal: 'hyrox' | 'general_fitness' | '';
   // Hyrox-specific
   hyrox_experience: string;
@@ -50,7 +54,9 @@ type OnboardingData = {
 };
 
 type StepKey =
-  | 'firstName' | 'lastName' | 'age' | 'gender' | 'goal'
+  | 'firstName' | 'lastName' | 'age' | 'gender'
+  | 'preferredUnits' | 'height' | 'weight'
+  | 'goal'
   | 'hyroxExperience' | 'hyroxDivision' | 'hyroxGoalTime' | 'raceDate'
   | 'stationWeaknesses' | 'weeklyMileage' | 'hyroxEquipment'
   | 'generalTrainingDays' | 'trainingHistory' | 'generalEquipment'
@@ -59,7 +65,11 @@ type StepKey =
 
 // ─── Step Definitions ─────────────────────────────────────────────────────────
 
-const BASE_STEPS: StepKey[] = ['firstName', 'lastName', 'age', 'gender', 'goal'];
+const BASE_STEPS: StepKey[] = [
+  'firstName', 'lastName', 'age', 'gender',
+  'preferredUnits', 'height', 'weight',
+  'goal',
+];
 
 const HYROX_STEPS: StepKey[] = [
   'hyroxExperience', 'hyroxDivision', 'hyroxGoalTime', 'raceDate',
@@ -103,6 +113,9 @@ function isStepComplete(key: StepKey, d: OnboardingData): boolean {
       return !isNaN(n) && n >= 13 && n <= 99;
     }
     case 'gender':              return d.gender !== '';
+    case 'preferredUnits':      return true; // always has a value (defaults to 'imperial')
+    case 'height':              return d.height_cm > 0;
+    case 'weight':              return d.weight_kg > 0;
     case 'goal':                return d.goal !== '';
     case 'hyroxExperience':     return d.hyrox_experience !== '';
     case 'hyroxDivision':       return d.hyrox_division !== '';
@@ -128,6 +141,21 @@ function isStepComplete(key: StepKey, d: OnboardingData): boolean {
   }
 }
 
+// ─── Unit formatting helpers ──────────────────────────────────────────────────
+
+function formatHeightDisplay(heightCm: number, imperial: boolean): string {
+  if (!imperial) return `${Math.round(heightCm)} cm`;
+  const totalInches = Math.round(heightCm / 2.54);
+  const feet = Math.floor(totalInches / 12);
+  const inches = totalInches % 12;
+  return `${feet}' ${inches}"`;
+}
+
+function formatWeightDisplay(weightKg: number, imperial: boolean): string {
+  if (!imperial) return `${Math.round(weightKg)} kg`;
+  return `${Math.round(weightKg / 0.453592)} lb`;
+}
+
 // ─── Colours ──────────────────────────────────────────────────────────────────
 
 const YELLOW    = '#e8ff47';
@@ -137,8 +165,15 @@ const GREY      = '#8a877f';
 
 // ─── Initial state ────────────────────────────────────────────────────────────
 
+const DEFAULT_HEIGHT_CM = 173; // ~5'8"
+const DEFAULT_WEIGHT_KG = 75;  // ~165 lb
+
 const INITIAL: OnboardingData = {
-  first_name: '', last_name: '', age: '', gender: '', goal: '',
+  first_name: '', last_name: '', age: '', gender: '',
+  preferred_units: 'imperial',
+  height_cm: DEFAULT_HEIGHT_CM,
+  weight_kg: DEFAULT_WEIGHT_KG,
+  goal: '',
   hyrox_experience: '', hyrox_division: '', hyrox_goal_time: '',
   race_date: null, station_weaknesses: [], weekly_mileage: '',
   equipment_access: [], current_training_days: '',
@@ -173,6 +208,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   const [apiError, setApiError]       = useState(false);
   const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
   const [androidPickerOpen, setAndroidPickerOpen] = useState(false);
+  const [isSliding, setIsSliding]     = useState(false);
 
   const steps          = getSteps(data.goal);
   const totalSteps     = steps.length;
@@ -328,6 +364,9 @@ export default function OnboardingScreen({ navigation }: Props) {
       last_name:             data.last_name,
       age:                   parseInt(data.age, 10),
       gender:                data.gender,
+      preferred_units:       data.preferred_units,
+      height_cm:             Math.round(data.height_cm),
+      weight_kg:             Math.round(data.weight_kg * 10) / 10,
       goal:                  data.goal,
       hyrox_experience:      data.hyrox_experience      || null,
       hyrox_division:        data.hyrox_division         || null,
@@ -353,6 +392,65 @@ export default function OnboardingScreen({ navigation }: Props) {
     console.log('[onboarding] upsert error:', JSON.stringify(upsertError));
 
     setSaving(false);
+
+    // Check for a pending or already-accepted elite invite matching this email.
+    // Guard against duplicate coach_athletes rows if the web flow already linked them.
+    const userEmail = authData.user.email;
+    if (userEmail) {
+      const { data: existingLink } = await supabase
+        .from('coach_athletes')
+        .select('id')
+        .eq('athlete_id', authData.user.id)
+        .maybeSingle();
+
+      if (!existingLink) {
+        const { data: invite } = await supabase
+          .from('elite_invites')
+          .select('*')
+          .eq('email', userEmail)
+          .in('status', ['pending', 'accepted'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (invite) {
+          await Promise.all([
+            supabase.from('coach_athletes').insert({
+              coach_id:   invite.coach_id,
+              athlete_id: authData.user.id,
+              tier:       invite.tier ?? 'elite',
+              status:     'active',
+            }),
+            supabase.from('profiles').update({
+              tier:           invite.tier ?? 'elite',
+              known_zones:    invite.known_zones ?? null,
+              program_status: 'awaiting_coach',
+            }).eq('id', authData.user.id),
+            supabase.from('elite_invites').update({
+              status:     'accepted',
+              athlete_id: authData.user.id,
+            }).eq('id', invite.id),
+          ]);
+          console.log('[invite] linked athlete to coach via invite:', invite.id);
+        }
+      }
+    }
+
+    // Elite athletes are coached manually — skip AI generation
+    const { data: freshProfile } = await supabase
+      .from('profiles')
+      .select('tier')
+      .eq('id', authData.user.id)
+      .maybeSingle();
+
+    if ((freshProfile as any)?.tier === 'elite') {
+      await supabase.from('profiles')
+        .update({ program_status: 'awaiting_coach' })
+        .eq('id', authData.user.id);
+      navigation.replace('Waiting');
+      return;
+    }
+
     await callGenerateAssessment();
   }
 
@@ -568,9 +666,91 @@ export default function OnboardingScreen({ navigation }: Props) {
 
       case 'gender':
         return renderSingleSelect('What is your gender?', 'gender', [
-          { label: 'Male',   value: 'Male' },
-          { label: 'Female', value: 'Female' },
+          { label: 'Male',   value: 'male' },
+          { label: 'Female', value: 'female' },
         ]);
+
+      case 'preferredUnits':
+        return (
+          <View style={styles.stepContent}>
+            {renderLabel('Which units do you prefer?')}
+            <Text style={styles.sublabel}>We'll display your data in your preferred units</Text>
+            {(['imperial', 'metric'] as const).map(unit => (
+              <TouchableOpacity
+                key={unit}
+                style={[styles.option, data.preferred_units === unit && styles.optionSelected]}
+                onPress={() => setData(prev => ({ ...prev, preferred_units: unit }))}
+              >
+                <Text style={[styles.optionText, data.preferred_units === unit && styles.optionTextSelected]}>
+                  {unit === 'imperial' ? 'Imperial  (lb, ft / in)' : 'Metric  (kg, cm)'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        );
+
+      case 'height': {
+        const imp = data.preferred_units === 'imperial';
+        // Slider operates in display units; store converts back to cm
+        const displayVal = imp
+          ? Math.round(data.height_cm / 2.54)   // cm → whole inches
+          : Math.round(data.height_cm);
+        const sliderMin = imp ? 54 : 137;        // 4'6" or 137 cm
+        const sliderMax = imp ? 84 : 213;        // 7'0" or 213 cm
+        return (
+          <View style={styles.stepContent}>
+            {renderLabel("What's your height?")}
+            <Text style={styles.sliderValueText}>
+              {formatHeightDisplay(data.height_cm, imp)}
+            </Text>
+            <SliderWithScrollLock
+              value={displayVal}
+              min={sliderMin}
+              max={sliderMax}
+              onChange={v => setData(prev => ({
+                ...prev,
+                height_cm: imp ? Math.round(v * 2.54) : v,
+              }))}
+              onScrollLockChange={setIsSliding}
+            />
+            <View style={styles.sliderRangeRow}>
+              <Text style={styles.sliderRangeText}>{imp ? "4' 6\"" : '137 cm'}</Text>
+              <Text style={styles.sliderRangeText}>{imp ? "7' 0\"" : '213 cm'}</Text>
+            </View>
+          </View>
+        );
+      }
+
+      case 'weight': {
+        const imp = data.preferred_units === 'imperial';
+        const displayVal = imp
+          ? Math.round(data.weight_kg / 0.453592)  // kg → whole lbs
+          : Math.round(data.weight_kg);
+        const sliderMin = imp ? 80 : 36;
+        const sliderMax = imp ? 350 : 159;
+        return (
+          <View style={styles.stepContent}>
+            {renderLabel("What's your current weight?")}
+            <Text style={styles.sliderValueText}>
+              {formatWeightDisplay(data.weight_kg, imp)}
+            </Text>
+            <SliderWithScrollLock
+              value={displayVal}
+              min={sliderMin}
+              max={sliderMax}
+              onChange={v => setData(prev => ({
+                ...prev,
+                weight_kg: imp ? Math.round(v * 0.453592 * 10) / 10 : v,
+              }))}
+              onScrollLockChange={setIsSliding}
+            />
+            <View style={styles.sliderRangeRow}>
+              <Text style={styles.sliderRangeText}>{imp ? '80 lb' : '36 kg'}</Text>
+              <Text style={styles.sliderRangeText}>{imp ? '350 lb' : '159 kg'}</Text>
+            </View>
+          </View>
+        );
+      }
 
       case 'goal':
         return renderSingleSelect("What's your main goal?", 'goal', [
@@ -745,7 +925,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       case 'availability':
         return renderSingleSelect('When are you available to train?', 'availability', [
           { label: 'Once a day',            value: 'once' },
-          { label: 'Twice a day (AM + PM)', value: 'twice' },
+          { label: 'Twice a day (AM + PM)', value: 'both' },
         ]);
 
       default:
@@ -817,6 +997,7 @@ export default function OnboardingScreen({ navigation }: Props) {
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            scrollEnabled={!isSliding}
           >
             {renderCurrentStep()}
           </ScrollView>
@@ -978,6 +1159,25 @@ const styles = StyleSheet.create({
   },
   multiOptions: {
     gap: 10,
+  },
+
+  // Slider display
+  sliderValueText: {
+    color: OFF_WHITE,
+    fontSize: 52,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: -1,
+  },
+  sliderRangeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  sliderRangeText: {
+    color: GREY,
+    fontSize: 12,
   },
 
   // Body weight unit toggle
