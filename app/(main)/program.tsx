@@ -6,9 +6,7 @@ import {
   StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Calendar, Check,
-} from 'lucide-react-native';
+import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import type { Program, ProgramDay, ProgramSession, MainStackParamList, ExerciseItem } from '../_layout';
 import {
@@ -126,14 +124,14 @@ function CircuitBlock({ members, rounds, rest }: {
             onPress={() => setCurrentRound(r => Math.max(1, r - 1))}
             style={[styles.circuitRoundBtn, currentRound === 1 && styles.circuitRoundBtnDone]}
           >
-            <ChevronLeft color={Colors.accent} size={16} strokeWidth={2} />
+            <Feather name="chevron-left" color={Colors.accent} size={16} />
           </TouchableOpacity>
           <Text style={styles.circuitRoundText}>Round {currentRound} / {rounds}</Text>
           <TouchableOpacity
             onPress={() => setCurrentRound(r => Math.min(rounds, r + 1))}
             style={[styles.circuitRoundBtn, currentRound === rounds && styles.circuitRoundBtnDone]}
           >
-            <ChevronRight color={Colors.accent} size={16} strokeWidth={2} />
+            <Feather name="chevron-right" color={Colors.accent} size={16} />
           </TouchableOpacity>
         </View>
       </View>
@@ -831,13 +829,13 @@ function DayCard({
       >
         <View style={styles.dayCardLeft}>
           <Text style={[styles.dayName, isToday && { color: Colors.accent }]}>{day.day}</Text>
-          {isComplete && <Check color={Colors.green} size={14} strokeWidth={2.5} style={{ marginLeft: 6 }} />}
+          {isComplete && <Feather name="check" color={Colors.green} size={14} style={{ marginLeft: 6 }} />}
         </View>
         <View style={styles.dayCardRight}>
           <Text style={styles.sessionType}>{day.type}</Text>
           {expanded
-            ? <ChevronUp color={Colors.textSecondary} size={16} strokeWidth={1.5} />
-            : <ChevronDown color={Colors.textSecondary} size={16} strokeWidth={1.5} />}
+            ? <Feather name="chevron-up" color={Colors.textSecondary} size={16} />
+            : <Feather name="chevron-down" color={Colors.textSecondary} size={16} />}
         </View>
       </TouchableOpacity>
 
@@ -1171,7 +1169,7 @@ export default function ProgramScreen() {
           )}
           {nextWeekReady && !generatingNextWeek && activeProgram && allPrograms.some(p => p.week_number === activeProgram.week_number + 1) && (
             <View style={[styles.nextWeekBanner, styles.nextWeekBannerReady]}>
-              <Calendar color={Colors.green} size={22} strokeWidth={1.5} style={{ marginRight: 12 }} />
+              <Feather name="calendar" color={Colors.green} size={22} style={{ marginRight: 12 }} />
               <View>
                 <Text style={[styles.nextWeekTitle, { color: Colors.green }]}>
                   Week {activeProgram.week_number + 1} is ready.
@@ -1187,7 +1185,7 @@ export default function ProgramScreen() {
               disabled={!canGoBack}
               style={styles.weekArrow}
             >
-              <ChevronLeft color={!canGoBack ? '#333' : Colors.textPrimary} size={28} strokeWidth={1.5} />
+              <Feather name="chevron-left" color={!canGoBack ? '#333' : Colors.textPrimary} size={28} />
             </TouchableOpacity>
             <Text style={styles.weekLabel}>Week {displayWeekNum}</Text>
             <TouchableOpacity
@@ -1195,7 +1193,7 @@ export default function ProgramScreen() {
               disabled={!canGoForward}
               style={styles.weekArrow}
             >
-              <ChevronRight color={!canGoForward ? '#333' : Colors.textPrimary} size={28} strokeWidth={1.5} />
+              <Feather name="chevron-right" color={!canGoForward ? '#333' : Colors.textPrimary} size={28} />
             </TouchableOpacity>
           </View>
 

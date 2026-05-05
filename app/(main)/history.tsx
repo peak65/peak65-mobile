@@ -4,7 +4,7 @@ import {
   StyleSheet, ActivityIndicator, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { X, ChevronRight } from 'lucide-react-native';
+import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { Colors, Fonts } from '../../lib/theme';
 
@@ -187,7 +187,7 @@ function SessionDetailModal({
           <View style={styles.detailHeader}>
             <Text style={styles.detailTitle}>{getSessionTitle(log)}</Text>
             <TouchableOpacity onPress={onClose} style={styles.detailCloseBtn}>
-              <X color={Colors.textSecondary} size={20} strokeWidth={1.5} />
+              <Feather name="x" color={Colors.textSecondary} size={20} />
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
@@ -254,7 +254,7 @@ function WorkoutDetailModal({
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.detailCloseBtn}>
-              <X color={Colors.textSecondary} size={20} strokeWidth={1.5} />
+              <Feather name="x" color={Colors.textSecondary} size={20} />
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
@@ -561,7 +561,7 @@ export default function HistoryScreen() {
                               </Text>
                             </View>
                           )}
-                          <ChevronRight color={Colors.textSecondary} size={18} strokeWidth={1.5} />
+                          <Feather name="chevron-right" color={Colors.textSecondary} size={18} />
                         </View>
                       </View>
                     </TouchableOpacity>
@@ -592,7 +592,7 @@ export default function HistoryScreen() {
                         <View style={styles.offProgramBadge}>
                           <Text style={styles.offProgramText}>OFF-PROGRAM</Text>
                         </View>
-                        <ChevronRight color={Colors.textSecondary} size={18} strokeWidth={1.5} />
+                        <Feather name="chevron-right" color={Colors.textSecondary} size={18} />
                       </View>
                     </View>
                   </TouchableOpacity>

@@ -18,7 +18,7 @@ import {
 } from '../../lib/whoopApi';
 import SliderInput from '../../components/SliderInput';
 import { Colors, Fonts } from '../../lib/theme';
-import { ChevronRight } from 'lucide-react-native';
+import { Feather } from '@expo/vector-icons';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -290,7 +290,7 @@ function SettingRow({
       <Text style={styles.settingLabel}>{label}</Text>
       <View style={styles.settingRight}>
         <Text style={styles.settingValue} numberOfLines={1}>{value || '—'}</Text>
-        {!!onPress && <ChevronRight color={Colors.textSecondary} size={16} strokeWidth={1.5} />}
+        {!!onPress && <Feather name="chevron-right" color={Colors.textSecondary} size={16} />}
       </View>
     </TouchableOpacity>
   );
@@ -1082,7 +1082,7 @@ export default function ProfileScreen() {
           <SettingRow label="Equipment" value={toStringArray(profile?.equipment_access).join(', ')} onPress={() => setPicker('equipment')} />
           <TouchableOpacity style={styles.updateProgramRow} onPress={() => (navigation as any).navigate('UpdateProgram')}>
             <Text style={styles.updateProgramText}>Update My Program</Text>
-            <ChevronRight color={Colors.accent} size={16} strokeWidth={1.5} />
+            <Feather name="chevron-right" color={Colors.accent} size={16} />
           </TouchableOpacity>
         </View>
 
@@ -1119,7 +1119,7 @@ export default function ProfileScreen() {
                      isConnected ? 'Connected ✓' : 'Connect'}
                   </Text>
                   {!isConnected && isIOS && !healthConnecting && (
-                    <ChevronRight color={Colors.textSecondary} size={16} strokeWidth={1.5} />
+                    <Feather name="chevron-right" color={Colors.textSecondary} size={16} />
                   )}
                 </View>
               </TouchableOpacity>
@@ -1146,7 +1146,7 @@ export default function ProfileScreen() {
                       {whoopConnecting ? 'Connecting...' : needsReconnect ? 'Reconnect needed' : isConnected ? 'Connected ✓' : 'Connect'}
                     </Text>
                     {(!isConnected || needsReconnect) && !whoopConnecting && (
-                      <ChevronRight color={Colors.textSecondary} size={16} strokeWidth={1.5} />
+                      <Feather name="chevron-right" color={Colors.textSecondary} size={16} />
                     )}
                   </View>
                 </TouchableOpacity>

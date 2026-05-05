@@ -9,7 +9,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList } from '../_layout';
 import { Colors, Fonts } from '../../lib/theme';
-import { ArrowLeft } from 'lucide-react-native';
+import { Feather } from '@expo/vector-icons';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'UpdateProgram'>;
 
@@ -572,7 +572,7 @@ export default function UpdateProgramScreen({ navigation }: Props) {
           onPress={handleBack}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <ArrowLeft color={Colors.textPrimary} size={22} strokeWidth={1.5} />
+          <Feather name="arrow-left" color={Colors.textPrimary} size={22} />
         </TouchableOpacity>
         <View style={s.progressBarTrack}>
           <View style={[s.progressBarFill, { width: `${progress * 100}%` as any }]} />

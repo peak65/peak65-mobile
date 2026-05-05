@@ -11,7 +11,7 @@ import {
   BarlowCondensed_900Black,
 } from '@expo-google-fonts/barlow-condensed';
 import * as SplashScreen from 'expo-splash-screen';
-import { Home, ClipboardList, Clock, Activity, User } from 'lucide-react-native';
+import { Feather } from '@expo/vector-icons';
 
 import { supabase } from '../lib/supabase';
 import { detectCandidates } from '../lib/sessionMatcher';
@@ -121,12 +121,12 @@ const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const MainStack = createNativeStackNavigator<MainStackParamList>();
 const Tab       = createBottomTabNavigator<TabParamList>();
 
-const TAB_ICON_COMPONENTS: Record<keyof TabParamList, React.ComponentType<{ color: string; size: number; strokeWidth: number }>> = {
-  Home:    Home,
-  Program: ClipboardList,
-  History: Clock,
-  Coach:   Activity,
-  Profile: User,
+const TAB_ICON_NAMES: Record<keyof TabParamList, React.ComponentProps<typeof Feather>['name']> = {
+  Home:    'home',
+  Program: 'clipboard',
+  History: 'clock',
+  Coach:   'activity',
+  Profile: 'user',
 };
 
 // Context that makes isCoach available to MainTabs without prop drilling
@@ -139,7 +139,7 @@ function MainTabs() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => {
-        const IconComponent = TAB_ICON_COMPONENTS[route.name as keyof TabParamList];
+        const iconName = TAB_ICON_NAMES[route.name as keyof TabParamList];
         return {
           headerShown: false,
           tabBarStyle: {
@@ -152,7 +152,7 @@ function MainTabs() {
           tabBarActiveTintColor:   Colors.accent,
           tabBarInactiveTintColor: Colors.textSecondary,
           tabBarIcon: ({ color }) => (
-            <IconComponent color={color} size={24} strokeWidth={1.5} />
+            <Feather name={iconName} color={color} size={24} />
           ),
         };
       }}

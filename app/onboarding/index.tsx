@@ -17,7 +17,7 @@ import { supabase } from '../../lib/supabase';
 import type { MainStackParamList } from '../_layout';
 import SliderWithScrollLock from '../../components/SliderWithScrollLock';
 import { Colors, Fonts } from '../../lib/theme';
-import { ArrowLeft } from 'lucide-react-native';
+import { Feather } from '@expo/vector-icons';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -964,7 +964,7 @@ export default function OnboardingScreen({ navigation }: Props) {
           disabled={step === 0}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          {step > 0 && <ArrowLeft color={Colors.textPrimary} size={22} strokeWidth={1.5} />}
+          {step > 0 && <Feather name="arrow-left" color={Colors.textPrimary} size={22} />}
         </TouchableOpacity>
 
         <View style={styles.progressTrack}>

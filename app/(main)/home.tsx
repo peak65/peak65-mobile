@@ -6,9 +6,7 @@ import {
   StyleSheet, ActivityIndicator, Modal, AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  Flame, Footprints, Dumbbell, Heart, Moon, Activity, Calendar,
-} from 'lucide-react-native';
+import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import {
   getTodayHealthData, fetchTodayHealthData, fetchTodayWorkouts,
@@ -646,7 +644,7 @@ export default function HomeScreen() {
         <View style={styles.row}>
           <View style={[styles.miniCard, { flex: 1 }]}>
             <View style={styles.streakRow}>
-              <Flame color={Colors.accent} size={18} strokeWidth={1.5} />
+              <Feather name="zap" color={Colors.accent} size={18} />
               <Text style={styles.streakNum}>{streak}</Text>
             </View>
             <Text style={styles.miniCardLabel}>Day Streak</Text>
@@ -663,20 +661,20 @@ export default function HomeScreen() {
         <View style={styles.row}>
           {[
             {
-              Icon: Footprints,
+              icon: 'navigation' as const,
               label: 'Steps',
               val: hasWearable && healthData?.steps != null
                 ? healthData.steps.toLocaleString('en-US') : '--',
             },
             {
-              Icon: Dumbbell,
+              icon: 'zap' as const,
               label: 'Active',
               val: hasWearable && healthData?.activeCalories != null
                 ? `${healthData.activeCalories}` : '--',
             },
           ].map(s => (
             <View key={s.label} style={[styles.statCard, { flex: 1 }]}>
-              <s.Icon color={Colors.textSecondary} size={20} strokeWidth={1.5} />
+              <Feather name={s.icon} color={Colors.textSecondary} size={20} />
               <Text style={styles.statVal}>{s.val}</Text>
               <Text style={styles.statLabel}>{s.label}</Text>
               {!hasWearable && (
@@ -691,7 +689,7 @@ export default function HomeScreen() {
             if (whoopTotal != null) {
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
-                  <Flame color={Colors.textSecondary} size={20} strokeWidth={1.5} />
+                  <Feather name="zap" color={Colors.textSecondary} size={20} />
                   <Text style={styles.statVal}>{whoopTotal}</Text>
                   <Text style={styles.statLabel}>Total</Text>
                   <Text style={styles.statSub}>Whoop + Est.</Text>
@@ -712,7 +710,7 @@ export default function HomeScreen() {
             if (!healthConnected || projected == null) {
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
-                  <Flame color={Colors.textSecondary} size={20} strokeWidth={1.5} />
+                  <Feather name="zap" color={Colors.textSecondary} size={20} />
                   <Text style={styles.statVal}>--</Text>
                   <Text style={styles.statLabel}>Total</Text>
                   {!healthConnected && <Text style={styles.statSub}>Connect Health</Text>}
@@ -721,7 +719,7 @@ export default function HomeScreen() {
             }
             return (
               <View style={[styles.statCard, { flex: 1 }]}>
-                <Flame color={Colors.textSecondary} size={20} strokeWidth={1.5} />
+                <Feather name="zap" color={Colors.textSecondary} size={20} />
                 <Text style={styles.statVal}>{projected}</Text>
                 <Text style={styles.statLabel}>Projected</Text>
                 {currentBurn != null && <Text style={styles.statSub}>{currentBurn} so far</Text>}
@@ -737,9 +735,9 @@ export default function HomeScreen() {
           const sleepR = selectSleepSource(readinessData);
           const rhrR   = selectRHRSource(readinessData);
           const tiles = [
-            { Icon: Heart,    label: 'HRV',   reading: hrvR,   unit: 'ms' },
-            { Icon: Moon,     label: 'Sleep', reading: sleepR, unit: 'h' },
-            { Icon: Activity, label: 'RHR',   reading: rhrR,   unit: 'bpm' },
+            { icon: 'heart' as const,    label: 'HRV',   reading: hrvR,   unit: 'ms' },
+            { icon: 'moon' as const,     label: 'Sleep', reading: sleepR, unit: 'h' },
+            { icon: 'activity' as const, label: 'RHR',   reading: rhrR,   unit: 'bpm' },
           ] as const;
           return (
             <View style={styles.row}>
@@ -750,7 +748,7 @@ export default function HomeScreen() {
                   onPress={() => navigation.navigate('Profile')}
                   activeOpacity={0.75}
                 >
-                  <t.Icon color={Colors.textSecondary} size={20} strokeWidth={1.5} />
+                  <Feather name={t.icon} color={Colors.textSecondary} size={20} />
                   {t.reading.noWearable || t.reading.value == null ? (
                     <Text style={[styles.recoveryVal, { color: Colors.textSecondary }]}>--</Text>
                   ) : (
@@ -881,7 +879,7 @@ export default function HomeScreen() {
         )}
         {week2Ready && !generatingWeek2 && (
           <View style={[styles.week2Banner, styles.week2BannerReady]}>
-            <Calendar color={Colors.green} size={22} strokeWidth={1.5} style={{ marginRight: 10 }} />
+            <Feather name="calendar" color={Colors.green} size={22} style={{ marginRight: 10 }} />
             <View>
               <Text style={[styles.week2Title, { color: Colors.green }]}>Week 2 is ready.</Text>
               <Text style={styles.week2Sub}>Open the Program tab to view it.</Text>
