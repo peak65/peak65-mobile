@@ -5,8 +5,9 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
+import { MessageSquare } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
-import { Colors, Fonts } from '../../lib/theme';
+import { Colors } from '../../lib/theme';
 import { UnreadContext } from '../_layout';
 
 const API_BASE = 'https://peak65.vercel.app';
@@ -31,9 +32,9 @@ function formatDate(iso: string) {
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  if (d.toDateString() === today.toDateString()) return 'TODAY';
+  if (d.toDateString() === yesterday.toDateString()) return 'YESTERDAY';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase();
 }
 
 function buildItems(msgs: Msg[]): ListItem[] {
@@ -48,6 +49,11 @@ function buildItems(msgs: Msg[]): ListItem[] {
     items.push(m);
   }
   return items;
+}
+
+async function getAccessToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
 }
 
 export default function MessagesScreen() {
@@ -90,7 +96,10 @@ export default function MessagesScreen() {
 
   async function fetchMessages(uid: string, initial = false) {
     try {
-      const res = await fetch(`${API_BASE}/api/coach/messages?athleteId=${uid}`);
+      const token = await getAccessToken();
+      const res = await fetch(`${API_BASE}/api/coach/messages?athleteId=${uid}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (res.ok) {
         const json = await res.json();
         const list: Msg[] = Array.isArray(json) ? json : (json.messages ?? []);
@@ -98,7 +107,7 @@ export default function MessagesScreen() {
       }
     } catch {}
     if (initial) setLoading(false);
-    // mark coach messages as read
+    // mark incoming messages as read
     try {
       await supabase
         .from('messages')
@@ -120,10 +129,7 @@ export default function MessagesScreen() {
         if (userId) fetchMessages(userId, false);
       }, 10000);
       return () => {
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
+        if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
       };
     }, [userId])
   );
@@ -138,10 +144,14 @@ export default function MessagesScreen() {
     setSending(true);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
     try {
+      const token = await getAccessToken();
       const res = await fetch(`${API_BASE}/api/coach/send-message`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ athleteId: userId, senderId: userId, body }),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ athleteId: userId, body }),
       });
       if (!res.ok) throw new Error('send failed');
       await fetchMessages(userId, false);
@@ -181,13 +191,18 @@ export default function MessagesScreen() {
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
           ListEmptyComponent={
             <View style={s.empty}>
-              <Text style={s.emptyText}>No messages yet.</Text>
-              <Text style={s.emptySubText}>Start a conversation with your coach.</Text>
+              <MessageSquare color={Colors.textSecondary} size={36} strokeWidth={1.5} />
+              <Text style={s.emptyText}>No messages yet</Text>
+              <Text style={s.emptySubText}>Your coach will reach out soon.</Text>
             </View>
           }
           renderItem={({ item }) => {
             if ('kind' in item) {
-              return <View style={s.dateSep}><Text style={s.dateText}>{item.label}</Text></View>;
+              return (
+                <View style={s.dateSep}>
+                  <Text style={s.dateText}>{item.label}</Text>
+                </View>
+              );
             }
             const mine = item.sender_id === userId;
             return (
@@ -212,18 +227,13 @@ export default function MessagesScreen() {
             placeholder="Message your coach..."
             placeholderTextColor={Colors.textSecondary}
             multiline
-            returnKeyType="default"
           />
           <TouchableOpacity
-            style={s.sendBtn}
+            style={[s.sendBtn, (!input.trim() || sending) && s.sendBtnDisabled]}
             onPress={handleSend}
             disabled={!input.trim() || sending}
           >
-            <Feather
-              name="send"
-              size={20}
-              color={!input.trim() || sending ? Colors.textSecondary : Colors.accent}
-            />
+            <Feather name="send" size={18} color="#080808" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -239,23 +249,24 @@ const s = StyleSheet.create({
   headerTitle:       { color: Colors.textPrimary, fontSize: 17, fontWeight: '600' },
   listContent:       { padding: 16 },
   dateSep:           { alignItems: 'center', marginVertical: 12 },
-  dateText:          { color: Colors.textSecondary, fontSize: 12 },
-  bubbleRow:         { marginBottom: 6 },
+  dateText:          { color: Colors.textSecondary, fontSize: 10, fontWeight: '700', letterSpacing: 2 },
+  bubbleRow:         { marginBottom: 8 },
   bubbleRowRight:    { alignItems: 'flex-end' },
   bubbleRowLeft:     { alignItems: 'flex-start' },
-  bubble:            { maxWidth: '75%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
+  bubble:            { maxWidth: '75%', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
   bubbleMine:        { backgroundColor: Colors.accent, borderBottomRightRadius: 4 },
   bubbleTheirs:      { backgroundColor: Colors.nested, borderBottomLeftRadius: 4 },
-  bubbleText:        { fontSize: 15, lineHeight: 20 },
+  bubbleText:        { fontSize: 13, lineHeight: 18 },
   bubbleTextMine:    { color: '#080808' },
   bubbleTextTheirs:  { color: Colors.textPrimary },
-  timeText:          { color: Colors.textSecondary, fontSize: 11, marginTop: 2, marginHorizontal: 4 },
+  timeText:          { color: Colors.textSecondary, fontSize: 10, marginTop: 3, marginHorizontal: 2 },
   timeRight:         {},
   timeLeft:          {},
-  empty:             { alignItems: 'center', paddingTop: 80 },
-  emptyText:         { color: Colors.textPrimary, fontSize: 16, marginBottom: 4 },
-  emptySubText:      { color: Colors.textSecondary, fontSize: 13 },
-  compose:           { flexDirection: 'row', alignItems: 'flex-end', padding: 12, gap: 8, borderTopWidth: 1, borderTopColor: Colors.border },
-  textInput:         { flex: 1, backgroundColor: Colors.nested, color: Colors.textPrimary, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 120 },
-  sendBtn:           { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  empty:             { alignItems: 'center', paddingTop: 80, gap: 8 },
+  emptyText:         { color: Colors.textSecondary, fontSize: 14, marginTop: 4 },
+  emptySubText:      { color: Colors.textSecondary, fontSize: 12 },
+  compose:           { flexDirection: 'row', alignItems: 'flex-end', padding: 12, gap: 10, borderTopWidth: 1, borderTopColor: Colors.border },
+  textInput:         { flex: 1, backgroundColor: Colors.nested, color: Colors.textPrimary, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 16, paddingVertical: 10, fontSize: 13, maxHeight: 120 },
+  sendBtn:           { width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.accent, alignItems: 'center', justifyContent: 'center' },
+  sendBtnDisabled:   { opacity: 0.35 },
 });

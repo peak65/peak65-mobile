@@ -13,6 +13,17 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { Feather } from '@expo/vector-icons';
+import { MessageSquare } from 'lucide-react-native';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert:  true,
+    shouldShowBanner: true,
+    shouldShowList:   true,
+    shouldPlaySound:  true,
+    shouldSetBadge:   true,
+  }),
+});
 
 import { supabase } from '../lib/supabase';
 import { detectCandidates } from '../lib/sessionMatcher';
@@ -165,7 +176,10 @@ function MainTabs() {
           tabBarInactiveTintColor: Colors.textSecondary,
           tabBarIcon: ({ color }) => (
             <View>
-              <Feather name={iconName} color={color} size={24} />
+              {route.name === 'Messages'
+                ? <MessageSquare color={color} size={24} strokeWidth={1.5} />
+                : <Feather name={iconName} color={color} size={24} />
+              }
               {route.name === 'Messages' && hasUnread && (
                 <View style={{ position: 'absolute', top: 0, right: -4, width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.accent }} />
               )}
@@ -228,11 +242,17 @@ async function registerPushToken(userId: string) {
       : (await Notifications.requestPermissionsAsync()).status;
     if (finalStatus !== 'granted') return;
 
-    const { data: token } = await Notifications.getExpoPushTokenAsync();
+    const { data: tokenData } = await Notifications.getDevicePushTokenAsync();
+    const token = tokenData as string | undefined;
     if (!token) return;
 
-    await supabase.from('profiles').update({ push_token: token }).eq('id', userId);
-  } catch {}
+    await supabase
+      .from('profiles')
+      .update({ expo_push_token: token })
+      .eq('id', userId);
+  } catch (err) {
+    console.log('[registerPushToken] error:', err);
+  }
 }
 
 // ─── App state resolution ─────────────────────────────────────────────────────
