@@ -69,11 +69,11 @@ export function selectActiveCalorieSource(healthData: WearableHealthData): Weara
   const r = healthData.activeCalories;
   if (!r) return noData();
   const s = r.source;
+  if (matchSrc(s, 'whoop'))            return fromReading(r, 'high', 'Whoop');
   if (matchSrc(s, 'garmin'))           return fromReading(r, 'high', 'Garmin');
   if (matchSrc(s, 'coros'))            return fromReading(r, 'high', 'Coros');
   if (matchSrc(s, 'zepp', 'amazfit')) return fromReading(r, 'high', 'Zepp');
   if (matchSrc(s, 'polar'))            return fromReading(r, 'high', 'Polar');
-  if (matchSrc(s, 'whoop'))            return fromReading(r, 'high', 'Whoop');
   if (isAppleWatch(s))                 return fromReading(r, 'medium', 'Apple Watch');
   // iPhone or unknown — not a valid active calorie source
   return noData();
@@ -89,13 +89,13 @@ export function selectHRVSource(
   const r = healthData.hrv;
   if (r) {
     const s = r.source;
-    if (matchSrc(s, 'garmin'))           return fromReading(r, 'high', 'Garmin');
     if (matchSrc(s, 'whoop'))            return fromReading(r, 'high', 'Whoop');
+    if (matchSrc(s, 'garmin'))           return fromReading(r, 'high', 'Garmin');
     if (matchSrc(s, 'oura'))             return fromReading(r, 'high', 'Oura');
+    if (matchSrc(s, 'zepp', 'amazfit')) return fromReading(r, 'medium', 'Zepp');
     if (matchSrc(s, 'polar'))            return fromReading(r, 'high', 'Polar');
     if (matchSrc(s, 'coros'))            return fromReading(r, 'high', 'Coros');
     if (isAppleWatch(s))                 return fromReading(r, 'medium', 'Apple Watch');
-    if (matchSrc(s, 'zepp', 'amazfit')) return fromReading(r, 'medium', 'Zepp');
   }
   // Manual HRV fallback (Zepp users logging manually)
   const today = new Date().toISOString().slice(0, 10);
@@ -143,11 +143,10 @@ export function selectStepsSource(healthData: WearableHealthData): WearableReadi
   const r = healthData.steps;
   if (!r) return noData();
   const s = r.source;
+  if (matchSrc(s, 'whoop'))            return fromReading(r, 'high', 'Whoop');
   if (matchSrc(s, 'garmin'))           return fromReading(r, 'high', 'Garmin');
   if (matchSrc(s, 'coros'))            return fromReading(r, 'high', 'Coros');
-  if (matchSrc(s, 'whoop'))            return fromReading(r, 'high', 'Whoop');
   if (matchSrc(s, 'zepp', 'amazfit')) return fromReading(r, 'high', 'Zepp');
-  if (matchSrc(s, 'polar'))            return fromReading(r, 'medium', 'Polar');
   if (isAppleWatch(s))                 return fromReading(r, 'medium', 'Apple Watch');
   if (matchSrc(s, 'iphone'))          return fromReading(r, 'medium', 'iPhone'); // steps only
   return noData();

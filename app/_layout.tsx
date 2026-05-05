@@ -49,6 +49,8 @@ export type ExerciseItem = {
   circuit_id?: string | null;
   circuit_rounds?: number | null;
   circuit_rest?: string | null;
+  block_id?: string | null;
+  block_name?: string | null;
 };
 
 export type SessionBlock = {
@@ -335,6 +337,7 @@ class ErrorBoundary extends React.Component<
 export default function RootLayout() {
   const [appState, setAppState] = useState<AppState>('loading');
   const [isCoach, setIsCoach]   = useState(false);
+  const resolvingRef            = React.useRef(false);
 
   const [fontsLoaded] = useFonts({
     BarlowCondensed_700Bold,
@@ -358,12 +361,24 @@ export default function RootLayout() {
           // Token refresh doesn't change routing — skip to avoid remounting the navigator.
           if (event === 'TOKEN_REFRESHED') return;
 
+          // One resolve at a time — if a resolve is already in progress, drop the
+          // duplicate event (typically caused by rapid sign-in/sign-out races).
+          if (resolvingRef.current) return;
+          resolvingRef.current = true;
+
           // For INITIAL_SESSION the state is already 'loading' (initial useState),
           // so we don't need to set it again. For all other events reset to loading
           // so the navigator unmounts cleanly before the new route is determined.
           if (event !== 'INITIAL_SESSION') setAppState('loading');
 
+          const resolveStart = Date.now();
           const { state: newState, isCoach: newIsCoach } = await resolveAppState(session);
+
+          // 300ms minimum prevents a white flash when the splash transitions
+          // out before the JS bridge has finished painting the first frame.
+          const elapsed = Date.now() - resolveStart;
+          if (elapsed < 300) await new Promise(r => setTimeout(r, 300 - elapsed));
+
           setAppState(newState);
           setIsCoach(newIsCoach);
 
@@ -374,6 +389,8 @@ export default function RootLayout() {
         } catch (err) {
           console.log('[layout] auth handler error:', err);
           setAppState('unauthenticated');
+        } finally {
+          resolvingRef.current = false;
         }
       }
     );

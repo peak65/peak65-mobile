@@ -661,7 +661,7 @@ export default function HomeScreen() {
         <View style={styles.row}>
           {[
             {
-              icon: 'navigation' as const,
+              icon: 'trending-up' as const,
               label: 'Steps',
               val: hasWearable && healthData?.steps != null
                 ? healthData.steps.toLocaleString('en-US') : '--',
@@ -689,7 +689,7 @@ export default function HomeScreen() {
             if (whoopTotal != null) {
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
-                  <Feather name="zap" color={Colors.textSecondary} size={20} />
+                  <Feather name="target" color={Colors.textSecondary} size={20} />
                   <Text style={styles.statVal}>{whoopTotal}</Text>
                   <Text style={styles.statLabel}>Total</Text>
                   <Text style={styles.statSub}>Whoop + Est.</Text>
@@ -710,7 +710,7 @@ export default function HomeScreen() {
             if (!healthConnected || projected == null) {
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
-                  <Feather name="zap" color={Colors.textSecondary} size={20} />
+                  <Feather name="target" color={Colors.textSecondary} size={20} />
                   <Text style={styles.statVal}>--</Text>
                   <Text style={styles.statLabel}>Total</Text>
                   {!healthConnected && <Text style={styles.statSub}>Connect Health</Text>}
@@ -719,7 +719,7 @@ export default function HomeScreen() {
             }
             return (
               <View style={[styles.statCard, { flex: 1 }]}>
-                <Feather name="zap" color={Colors.textSecondary} size={20} />
+                <Feather name="target" color={Colors.textSecondary} size={20} />
                 <Text style={styles.statVal}>{projected}</Text>
                 <Text style={styles.statLabel}>Projected</Text>
                 {currentBurn != null && <Text style={styles.statSub}>{currentBurn} so far</Text>}
@@ -729,11 +729,12 @@ export default function HomeScreen() {
           })()}
         </View>
 
-        {/* Morning Readiness row — HRV | Sleep | RHR */}
-        {(healthConnected || storedProfile?.whoop_connected === true) && readinessData && (() => {
-          const hrvR   = selectHRVSource(readinessData, storedProfile ?? {});
-          const sleepR = selectSleepSource(readinessData);
-          const rhrR   = selectRHRSource(readinessData);
+        {/* Morning Readiness row — HRV | Sleep | RHR — always rendered */}
+        {(() => {
+          const hasWearableData = (healthConnected || storedProfile?.whoop_connected === true) && !!readinessData;
+          const hrvR   = hasWearableData ? selectHRVSource(readinessData!, storedProfile ?? {}) : null;
+          const sleepR = hasWearableData ? selectSleepSource(readinessData!) : null;
+          const rhrR   = hasWearableData ? selectRHRSource(readinessData!) : null;
           const tiles = [
             { icon: 'heart' as const,    label: 'HRV',   reading: hrvR,   unit: 'ms' },
             { icon: 'moon' as const,     label: 'Sleep', reading: sleepR, unit: 'h' },
@@ -749,18 +750,20 @@ export default function HomeScreen() {
                   activeOpacity={0.75}
                 >
                   <Feather name={t.icon} color={Colors.textSecondary} size={20} />
-                  {t.reading.noWearable || t.reading.value == null ? (
-                    <Text style={[styles.recoveryVal, { color: Colors.textSecondary }]}>--</Text>
-                  ) : (
+                  {t.reading && !t.reading.noWearable && t.reading.value != null ? (
                     <Text style={styles.recoveryVal}>
                       {t.label === 'Sleep'
                         ? t.reading.value.toFixed(1)
                         : Math.round(t.reading.value as number)}{t.unit}
                     </Text>
+                  ) : (
+                    <Text style={[styles.recoveryVal, { color: Colors.textSecondary }]}>--</Text>
                   )}
                   <Text style={styles.statLabel}>{t.label}</Text>
-                  {!t.reading.noWearable && t.reading.source ? (
+                  {t.reading && !t.reading.noWearable && t.reading.source ? (
                     <Text style={styles.readinessSource}>{t.reading.source}</Text>
+                  ) : !hasWearableData ? (
+                    <Text style={styles.connectWearable}>Connect wearable</Text>
                   ) : null}
                 </TouchableOpacity>
               ))}
@@ -945,7 +948,8 @@ const styles = StyleSheet.create({
   statLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600' },
   statSub:  { color: Colors.textSecondary, fontSize: 10 },
   statSync: { color: Colors.textSecondary, fontSize: 9, marginTop: 1 },
-  readinessSource: { color: Colors.textSecondary, fontSize: 9, marginTop: 1, textAlign: 'center' },
+  readinessSource:  { color: Colors.textSecondary, fontSize: 9, marginTop: 1, textAlign: 'center' },
+  connectWearable:  { color: Colors.textSecondary, fontSize: 11, textAlign: 'center', marginTop: 1 },
 
   // Today section header
   todayHeader: {

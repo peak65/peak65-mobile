@@ -11,6 +11,8 @@ import {
   TextInput, Modal, Vibration, Alert, KeyboardAvoidingView,
   Platform, StatusBar,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { Audio } from 'expo-av';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -61,9 +63,12 @@ type MetconRound = { round: number; completedAt: number };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function parseRestSeconds(rest: string | undefined, defaultSecs = 90): number {
+function parseRestSeconds(rest: string | undefined, defaultSecs = 60): number {
   if (!rest) return defaultSecs;
-  const s = rest.toLowerCase();
+  const s = rest.toLowerCase().trim();
+  if (s.includes('as needed')) return 60;
+  const range = s.match(/^(\d+)\s*[-–]\s*\d+\s*min/);
+  if (range) return parseInt(range[1]) * 60;
   const colon = s.match(/^(\d+):(\d+)$/);
   if (colon) return parseInt(colon[1]) * 60 + parseInt(colon[2]);
   const mins = s.match(/(\d+)\s*min/);
@@ -73,6 +78,47 @@ function parseRestSeconds(rest: string | undefined, defaultSecs = 90): number {
   if (secs) t += parseInt(secs[1]);
   if (!t) { const n = parseInt(s); if (!isNaN(n)) t = n; }
   return t || defaultSecs;
+}
+
+function generateWavUri(freqHz: number, durationMs: number): string {
+  const sampleRate = 22050;
+  const numSamples = Math.round(sampleRate * durationMs / 1000);
+  const dataBytes  = numSamples * 2;
+  const buf = new ArrayBuffer(44 + dataBytes);
+  const v   = new DataView(buf);
+  v.setUint32(0,  0x52494646, false); // RIFF
+  v.setUint32(4,  36 + dataBytes, true);
+  v.setUint32(8,  0x57415645, false); // WAVE
+  v.setUint32(12, 0x666d7420, false); // fmt
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);           // PCM
+  v.setUint16(22, 1, true);           // mono
+  v.setUint32(24, sampleRate, true);
+  v.setUint32(28, sampleRate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  v.setUint32(36, 0x64617461, false); // data
+  v.setUint32(40, dataBytes, true);
+  for (let i = 0; i < numSamples; i++) {
+    const t    = i / sampleRate;
+    const fade = i < numSamples * 0.1 ? i / (numSamples * 0.1)
+               : i > numSamples * 0.8 ? (numSamples - i) / (numSamples * 0.2) : 1;
+    v.setInt16(44 + i * 2, Math.round(Math.sin(2 * Math.PI * freqHz * t) * 16383 * fade), true);
+  }
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return 'data:audio/wav;base64,' + btoa(binary);
+}
+
+async function playBeep(freqHz: number, durationMs: number): Promise<void> {
+  try {
+    const uri = generateWavUri(freqHz, durationMs);
+    const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
+    sound.setOnPlaybackStatusUpdate(status => {
+      if (status.isLoaded && status.didJustFinish) sound.unloadAsync().catch(() => {});
+    });
+  } catch {}
 }
 
 function isRunExercise(ex: ExerciseItem): boolean {
@@ -234,28 +280,44 @@ function RestCountdown({ seconds, label, onSkip }: { seconds: number; label: str
   const [rem, setRem] = useState(seconds);
   useEffect(() => { setRem(seconds); }, [seconds]);
   useEffect(() => {
-    if (rem <= 0) { Vibration.vibrate([0, 200, 100, 200]); onSkip(); return; }
+    if (rem <= 0) {
+      try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); } catch {}
+      playBeep(880, 400);
+      Vibration.vibrate([0, 200, 100, 200]);
+      onSkip();
+      return;
+    }
+    if (rem === 3) {
+      try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); } catch {}
+      playBeep(440, 150);
+    }
     const id = setTimeout(() => setRem(r => r - 1), 1000);
     return () => clearTimeout(id);
   }, [rem, onSkip]);
+  const pct = seconds > 0 ? Math.min((seconds - rem) / seconds, 1) : 1;
   return (
     <View style={rc.container}>
       <Text style={rc.restLabel}>REST</Text>
       <Text style={rc.countdown}>{formatTime(rem)}</Text>
+      <View style={rc.progressTrack}>
+        <View style={[rc.progressFill, { width: `${Math.round(pct * 100)}%` as unknown as number }]} />
+      </View>
       <Text style={rc.restNote}>{label}</Text>
       <TouchableOpacity style={rc.skip} onPress={onSkip}>
-        <Text style={rc.skipText}>SKIP REST</Text>
+        <Text style={rc.skipText}>Skip rest</Text>
       </TouchableOpacity>
     </View>
   );
 }
 const rc = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  restLabel: { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 12 },
-  countdown: { color: Colors.accent, fontSize: 88, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const] },
-  restNote:  { color: Colors.textSecondary, fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 32 },
-  skip:      { marginTop: 40 },
-  skipText:  { color: Colors.textSecondary, fontSize: 13, fontWeight: '600', letterSpacing: 1 },
+  container:     { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  restLabel:     { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 12 },
+  countdown:     { color: Colors.accent, fontSize: 88, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const] },
+  progressTrack: { width: '60%', height: 3, backgroundColor: '#222', borderRadius: 2, marginTop: 16, overflow: 'hidden' },
+  progressFill:  { height: 3, backgroundColor: Colors.accent, borderRadius: 2 },
+  restNote:      { color: Colors.textSecondary, fontSize: 13, marginTop: 16, textAlign: 'center', paddingHorizontal: 32 },
+  skip:          { marginTop: 40 },
+  skipText:      { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
 });
 
 function SwapSheet({ visible, onClose, onSelect }: { visible: boolean; onClose: () => void; onSelect: (l: string) => void }) {

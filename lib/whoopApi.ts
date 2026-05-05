@@ -389,8 +389,14 @@ export function mergeWhoopIntoHealthData(
   const r = whoopData.recovery;
 
   if (r) {
-    if (r.hrv != null) merged.hrv       = { value: r.hrv, source: 'Whoop' };
-    if (r.rhr != null) merged.restingHR = { value: r.rhr, source: 'Whoop' };
+    if (r.hrv != null) {
+      merged.hrv = { value: r.hrv, source: 'Whoop' };
+      console.log('[whoop] merge: hrv:', r.hrv);
+    }
+    if (r.rhr != null) {
+      merged.restingHR = { value: r.rhr, source: 'Whoop' };
+      console.log('[whoop] merge: rhr:', r.rhr);
+    }
   }
 
   // Strain calories = sum of individual workout kilojoules — this is the active portion.
@@ -399,12 +405,16 @@ export function mergeWhoopIntoHealthData(
   const strainKcal = Math.round(strainKj / 4.184);
   if (strainKcal > 0) {
     merged.activeCalories = { value: strainKcal, source: 'Whoop' };
+    console.log('[whoop] merge: activeCalories:', strainKcal, 'from kilojoules:', strainKj);
   }
 
   const s = whoopData.sleep;
   if (s?.totalSleepMs != null && s.totalSleepMs > 0) {
     const hours = Math.round(s.totalSleepMs / (1_000 * 60 * 60) * 10) / 10;
-    if (hours > 0.25) merged.sleepHours = { value: hours, source: 'Whoop' };
+    if (hours > 0.25) {
+      merged.sleepHours = { value: hours, source: 'Whoop' };
+      console.log('[whoop] merge: sleepHours:', hours);
+    }
   }
 
   // Steps from the Whoop daily cycle endpoint (/v1/cycle)

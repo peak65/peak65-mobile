@@ -67,11 +67,43 @@ function getSampleSource(s: HKSample): string {
 
 type PriorityLevel = { name: string; keys: string[] };
 
-// Priority order per spec: Garmin > Coros > Whoop > Zepp > Polar > Apple Watch > iPhone
-const WEARABLE_PRIORITIES: PriorityLevel[] = [
+// Per-metric priority arrays — Whoop leads for all recovery/sleep metrics;
+// GPS devices (Garmin/Coros) lead for activity metrics.
+const PRIORITY_HRV: PriorityLevel[] = [
+  { name: 'Whoop',       keys: ['whoop'] },
+  { name: 'Garmin',      keys: ['garmin'] },
+  { name: 'Zepp',        keys: ['zepp', 'amazfit', 'huami'] },
+  { name: 'Polar',       keys: ['polar'] },
+  { name: 'Apple Watch', keys: ['apple watch', ' watch'] },
+];
+
+const PRIORITY_RHR: PriorityLevel[] = [
+  { name: 'Whoop',       keys: ['whoop'] },
+  { name: 'Garmin',      keys: ['garmin'] },
+  { name: 'Zepp',        keys: ['zepp', 'amazfit', 'huami'] },
+  { name: 'Polar',       keys: ['polar'] },
+  { name: 'Apple Watch', keys: ['apple watch', ' watch'] },
+];
+
+const PRIORITY_SLEEP: PriorityLevel[] = [
+  { name: 'Whoop',       keys: ['whoop'] },
+  { name: 'Garmin',      keys: ['garmin'] },
+  { name: 'Zepp',        keys: ['zepp', 'amazfit', 'huami'] },
+  { name: 'Apple Watch', keys: ['apple watch', ' watch'] },
+];
+
+const PRIORITY_STEPS: PriorityLevel[] = [
+  { name: 'Whoop',       keys: ['whoop'] },
   { name: 'Garmin',      keys: ['garmin'] },
   { name: 'Coros',       keys: ['coros'] },
+  { name: 'Zepp',        keys: ['zepp', 'amazfit', 'huami'] },
+  { name: 'Apple Watch', keys: ['apple watch', ' watch'] },
+];
+
+const PRIORITY_CALORIES: PriorityLevel[] = [
   { name: 'Whoop',       keys: ['whoop'] },
+  { name: 'Garmin',      keys: ['garmin'] },
+  { name: 'Coros',       keys: ['coros'] },
   { name: 'Zepp',        keys: ['zepp', 'amazfit', 'huami'] },
   { name: 'Polar',       keys: ['polar'] },
   { name: 'Apple Watch', keys: ['apple watch', ' watch'] },
@@ -89,15 +121,11 @@ function sourceMatches(sourceName: string | undefined, keys: string[]): boolean 
 
 // Walk priority levels in order; return the most recent sample from the first
 // level that has any matching samples.
-// wearableOnly=true → no iPhone fallback (used for HRV, RHR)
-// wearableOnly=false → fall back to iPhone (used for Steps, Calories)
-function pickBest(samples: HKSample[], wearableOnly: boolean, metric: string): HealthReading | null {
+function pickBest(samples: HKSample[], priorities: PriorityLevel[], includeIphone: boolean, metric: string): HealthReading | null {
   console.log(`[healthkit] ${metric} unique sources:`, [...new Set(samples.map(s => getSampleSource(s)))]);
-  const priorities = wearableOnly
-    ? WEARABLE_PRIORITIES
-    : [...WEARABLE_PRIORITIES, IPHONE_PRIORITY];
+  const allPriorities = includeIphone ? [...priorities, IPHONE_PRIORITY] : priorities;
 
-  for (const { name, keys } of priorities) {
+  for (const { name, keys } of allPriorities) {
     const matched = samples.filter(s => sourceMatches(getSampleSource(s), keys));
     if (matched.length > 0) {
       console.log(`[healthkit] ${metric} matched priority:`, name, 'count:', matched.length);
@@ -114,15 +142,11 @@ function pickBest(samples: HKSample[], wearableOnly: boolean, metric: string): H
 }
 
 // Sum all samples from the first priority level that has matches.
-// wearableOnly=true → no iPhone fallback
-// wearableOnly=false → fall back to iPhone
-function pickBestSum(samples: HKSample[], wearableOnly: boolean, metric: string): HealthReading | null {
+function pickBestSum(samples: HKSample[], priorities: PriorityLevel[], includeIphone: boolean, metric: string): HealthReading | null {
   console.log(`[healthkit] ${metric} unique sources:`, [...new Set(samples.map(s => getSampleSource(s)))]);
-  const priorities = wearableOnly
-    ? WEARABLE_PRIORITIES
-    : [...WEARABLE_PRIORITIES, IPHONE_PRIORITY];
+  const allPriorities = includeIphone ? [...priorities, IPHONE_PRIORITY] : priorities;
 
-  for (const { name, keys } of priorities) {
+  for (const { name, keys } of allPriorities) {
     const matched = samples.filter(s => sourceMatches(getSampleSource(s), keys));
     if (matched.length > 0) {
       console.log(`[healthkit] ${metric} matched priority:`, name, 'count:', matched.length);
@@ -139,10 +163,10 @@ function pickBestSum(samples: HKSample[], wearableOnly: boolean, metric: string)
 // samples (value ≠ InBed/Awake), sum durations and return total hours.
 // If the winning source only recorded InBed/Awake, continue to the next level.
 // HK sleep values: 0=InBed, 1=Asleep, 2=Awake, 3=Core, 4=Deep, 5=REM
-function pickBestSleep(samples: HKSample[], metric: string): HealthReading | null {
+function pickBestSleep(samples: HKSample[], priorities: PriorityLevel[], metric: string): HealthReading | null {
   console.log(`[healthkit] ${metric} unique sources:`, [...new Set(samples.map(s => getSampleSource(s)))]);
 
-  for (const { name, keys } of WEARABLE_PRIORITIES) {
+  for (const { name, keys } of priorities) {
     const matched = samples.filter(s => sourceMatches(getSampleSource(s), keys));
     if (matched.length > 0) {
       console.log(`[healthkit] ${metric} matched priority:`, name, 'count:', matched.length);
@@ -391,12 +415,19 @@ export async function fetchTodayHealthData(): Promise<WearableHealthData> {
   const activeSamples = settled(activeR); console.log('[healthkit] active calories raw samples:', JSON.stringify(activeSamples));
   const basalSamples  = settled(basalR);  console.log('[healthkit] basal calories raw samples:', JSON.stringify(basalSamples));
 
-  const hrv    = pickBest(hrvSamples,    true,  'hrv');
-  const restHR = pickBest(rhrSamples,    true,  'rhr');
-  const sleep  = pickBestSleep(sleepSamples,    'sleep');
-  const steps  = pickBestSum(stepsSamples, false, 'steps');
-  const active = pickBestSum(activeSamples, false, 'active');
-  const basal  = pickBestSum(basalSamples,  false, 'basal');
+  const hrv    = pickBest(hrvSamples,    PRIORITY_HRV,      false, 'hrv');
+  const restHR = pickBest(rhrSamples,    PRIORITY_RHR,      false, 'rhr');
+  const sleep  = pickBestSleep(sleepSamples, PRIORITY_SLEEP, 'sleep');
+  const steps  = pickBestSum(stepsSamples, PRIORITY_STEPS,    true,  'steps');
+  const active = pickBestSum(activeSamples, PRIORITY_CALORIES, false, 'active');
+  const basal  = pickBestSum(basalSamples,  PRIORITY_CALORIES, false, 'basal');
+
+  console.log('[hrv] source selected:', hrv?.source ?? 'none', 'value:', hrv?.value ?? null);
+  console.log('[rhr] source selected:', restHR?.source ?? 'none', 'value:', restHR?.value ?? null);
+  console.log('[sleep] source selected:', sleep?.source ?? 'none', 'value:', sleep?.value ?? null);
+  console.log('[steps] source selected:', steps?.source ?? 'none', 'value:', steps?.value ?? null);
+  console.log('[active] source selected:', active?.source ?? 'none', 'value:', active?.value ?? null);
+  console.log('[basal] source selected:', basal?.source ?? 'none', 'value:', basal?.value ?? null);
 
   const total: HealthReading | null =
     active !== null || basal !== null

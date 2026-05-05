@@ -63,14 +63,24 @@ function isStrengthSession(session: ProgramSession): boolean {
 type ExGroup =
   | { kind: 'single'; ex: ExerciseItem; origIdx: number }
   | { kind: 'superset'; members: { ex: ExerciseItem; origIdx: number }[] }
-  | { kind: 'circuit'; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number; rest: string | null };
+  | { kind: 'circuit'; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number; rest: string | null }
+  | { kind: 'block'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] };
 
 function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
   const groups: ExGroup[] = [];
   let i = 0;
   while (i < exercises.length) {
     const ex = exercises[i];
-    if (ex.circuit_id) {
+    if (ex.block_id) {
+      const bId = ex.block_id;
+      const blockName = ex.block_name ?? '';
+      const members: { ex: ExerciseItem; origIdx: number }[] = [];
+      while (i < exercises.length && exercises[i].block_id === bId) {
+        members.push({ ex: exercises[i], origIdx: i });
+        i++;
+      }
+      groups.push({ kind: 'block', blockName, members });
+    } else if (ex.circuit_id) {
       const cId = ex.circuit_id;
       const members: { ex: ExerciseItem; origIdx: number }[] = [];
       while (i < exercises.length && exercises[i].circuit_id === cId) {
@@ -137,6 +147,36 @@ function CircuitBlock({ members, rounds, rest }: {
   );
 }
 
+// ─── Block group component ────────────────────────────────────────────────────
+
+function BlockGroupSection({ blockName, members }: {
+  blockName: string;
+  members: { ex: ExerciseItem; origIdx: number }[];
+}) {
+  return (
+    <View style={styles.blockGroup}>
+      <Text style={styles.blockGroupName}>{blockName}</Text>
+      {members.map(({ ex, origIdx }, mi) => {
+        let detail = '';
+        if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
+        else if (ex.reps) detail = ex.reps;
+        const note = ex.notes || ex.note;
+        const isLast = mi === members.length - 1;
+        return (
+          <View key={origIdx}>
+            <View style={styles.blockExRow}>
+              <Text style={styles.exName}>{ex.name}</Text>
+              {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
+              {!!note   && <Text style={styles.exDetail}>{note}</Text>}
+            </View>
+            {!isLast && <View style={styles.blockDivider} />}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 // ─── Exercise renderer (non-strength sessions) ───────────────────────────────
 
 function ExerciseSection({
@@ -158,6 +198,9 @@ function ExerciseSection({
         <View key={bi} style={styles.section}>
           <Text style={styles.sectionLabel}>{block.block_name}</Text>
           {groupBySuperset(block.exercises ?? []).map((group, gi) => {
+            if (group.kind === 'block') {
+              return <BlockGroupSection key={gi} blockName={group.blockName} members={group.members} />;
+            }
             if (group.kind === 'circuit') {
               return <CircuitBlock key={gi} members={group.members} rounds={group.rounds} rest={group.rest} />;
             }
@@ -171,7 +214,7 @@ function ExerciseSection({
                     else if (ex.reps) detail = ex.reps;
                     const note = ex.notes || ex.note;
                     return (
-                      <View key={origIdx} style={[styles.exRow, { borderLeftWidth: 0, paddingLeft: 0, marginBottom: 6 }]}>
+                      <View key={origIdx} style={[styles.exRow, { borderWidth: 0, padding: 0, marginBottom: 6 }]}>
                         <Text style={styles.exName}>{ex.name}</Text>
                         {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
                         {!!note   && <Text style={styles.exDetail}>{note}</Text>}
@@ -245,6 +288,9 @@ function StrengthSessionSection({
             {isStrBlock ? (
               <View style={styles.strExList}>
                 {groupBySuperset(block.exercises ?? []).map((group, gi) => {
+                  if (group.kind === 'block') {
+                    return <BlockGroupSection key={gi} blockName={group.blockName} members={group.members} />;
+                  }
                   if (group.kind === 'circuit') {
                     return (
                       <View key={gi} style={styles.circuitGroup}>
@@ -271,6 +317,9 @@ function StrengthSessionSection({
               </View>
             ) : (
               groupBySuperset(block.exercises ?? []).map((group, gi) => {
+                if (group.kind === 'block') {
+                  return <BlockGroupSection key={gi} blockName={group.blockName} members={group.members} />;
+                }
                 if (group.kind === 'circuit') {
                   return <CircuitBlock key={gi} members={group.members} rounds={group.rounds} rest={group.rest} />;
                 }
@@ -284,7 +333,7 @@ function StrengthSessionSection({
                         else if (ex.reps) detail = ex.reps;
                         const note = ex.notes || ex.note;
                         return (
-                          <View key={origIdx} style={[styles.exRow, { borderLeftWidth: 0, paddingLeft: 0, marginBottom: 6 }]}>
+                          <View key={origIdx} style={[styles.exRow, { borderWidth: 0, padding: 0, marginBottom: 6 }]}>
                             <Text style={styles.exName}>{ex.name}</Text>
                             {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
                             {!!note   && <Text style={styles.exDetail}>{note}</Text>}
@@ -414,7 +463,7 @@ function DayCard({
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
 
   function startLiveWorkout(session: ProgramSession) {
-    navigation.navigate('LiveWorkout', {
+    navigation.getParent()?.navigate('LiveWorkout', {
       sessionJson: JSON.stringify(session),
       programId,
       weekNumber,
@@ -1098,21 +1147,21 @@ const styles = StyleSheet.create({
   expandedContent: { paddingHorizontal: 16, paddingBottom: 16, gap: 16 },
   sessionWrapper:  { gap: 12 },
 
-  sessionBlock:     { gap: 10 },
+  sessionBlock:     { gap: 12 },
   sessionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   sessionName:      { color: Colors.textPrimary, fontSize: 14, fontWeight: '700', flex: 1 },
   sessionMeta:      { color: Colors.textSecondary, fontSize: 12 },
   sessionDesc:      { color: Colors.textSecondary, fontSize: 13, lineHeight: 18 },
 
-  section:      { gap: 8 },
+  section:      { gap: 12 },
   sectionLabel: {
-    color: Colors.textSecondary, fontSize: 11, fontWeight: '700',
-    letterSpacing: 1.2, textTransform: 'uppercase',
+    color: Colors.textSecondary, fontSize: 10, fontWeight: '700',
+    letterSpacing: 3, textTransform: 'uppercase',
   },
 
   // Non-strength exercise rows
-  exRow:    { borderLeftWidth: 3, borderLeftColor: Colors.accent, paddingLeft: 10, gap: 2 },
-  exName:   { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
+  exRow:    { borderWidth: 2, borderColor: 'rgba(255,255,255,0.08)', padding: 10, gap: 2 },
+  exName:   { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
   exDetail: { color: Colors.textSecondary, fontSize: 13 },
 
   // Superset grouping — 3px accent at 50% opacity
@@ -1159,6 +1208,12 @@ const styles = StyleSheet.create({
     gap: 2,
     marginBottom: 4,
   },
+
+  // Block group (named sub-group within a session block)
+  blockGroup:     { gap: 0, marginBottom: 4 },
+  blockGroupName: { color: Colors.textPrimary, fontSize: 16, fontFamily: Fonts.metric, marginBottom: 8 },
+  blockExRow:     { paddingVertical: 6, gap: 2 },
+  blockDivider:   { height: 0.5, backgroundColor: 'rgba(255,255,255,0.08)' },
 
   // Start Workout button
   startWorkoutBtn: {
