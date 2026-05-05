@@ -114,41 +114,25 @@ function CircuitBlock({ members, rounds, rest }: {
   rounds: number;
   rest: string | null;
 }) {
-  const [currentRound, setCurrentRound] = useState(1);
   return (
     <View style={styles.circuitGroup}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <Text style={styles.circuitLabel}>CIRCUIT — {rounds} ROUNDS</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <TouchableOpacity
-            onPress={() => setCurrentRound(r => Math.max(1, r - 1))}
-            style={[styles.circuitRoundBtn, currentRound === 1 && styles.circuitRoundBtnDone]}
-          >
-            <Feather name="chevron-left" color={Colors.accent} size={16} />
-          </TouchableOpacity>
-          <Text style={styles.circuitRoundText}>Round {currentRound} / {rounds}</Text>
-          <TouchableOpacity
-            onPress={() => setCurrentRound(r => Math.min(rounds, r + 1))}
-            style={[styles.circuitRoundBtn, currentRound === rounds && styles.circuitRoundBtnDone]}
-          >
-            <Feather name="chevron-right" color={Colors.accent} size={16} />
-          </TouchableOpacity>
-        </View>
+      <Text style={styles.circuitLabel}>CIRCUIT · {rounds} ROUNDS</Text>
+      <View style={styles.circuitBody}>
+        {members.map(({ ex, origIdx }, mi) => {
+          const note = ex.notes || ex.note;
+          const isLast = mi === members.length - 1;
+          return (
+            <View key={origIdx} style={[styles.circuitExRow, isLast && { marginBottom: 0 }]}>
+              <Text style={styles.exName}>{ex.name}</Text>
+              {!!ex.reps && <Text style={styles.exDetail}>{ex.reps}</Text>}
+              {!!note    && <Text style={styles.exDetail}>{note}</Text>}
+            </View>
+          );
+        })}
+        {!!rest && (
+          <Text style={styles.circuitRestText}>Rest {rest} between rounds</Text>
+        )}
       </View>
-      {members.map(({ ex, origIdx }, mi) => {
-        const note = ex.notes || ex.note;
-        const isLast = mi === members.length - 1;
-        return (
-          <View key={origIdx} style={[styles.circuitExRow, isLast && { marginBottom: 0 }]}>
-            <Text style={styles.exName}>{ex.name}</Text>
-            {!!ex.reps && <Text style={styles.exDetail}>{ex.reps}</Text>}
-            {!!note    && <Text style={styles.exDetail}>{note}</Text>}
-          </View>
-        );
-      })}
-      {!!rest && (
-        <Text style={[styles.exDetail, { marginTop: 8 }]}>Rest after round: {rest}</Text>
-      )}
     </View>
   );
 }
@@ -221,39 +205,24 @@ function ExerciseSection({
   );
 }
 
-// ─── Strength session with inline per-set logging ────────────────────────────
-
-type SetInput = { weight: string; reps: string };
-type StrengthInputs = Record<string, Record<number, SetInput>>;
-
 function StrengthSessionSection({
-  session, inputs, alreadySaved, saved, saving, onChange, onSave, onStart,
+  session, onStart,
 }: {
   session: ProgramSession;
-  inputs: StrengthInputs;
-  alreadySaved: boolean;
-  saved: boolean;
-  saving: boolean;
-  onChange: (exKey: string, setIdx: number, field: 'weight' | 'reps', value: string) => void;
-  onSave: () => void;
   onStart?: () => void;
 }) {
-  const isDone = alreadySaved || saved;
-  const [focusedSetKey, setFocusedSetKey] = useState<string | null>(null);
-
-  let allFilled = true;
-  let hasStrengthExercises = false;
-  (session.blocks ?? []).forEach((block, bi) => {
-    if (!isStrengthBlock(block.block_name)) return;
-    (block.exercises ?? []).forEach((ex, ei) => {
-      hasStrengthExercises = true;
-      const exKey = `${bi}_${ei}`;
-      const numSets = ex.sets ?? 1;
-      for (let si = 0; si < numSets; si++) {
-        if (!inputs[exKey]?.[si]?.weight?.trim()) allFilled = false;
-      }
-    });
-  });
+  const renderStrExCard = (ex: ExerciseItem, origIdx: number) => {
+    const note = ex.notes || ex.note;
+    return (
+      <View key={origIdx} style={styles.strExCard}>
+        <Text style={styles.strExName}>{ex.name}</Text>
+        {!!(ex.sets && ex.reps) && (
+          <Text style={styles.strExPrescribed}>{ex.sets} × {ex.reps}</Text>
+        )}
+        {!!note && <Text style={styles.strExNote}>{note}</Text>}
+      </View>
+    );
+  };
 
   return (
     <View style={styles.sessionBlock}>
@@ -276,88 +245,16 @@ function StrengthSessionSection({
             {isStrBlock ? (
               <View style={styles.strExList}>
                 {groupBySuperset(block.exercises ?? []).map((group, gi) => {
-                  const renderStrExCard = (ex: ExerciseItem, origIdx: number) => {
-                    const exKey = `${bi}_${origIdx}`;
-                    const numSets = ex.sets ?? 1;
-                    const prescribedReps = ex.reps
-                      ? String(ex.reps).match(/\d+/)?.[0] ?? ''
-                      : '';
-                    return (
-                      <View key={origIdx} style={styles.strExCard}>
-                        <Text style={styles.strExName}>{ex.name}</Text>
-                        {!!(ex.sets && ex.reps) && (
-                          <Text style={styles.strExPrescribed}>{ex.sets} × {ex.reps}</Text>
-                        )}
-                        <View style={styles.strDivider} />
-                        {!isDone && (
-                          <View style={styles.setColHeaders}>
-                            <Text style={styles.setColSpacer} />
-                            <Text style={styles.setColHeader}>REPS</Text>
-                            <Text style={styles.setColHeader}>LBS</Text>
-                          </View>
-                        )}
-                        {Array.from({ length: numSets }, (_, si) => {
-                          const set = inputs[exKey]?.[si];
-                          const setKey = `${exKey}_${si}`;
-                          const isActive = focusedSetKey === setKey;
-                          const isDim = !isActive && !set?.weight?.trim() && !isDone;
-                          if (isDone) {
-                            return (
-                              <View key={si} style={[styles.setRowContainer, styles.setRowSaved]}>
-                                <Text style={styles.setLabelText}>SET {si + 1}</Text>
-                                <View style={styles.setValuesRow}>
-                                  <Text style={styles.setSavedNum}>{set?.reps || '—'}</Text>
-                                  <Text style={styles.setSavedUnit}> reps</Text>
-                                  <Text style={[styles.setSavedNum, { marginLeft: 20 }]}>{set?.weight || '—'}</Text>
-                                  <Text style={styles.setSavedUnit}> lbs</Text>
-                                </View>
-                                <Text style={styles.setCheck}>✓</Text>
-                              </View>
-                            );
-                          }
-                          return (
-                            <View key={si} style={[styles.setRowContainer, isActive && styles.setRowActive, isDim && styles.setRowDim]}>
-                              <Text style={styles.setLabelText}>SET {si + 1}</Text>
-                              <TextInput
-                                style={[styles.setRepsInput, isActive && styles.setInputFocused]}
-                                placeholder="0"
-                                placeholderTextColor="#3a3a3a"
-                                value={set?.reps ?? prescribedReps}
-                                onChangeText={v => onChange(exKey, si, 'reps', v)}
-                                onFocus={() => setFocusedSetKey(setKey)}
-                                onBlur={() => setFocusedSetKey(null)}
-                                keyboardType="numeric"
-                                selectionColor={Colors.accent}
-                              />
-                              <View style={styles.setWeightRow}>
-                                <TextInput
-                                  style={[styles.setWeightInput, isActive && styles.setInputFocused]}
-                                  placeholder=""
-                                  placeholderTextColor="#3a3a3a"
-                                  value={set?.weight ?? ''}
-                                  onChangeText={v => onChange(exKey, si, 'weight', v)}
-                                  onFocus={() => setFocusedSetKey(setKey)}
-                                  onBlur={() => setFocusedSetKey(null)}
-                                  keyboardType="numeric"
-                                  selectionColor={Colors.accent}
-                                />
-                                <Text style={styles.setWeightSuffix}>lbs</Text>
-                              </View>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    );
-                  };
-
                   if (group.kind === 'circuit') {
                     return (
                       <View key={gi} style={styles.circuitGroup}>
-                        <Text style={styles.circuitLabel}>CIRCUIT — {group.rounds} ROUNDS</Text>
-                        {group.members.map(({ ex, origIdx }) => renderStrExCard(ex, origIdx))}
-                        {!!group.rest && (
-                          <Text style={[styles.exDetail, { marginTop: 4 }]}>Rest after round: {group.rest}</Text>
-                        )}
+                        <Text style={styles.circuitLabel}>CIRCUIT · {group.rounds} ROUNDS</Text>
+                        <View style={styles.circuitBody}>
+                          {group.members.map(({ ex, origIdx }) => renderStrExCard(ex, origIdx))}
+                          {!!group.rest && (
+                            <Text style={styles.circuitRestText}>Rest {group.rest} between rounds</Text>
+                          )}
+                        </View>
                       </View>
                     );
                   }
@@ -415,23 +312,6 @@ function StrengthSessionSection({
         );
       })}
 
-      {hasStrengthExercises && (
-        isDone ? (
-          <View style={styles.logAllBtnDone}>
-            <Text style={styles.logAllBtnDoneText}>LIFTS LOGGED ✓</Text>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={[styles.logAllBtn, (!allFilled || saving) && styles.logAllBtnDisabled]}
-            onPress={onSave}
-            disabled={!allFilled || saving}
-          >
-            <Text style={styles.logAllBtnText}>
-              {saving ? 'SAVING...' : 'LOG ALL LIFTS'}
-            </Text>
-          </TouchableOpacity>
-        )
-      )}
       {onStart && (
         <TouchableOpacity style={styles.startWorkoutBtn} onPress={onStart}>
           <Text style={styles.startWorkoutText}>START WORKOUT →</Text>
@@ -561,23 +441,6 @@ function DayCard({
     return init;
   });
   const [trialSaving, setTrialSaving] = useState(false);
-
-  // ── Strength state (inline per-set) ─────────────────────────────────────────
-  const strengthAlreadySaved = (() => {
-    for (const session of day.sessions ?? []) {
-      if (!isStrengthSession(session)) continue;
-      for (const block of session.blocks ?? []) {
-        if (!isStrengthBlock(block.block_name)) continue;
-        for (const ex of block.exercises ?? []) {
-          if (savedTrials.has(`${day.day}:${exerciseSlug(ex.name)}`)) return true;
-        }
-      }
-    }
-    return false;
-  })();
-  const [strengthInputs, setStrengthInputs] = useState<StrengthInputs>({});
-  const [strengthSaved, setStrengthSaved]   = useState(false);
-  const [strengthSaving, setStrengthSaving] = useState(false);
 
   // ── Mark-complete state ──────────────────────────────────────────────────────
   const completeAlreadySaved = savedTrials.has(`${day.day}:session_complete`);
@@ -767,58 +630,6 @@ function DayCard({
     setCompleteSaving(false);
   }
 
-  async function saveStrengthResults(session: ProgramSession) {
-    if (!userId) return;
-    setStrengthSaving(true);
-    const rows: object[] = [];
-    (session.blocks ?? []).forEach((block, bi) => {
-      if (!isStrengthBlock(block.block_name)) return;
-      (block.exercises ?? []).forEach((ex, ei) => {
-        const exKey = `${bi}_${ei}`;
-        const numSets = ex.sets ?? 1;
-        const prescribedReps = ex.reps
-          ? String(ex.reps).match(/\d+/)?.[0] ?? ''
-          : '';
-        const setsData = Array.from({ length: numSets }, (_, si) => ({
-          weight: strengthInputs[exKey]?.[si]?.weight?.trim() ?? '',
-          reps:   strengthInputs[exKey]?.[si]?.reps?.trim() || prescribedReps,
-        }));
-        rows.push({
-          user_id:      userId!,
-          program_id:   programId,
-          day_name:     day.day,
-          week_number:  weekNumber,
-          session_name: session.name,
-          log_field:    exerciseSlug(ex.name),
-          log_value:    JSON.stringify(setsData),
-          completed:    true,
-          completed_at: new Date().toISOString(),
-        });
-      });
-    });
-    if (rows.length > 0) {
-      const { error } = await supabase.from('session_logs').insert(rows);
-      if (error) console.log('[program] saveStrengthResults error:', error.message);
-    }
-    setStrengthSaved(true);
-    setStrengthSaving(false);
-  }
-
-  function handleStrengthChange(
-    exKey: string, setIdx: number, field: 'weight' | 'reps', value: string,
-  ) {
-    setStrengthInputs(prev => ({
-      ...prev,
-      [exKey]: {
-        ...(prev[exKey] ?? {}),
-        [setIdx]: {
-          ...(prev[exKey]?.[setIdx] ?? { weight: '', reps: '' }),
-          [field]: value,
-        },
-      },
-    }));
-  }
-
   return (
     <>
     <View style={[styles.dayCard, isToday && styles.dayCardToday]}>
@@ -849,12 +660,6 @@ function DayCard({
                 <StrengthSessionSection
                   key={si}
                   session={session}
-                  inputs={strengthInputs}
-                  alreadySaved={strengthAlreadySaved}
-                  saved={strengthSaved}
-                  saving={strengthSaving}
-                  onChange={handleStrengthChange}
-                  onSave={() => saveStrengthResults(session)}
                   onStart={() => startLiveWorkout(session)}
                 />
               ) : (
@@ -1329,44 +1134,30 @@ const styles = StyleSheet.create({
 
   // Circuit grouping — 3px accent
   circuitGroup: {
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.accent,
-    paddingLeft: 10,
-    gap: 6,
-    marginBottom: 4,
+    marginBottom: 8,
   },
   circuitLabel: {
     color: Colors.accent,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: 2,
-  },
-  circuitRoundTracker: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  circuitRoundText: {
-    color: Colors.textPrimary,
     fontFamily: Fonts.metric,
-    fontSize: 13,
+    fontSize: 15,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 6,
   },
-  circuitRoundBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: Colors.nested,
-    alignItems: 'center',
-    justifyContent: 'center',
+  circuitBody: {
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.accent,
+    paddingLeft: 12,
+    gap: 6,
   },
-  circuitRoundBtnDone: {
-    opacity: 0.3,
+  circuitRestText: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    marginTop: 4,
   },
   circuitExRow: {
     gap: 2,
-    marginBottom: 8,
+    marginBottom: 4,
   },
 
   // Start Workout button
@@ -1395,7 +1186,8 @@ const styles = StyleSheet.create({
     borderLeftColor: Colors.accent,
   },
   strExName:       { color: Colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 4 },
-  strExPrescribed: { color: Colors.textSecondary, fontSize: 13, marginBottom: 16 },
+  strExPrescribed: { color: Colors.textSecondary, fontSize: 13, marginBottom: 4 },
+  strExNote:       { color: Colors.textSecondary, fontSize: 13, fontStyle: 'italic' },
   strDivider:      { height: 1, backgroundColor: Colors.nested, marginBottom: 12 },
 
   // Set row containers

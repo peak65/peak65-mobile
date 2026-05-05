@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -11,6 +11,7 @@ import {
   BarlowCondensed_900Black,
 } from '@expo-google-fonts/barlow-condensed';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Notifications from 'expo-notifications';
 import { Feather } from '@expo/vector-icons';
 
 import { supabase } from '../lib/supabase';
@@ -189,6 +190,24 @@ function MainNavigator({ initialRoute }: { initialRoute: keyof MainStackParamLis
   );
 }
 
+// ─── Push token registration ─────────────────────────────────────────────────
+
+async function registerPushToken(userId: string) {
+  if (Platform.OS !== 'ios') return;
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    const finalStatus = existing === 'granted'
+      ? existing
+      : (await Notifications.requestPermissionsAsync()).status;
+    if (finalStatus !== 'granted') return;
+
+    const { data: token } = await Notifications.getExpoPushTokenAsync();
+    if (!token) return;
+
+    await supabase.from('profiles').update({ push_token: token }).eq('id', userId);
+  } catch {}
+}
+
 // ─── App state resolution ─────────────────────────────────────────────────────
 
 type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'generating' | 'authenticated';
@@ -350,6 +369,7 @@ export default function RootLayout() {
 
           if (newState === 'authenticated' && session?.user?.id) {
             detectCandidates(session.user.id).catch(() => {});
+            registerPushToken(session.user.id).catch(() => {});
           }
         } catch (err) {
           console.log('[layout] auth handler error:', err);
