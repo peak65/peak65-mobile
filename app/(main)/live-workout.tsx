@@ -18,6 +18,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainStackParamList, ProgramSession, SessionBlock, ExerciseItem } from '../_layout';
 import { supabase } from '../../lib/supabase';
+import { Feather } from '@expo/vector-icons';
 import { Colors, Fonts } from '../../lib/theme';
 
 // Optional keep-awake — requires: npx expo install expo-keep-awake
@@ -548,6 +549,17 @@ export default function LiveWorkoutScreen() {
     setSaving(false);
   }
 
+  function confirmDiscard() {
+    Alert.alert(
+      'Discard this workout?',
+      '',
+      [
+        { text: 'Keep Going', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => navigation.goBack() },
+      ],
+    );
+  }
+
   async function saveAndExit() {
     await saveSession(true);
     navigation.goBack();
@@ -580,6 +592,9 @@ export default function LiveWorkoutScreen() {
           </Text>
           <TouchableOpacity style={[s.primaryBtn, saving && s.btnOff]} onPress={saveAndExit} disabled={saving}>
             <Text style={s.primaryBtnTxt}>{saving ? 'SAVING...' : 'SAVE & EXIT'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={{ marginTop: 16, alignItems: 'center' }} onPress={confirmDiscard}>
+            <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Discard workout</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -627,6 +642,12 @@ export default function LiveWorkoutScreen() {
     <SafeAreaView style={s.container}>
       <StatusBar barStyle="light-content" />
       <ProgressBar done={stepIdx} total={totalSteps} />
+      <TouchableOpacity
+        style={{ position: 'absolute', top: 16, left: 16, zIndex: 10, padding: 8 }}
+        onPress={confirmDiscard}
+      >
+        <Feather name="x" color={Colors.textSecondary} size={22} />
+      </TouchableOpacity>
 
       {currentStep.kind === 'z2_cardio' && (
         <Z2Phase

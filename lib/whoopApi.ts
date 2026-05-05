@@ -37,6 +37,7 @@ export type WhoopWorkout = {
 export type WhoopCycle = {
   steps: number | null;
   strainKj: number | null;
+  totalKcal: number | null;
 };
 
 export type WhoopAllData = {
@@ -312,16 +313,21 @@ export async function fetchWhoopWorkouts(userId: string): Promise<WhoopWorkout[]
 export async function fetchWhoopCycle(userId: string): Promise<WhoopCycle | null> {
   try {
     const data = await whoopGet('/v1/cycle?limit=1', userId);
-    console.log('[whoop] v1 cycle raw response:', JSON.stringify(data).substring(0, 500));
-    const record = data?.records?.[0];
+    console.log('[whoop] v1 cycle full raw response:', JSON.stringify(data).substring(0, 800));
+    // v1 cycle API returns { data: [...] }, not { records: [...] }
+    const record = data?.data?.[0] ?? data?.records?.[0];
+    console.log('[whoop] v1 cycle data[0]?.score?.step_count:', data?.data?.[0]?.score?.step_count);
     if (!record?.score) {
       console.log('[whoop] cycle: no score in record:', JSON.stringify(record ?? {}).substring(0, 200));
       return null;
     }
-    console.log('[whoop] cycle score fields:', Object.keys(record.score));
+    const steps     = record.score.step_count ?? null;
+    const totalKcal = record.score.kilojoule != null ? Math.round(record.score.kilojoule / 4.184) : null;
+    console.log('[whoop] cycle score.step_count:', steps, '| kilojoule:', record.score.kilojoule, '| totalKcal:', totalKcal);
     return {
-      steps:    record.score.step_count ?? null,
-      strainKj: record.score.kilojoule  ?? null,
+      steps,
+      strainKj: record.score.kilojoule ?? null,
+      totalKcal,
     };
   } catch (e) {
     console.log('[whoop] fetchWhoopCycle error:', e);
@@ -422,6 +428,13 @@ export function mergeWhoopIntoHealthData(
   if (cycle?.steps != null && cycle.steps > 0) {
     merged.steps = { value: cycle.steps, source: 'Whoop' };
     console.log('[whoop] merge: steps from cycle:', cycle.steps);
+  }
+
+  // Total daily calorie burn from cycle (includes resting + strain — use as Total, not Active)
+  console.log('[whoop] merge: cycle totalKcal raw:', cycle?.totalKcal ?? null, '| activeCalories (strain):', merged.activeCalories?.value ?? null);
+  if (cycle?.totalKcal != null && cycle.totalKcal > 0) {
+    merged.totalCalories = { value: cycle.totalKcal, source: 'Whoop' };
+    console.log('[whoop] merge: totalCalories set to Whoop cycle total:', cycle.totalKcal);
   }
 
   return merged;

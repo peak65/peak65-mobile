@@ -160,19 +160,21 @@ export function selectTotalCalorieSource(
   healthData: WearableHealthData,
   tdeeBase: number | null,
   activeCalories: WearableReading,
+  bmr?: number | null,
 ): WearableReading {
-  // Direct API integrations (not yet built — placeholder for Whoop/Garmin/Coros)
-  // if (wearables.whoop) { ... }
-  // if (wearables.garmin) { ... }
-  // if (wearables.coros) { ... }
-
-  if (!activeCalories.noWearable && activeCalories.value != null && tdeeBase != null) {
-    return {
-      value: tdeeBase + activeCalories.value,
-      source: `${activeCalories.source} + Calculated`,
-      confidence: activeCalories.confidence,
-      noWearable: false,
-    };
+  if (!activeCalories.noWearable && activeCalories.value != null) {
+    // Use raw BMR as base when wearable active calories are present — adding active
+    // calories to tdeeBase (BMR × multiplier) double-counts non-exercise activity.
+    const base = bmr != null ? bmr : tdeeBase;
+    console.log('[wearable] totalCal base — bmr:', bmr, 'tdeeBase:', tdeeBase, 'using:', base);
+    if (base != null) {
+      return {
+        value: Math.round(base + activeCalories.value),
+        source: `${activeCalories.source} + Calculated`,
+        confidence: activeCalories.confidence,
+        noWearable: false,
+      };
+    }
   }
 
   // No wearable active calories — TDEE base only (valid for nutrition coaching)
@@ -204,6 +206,7 @@ export function resolveAllSources(
   healthData: WearableHealthData,
   profile: ProfileForPriority,
   tdeeBase: number | null,
+  bmr?: number | null,
 ): {
   activeCal: WearableReading;
   hrv: WearableReading;
@@ -217,7 +220,7 @@ export function resolveAllSources(
   const rhr       = selectRHRSource(healthData);
   const sleep     = selectSleepSource(healthData);
   const steps     = selectStepsSource(healthData);
-  const totalCal  = selectTotalCalorieSource(wearables, healthData, tdeeBase, activeCal);
+  const totalCal  = selectTotalCalorieSource(wearables, healthData, tdeeBase, activeCal, bmr);
 
   console.log('[wearable] connected:', wearables);
   console.log('[wearable] sources selected:', { activeCal, hrv, rhr, sleep, steps, totalCal });

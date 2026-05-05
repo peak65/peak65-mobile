@@ -64,7 +64,9 @@ type ExGroup =
   | { kind: 'single'; ex: ExerciseItem; origIdx: number }
   | { kind: 'superset'; members: { ex: ExerciseItem; origIdx: number }[] }
   | { kind: 'circuit'; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number; rest: string | null }
-  | { kind: 'block'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] };
+  | { kind: 'block'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] }
+  | { kind: 'part-circuit'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number; rest: string | null }
+  | { kind: 'part-superset'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] };
 
 function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
   const groups: ExGroup[] = [];
@@ -79,7 +81,17 @@ function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
         members.push({ ex: exercises[i], origIdx: i });
         i++;
       }
-      groups.push({ kind: 'block', blockName, members });
+      const firstCircuitId = members[0].ex.circuit_id;
+      if (firstCircuitId && members.every((m) => m.ex.circuit_id === firstCircuitId)) {
+        groups.push({ kind: 'part-circuit', blockName, members, rounds: members[0].ex.circuit_rounds ?? 4, rest: members[0].ex.circuit_rest ?? null });
+      } else {
+        const firstSupersetId = members[0].ex.superset_id;
+        if (firstSupersetId && members.every((m) => m.ex.superset_id === firstSupersetId)) {
+          groups.push({ kind: 'part-superset', blockName, members });
+        } else {
+          groups.push({ kind: 'block', blockName, members });
+        }
+      }
     } else if (ex.circuit_id) {
       const cId = ex.circuit_id;
       const members: { ex: ExerciseItem; origIdx: number }[] = [];
@@ -201,6 +213,39 @@ function ExerciseSection({
             if (group.kind === 'block') {
               return <BlockGroupSection key={gi} blockName={group.blockName} members={group.members} />;
             }
+            if (group.kind === 'part-circuit') {
+              return (
+                <View key={gi} style={styles.partWrapper}>
+                  <View style={styles.partDivider} />
+                  <Text style={styles.partName}>{group.blockName}</Text>
+                  <CircuitBlock members={group.members} rounds={group.rounds} rest={group.rest} />
+                </View>
+              );
+            }
+            if (group.kind === 'part-superset') {
+              return (
+                <View key={gi} style={styles.partWrapper}>
+                  <View style={styles.partDivider} />
+                  <Text style={styles.partName}>{group.blockName}</Text>
+                  <View style={styles.supersetGroup}>
+                    <Text style={styles.supersetLabel}>Superset</Text>
+                    {group.members.map(({ ex, origIdx }) => {
+                      let detail = '';
+                      if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
+                      else if (ex.reps) detail = ex.reps;
+                      const note = ex.notes || ex.note;
+                      return (
+                        <View key={origIdx} style={[styles.exRow, { borderWidth: 0, padding: 0, marginBottom: 6 }]}>
+                          <Text style={styles.exName}>{ex.name}</Text>
+                          {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
+                          {!!note   && <Text style={styles.exDetail}>{note}</Text>}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              );
+            }
             if (group.kind === 'circuit') {
               return <CircuitBlock key={gi} members={group.members} rounds={group.rounds} rest={group.rest} />;
             }
@@ -291,6 +336,33 @@ function StrengthSessionSection({
                   if (group.kind === 'block') {
                     return <BlockGroupSection key={gi} blockName={group.blockName} members={group.members} />;
                   }
+                  if (group.kind === 'part-circuit') {
+                    return (
+                      <View key={gi} style={styles.partWrapper}>
+                        <View style={styles.partDivider} />
+                        <Text style={styles.partName}>{group.blockName}</Text>
+                        <View style={styles.circuitGroup}>
+                          <Text style={styles.circuitLabel}>CIRCUIT · {group.rounds} ROUNDS</Text>
+                          <View style={styles.circuitBody}>
+                            {group.members.map(({ ex, origIdx }) => renderStrExCard(ex, origIdx))}
+                            {!!group.rest && <Text style={styles.circuitRestText}>Rest {group.rest} between rounds</Text>}
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  }
+                  if (group.kind === 'part-superset') {
+                    return (
+                      <View key={gi} style={styles.partWrapper}>
+                        <View style={styles.partDivider} />
+                        <Text style={styles.partName}>{group.blockName}</Text>
+                        <View style={styles.supersetGroup}>
+                          <Text style={styles.supersetLabel}>Superset</Text>
+                          {group.members.map(({ ex, origIdx }) => renderStrExCard(ex, origIdx))}
+                        </View>
+                      </View>
+                    );
+                  }
                   if (group.kind === 'circuit') {
                     return (
                       <View key={gi} style={styles.circuitGroup}>
@@ -319,6 +391,39 @@ function StrengthSessionSection({
               groupBySuperset(block.exercises ?? []).map((group, gi) => {
                 if (group.kind === 'block') {
                   return <BlockGroupSection key={gi} blockName={group.blockName} members={group.members} />;
+                }
+                if (group.kind === 'part-circuit') {
+                  return (
+                    <View key={gi} style={styles.partWrapper}>
+                      <View style={styles.partDivider} />
+                      <Text style={styles.partName}>{group.blockName}</Text>
+                      <CircuitBlock members={group.members} rounds={group.rounds} rest={group.rest} />
+                    </View>
+                  );
+                }
+                if (group.kind === 'part-superset') {
+                  return (
+                    <View key={gi} style={styles.partWrapper}>
+                      <View style={styles.partDivider} />
+                      <Text style={styles.partName}>{group.blockName}</Text>
+                      <View style={styles.supersetGroup}>
+                        <Text style={styles.supersetLabel}>Superset</Text>
+                        {group.members.map(({ ex, origIdx }) => {
+                          let detail = '';
+                          if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
+                          else if (ex.reps) detail = ex.reps;
+                          const note = ex.notes || ex.note;
+                          return (
+                            <View key={origIdx} style={[styles.exRow, { borderWidth: 0, padding: 0, marginBottom: 6 }]}>
+                              <Text style={styles.exName}>{ex.name}</Text>
+                              {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
+                              {!!note   && <Text style={styles.exDetail}>{note}</Text>}
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  );
                 }
                 if (group.kind === 'circuit') {
                   return <CircuitBlock key={gi} members={group.members} rounds={group.rounds} rest={group.rest} />;
@@ -1214,6 +1319,11 @@ const styles = StyleSheet.create({
   blockGroupName: { color: Colors.textPrimary, fontSize: 16, fontFamily: Fonts.metric, marginBottom: 8 },
   blockExRow:     { paddingVertical: 6, gap: 2 },
   blockDivider:   { height: 0.5, backgroundColor: 'rgba(255,255,255,0.08)' },
+
+  // Part wrapper (Part wrapping a Circuit or Superset)
+  partWrapper:    { marginBottom: 4 },
+  partDivider:    { height: 0.5, backgroundColor: 'rgba(255,255,255,0.08)', marginBottom: 8 },
+  partName:       { color: Colors.textPrimary, fontSize: 16, fontFamily: Fonts.metric, marginBottom: 8 },
 
   // Start Workout button
   startWorkoutBtn: {

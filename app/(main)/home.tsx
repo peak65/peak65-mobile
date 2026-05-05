@@ -7,13 +7,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { Footprints, Zap, Target } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import {
   getTodayHealthData, fetchTodayHealthData, fetchTodayWorkouts,
   type HealthData, type WearableHealthData,
 } from '../../lib/healthKit';
 import { fetchAllWhoopData, mergeWhoopIntoHealthData } from '../../lib/whoopApi';
-import { computeTDEEFromProfile } from '../../lib/tdee';
+import { computeTDEEFromProfile, getActivityMultiplier } from '../../lib/tdee';
 import { calculatePeakScore, type PeakScoreResult } from '../../lib/peakScore';
 import {
   getConnectedWearables,
@@ -231,6 +232,7 @@ export default function HomeScreen() {
   const [readinessData, setReadinessData]     = useState<WearableHealthData | null>(null);
   const [peakScore, setPeakScore]             = useState<PeakScoreResult | null>(null);
   const [tdeeBase, setTdeeBase]               = useState<number | null>(null);
+  const [bmr, setBmr]                         = useState<number | null>(null);
   const [externalWorkouts, setExternalWorkouts] = useState<ExternalWorkout[]>([]);
   const [profileGoal, setProfileGoal]         = useState<string | null>(null);
   const [preferredUnits, setPreferredUnits]   = useState<string | null>(null);
@@ -380,7 +382,13 @@ export default function HomeScreen() {
 
           if (profileData) {
             const tdee = computeTDEEFromProfile(profileData);
-            if (tdee.ok) setTdeeBase(tdee.value);
+            if (tdee.ok) {
+              setTdeeBase(tdee.value);
+              const tDays = profileData.current_training_days != null
+                ? (parseInt(profileData.current_training_days, 10) || 4)
+                : profileData.rest_days != null ? Math.max(0, 7 - profileData.rest_days) : 4;
+              setBmr(Math.round(tdee.value / getActivityMultiplier(tDays)));
+            }
           }
 
           const score = await calculatePeakScore(uid, {
@@ -455,7 +463,12 @@ export default function HomeScreen() {
             const wearables = getConnectedWearables(profileData);
             const tdee = computeTDEEFromProfile(profileData);
             const base = tdee.ok ? tdee.value : null;
-            resolveAllSources(wearables, rd, profileData, base);
+            const tDays = profileData.current_training_days != null
+              ? (parseInt(profileData.current_training_days, 10) || 4)
+              : profileData.rest_days != null ? Math.max(0, 7 - profileData.rest_days) : 4;
+            const localBmr = base != null ? Math.round(base / getActivityMultiplier(tDays)) : null;
+            const sources = resolveAllSources(wearables, rd, profileData, base, localBmr);
+            console.log('[home] totalCal final:', sources.totalCal.value, '| source:', sources.totalCal.source);
           }
           const hrv   = rd.hrv?.value         ?? null;
           const sleep = rd.sleepHours?.value   ?? null;
@@ -491,10 +504,21 @@ export default function HomeScreen() {
           });
           if (profileData) {
             const tdee = computeTDEEFromProfile(profileData);
-            if (tdee.ok) setTdeeBase(tdee.value);
+            if (tdee.ok) {
+              setTdeeBase(tdee.value);
+              const tDays = profileData.current_training_days != null
+                ? (parseInt(profileData.current_training_days, 10) || 4)
+                : profileData.rest_days != null ? Math.max(0, 7 - profileData.rest_days) : 4;
+              setBmr(Math.round(tdee.value / getActivityMultiplier(tDays)));
+            }
             const wearables = getConnectedWearables(profileData);
             const base = tdee.ok ? tdee.value : null;
-            resolveAllSources(wearables, rd, profileData, base);
+            const tDays2 = profileData.current_training_days != null
+              ? (parseInt(profileData.current_training_days, 10) || 4)
+              : profileData.rest_days != null ? Math.max(0, 7 - profileData.rest_days) : 4;
+            const localBmr = base != null ? Math.round(base / getActivityMultiplier(tDays2)) : null;
+            const sources = resolveAllSources(wearables, rd, profileData, base, localBmr);
+            console.log('[home] Whoop-only totalCal final:', sources.totalCal.value, '| source:', sources.totalCal.source);
           }
           const hrv   = rd.hrv?.value       ?? null;
           const sleep = rd.sleepHours?.value ?? null;
@@ -659,58 +683,57 @@ export default function HomeScreen() {
 
         {/* Stats row — Steps | Active | Total */}
         <View style={styles.row}>
-          {[
-            {
-              icon: 'trending-up' as const,
-              label: 'Steps',
-              val: hasWearable && healthData?.steps != null
-                ? healthData.steps.toLocaleString('en-US') : '--',
-            },
-            {
-              icon: 'zap' as const,
-              label: 'Active',
-              val: hasWearable && healthData?.activeCalories != null
-                ? `${healthData.activeCalories}` : '--',
-            },
-          ].map(s => (
-            <View key={s.label} style={[styles.statCard, { flex: 1 }]}>
-              <Feather name={s.icon} color={Colors.textSecondary} size={20} />
-              <Text style={styles.statVal}>{s.val}</Text>
-              <Text style={styles.statLabel}>{s.label}</Text>
-              {!hasWearable && (
-                <Text style={styles.statSub}>Connect Health</Text>
-              )}
-            </View>
-          ))}
-          {/* Total calories — Whoop or TDEE projection */}
+          {/* Steps */}
+          <View style={[styles.statCard, { flex: 1 }]}>
+            <Footprints color={Colors.textSecondary} size={20} strokeWidth={1.5} />
+            <Text style={styles.statVal}>
+              {hasWearable && healthData?.steps != null ? healthData.steps.toLocaleString('en-US') : '--'}
+            </Text>
+            <Text style={styles.statLabel}>Steps</Text>
+            {!hasWearable && <Text style={styles.statSub}>Connect Health</Text>}
+          </View>
+          {/* Active Calories */}
+          <View style={[styles.statCard, { flex: 1 }]}>
+            <Zap color={Colors.textSecondary} size={20} strokeWidth={1.5} />
+            <Text style={styles.statVal}>
+              {hasWearable && healthData?.activeCalories != null ? `${healthData.activeCalories}` : '--'}
+            </Text>
+            <Text style={styles.statLabel}>Active</Text>
+            {!hasWearable && <Text style={styles.statSub}>Connect Health</Text>}
+          </View>
+          {/* Total calories — Whoop cycle total or BMR + active projection */}
           {(() => {
             const whoopTotal = readinessData?.totalCalories?.source?.includes('Whoop')
               ? readinessData.totalCalories.value : null;
             if (whoopTotal != null) {
+              console.log('[home] Total Cal display: Whoop cycle total:', whoopTotal);
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
-                  <Feather name="target" color={Colors.textSecondary} size={20} />
+                  <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                   <Text style={styles.statVal}>{whoopTotal}</Text>
                   <Text style={styles.statLabel}>Total</Text>
-                  <Text style={styles.statSub}>Whoop + Est.</Text>
+                  <Text style={styles.statSub}>Whoop</Text>
                 </View>
               );
             }
             const activeSoFar = hasWearable && healthData?.activeCalories != null ? healthData.activeCalories : null;
             const now          = new Date();
             const hoursElapsed = now.getHours() + now.getMinutes() / 60;
-            const basalSoFar   = tdeeBase != null ? Math.round((tdeeBase / 24) * hoursElapsed) : null;
+            // Use raw BMR as base to avoid double-counting NEAT already in tdeeBase
+            const base         = bmr ?? tdeeBase;
+            const basalSoFar   = base != null ? Math.round((base / 24) * hoursElapsed) : null;
             const currentBurn  = basalSoFar != null && activeSoFar != null
               ? basalSoFar + activeSoFar
               : basalSoFar ?? null;
-            const projected    = tdeeBase != null && activeSoFar != null ? tdeeBase + activeSoFar : null;
+            const projected    = base != null && activeSoFar != null ? base + activeSoFar : null;
+            console.log('[home] Total Cal display: activeSoFar:', activeSoFar, '| bmr:', bmr, '| tdeeBase:', tdeeBase, '| projected:', projected);
             const syncTime     = healthData?.lastActiveCalSync
               ? new Date(healthData.lastActiveCalSync).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
               : null;
             if (!healthConnected || projected == null) {
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
-                  <Feather name="target" color={Colors.textSecondary} size={20} />
+                  <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                   <Text style={styles.statVal}>--</Text>
                   <Text style={styles.statLabel}>Total</Text>
                   {!healthConnected && <Text style={styles.statSub}>Connect Health</Text>}
@@ -719,7 +742,7 @@ export default function HomeScreen() {
             }
             return (
               <View style={[styles.statCard, { flex: 1 }]}>
-                <Feather name="target" color={Colors.textSecondary} size={20} />
+                <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                 <Text style={styles.statVal}>{projected}</Text>
                 <Text style={styles.statLabel}>Projected</Text>
                 {currentBurn != null && <Text style={styles.statSub}>{currentBurn} so far</Text>}
@@ -757,13 +780,11 @@ export default function HomeScreen() {
                         : Math.round(t.reading.value as number)}{t.unit}
                     </Text>
                   ) : (
-                    <Text style={[styles.recoveryVal, { color: Colors.textSecondary }]}>--</Text>
+                    <Text style={styles.connectWearable}>Connect wearable</Text>
                   )}
                   <Text style={styles.statLabel}>{t.label}</Text>
                   {t.reading && !t.reading.noWearable && t.reading.source ? (
                     <Text style={styles.readinessSource}>{t.reading.source}</Text>
-                  ) : !hasWearableData ? (
-                    <Text style={styles.connectWearable}>Connect wearable</Text>
                   ) : null}
                 </TouchableOpacity>
               ))}

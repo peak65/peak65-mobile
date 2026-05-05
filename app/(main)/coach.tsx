@@ -55,9 +55,10 @@ export default function CoachScreen({ navigation }: Props) {
 
     const { data: rows, error } = await supabase
       .from('coach_athletes')
-      .select('id, athlete_id, tier')
-      .eq('coach_id', user.id)
-      .eq('status', 'active');
+      .select('id, athlete_id, tier, profile:profiles!athlete_id(first_name, last_name)')
+      .eq('coach_id', user.id);
+
+    console.log('[coach] raw rows:', JSON.stringify(rows?.slice(0, 3)), '| error:', error?.message);
 
     if (!mounted.current) return;
     if (error || !rows || rows.length === 0) {
@@ -67,12 +68,8 @@ export default function CoachScreen({ navigation }: Props) {
 
     const ids = rows.map(r => r.athlete_id as string);
 
-    // Parallel: profiles, last sessions, unread messages, latest scores
-    const [profileRes, sessionRes, msgRes, scoreRes] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select('id, first_name, last_name')
-        .in('id', ids),
+    // Parallel: last sessions, unread messages, latest scores
+    const [sessionRes, msgRes, scoreRes] = await Promise.all([
       supabase
         .from('session_logs')
         .select('user_id, session_name, completed_at')
@@ -95,9 +92,6 @@ export default function CoachScreen({ navigation }: Props) {
 
     if (!mounted.current) return;
     // Build lookup maps
-    const profileMap = new Map<string, { first_name: string; last_name: string }>();
-    for (const p of profileRes.data ?? []) profileMap.set(p.id, p);
-
     const lastSessionMap = new Map<string, { name: string; completedAt: string }>();
     for (const s of sessionRes.data ?? []) {
       if (!lastSessionMap.has(s.user_id)) {
@@ -116,7 +110,7 @@ export default function CoachScreen({ navigation }: Props) {
     }
 
     setAthletes(rows.map(r => {
-      const p = profileMap.get(r.athlete_id);
+      const p = (r as any).profile;
       return {
         coachAthleteId: r.id,
         athleteId:      r.athlete_id,
