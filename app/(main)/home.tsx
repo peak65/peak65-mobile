@@ -3,7 +3,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import {
   View, Text, ScrollView, TouchableOpacity, RefreshControl,
-  StyleSheet, ActivityIndicator, Modal, AppState,
+  StyleSheet, ActivityIndicator, Modal, AppState, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -203,6 +203,60 @@ function scoreStatusText(score: number): string {
   return 'Rest Zone';
 }
 
+// ─── Daily health cache ───────────────────────────────────────────────────────
+
+async function saveHealthCache(uid: string, rd: WearableHealthData, date: string): Promise<void> {
+  await supabase.from('daily_health_readings').upsert({
+    user_id:                uid,
+    date,
+    hrv:                    rd.hrv?.value             ?? null,
+    hrv_source:             rd.hrv?.source            ?? null,
+    resting_hr:             rd.restingHR?.value       ?? null,
+    resting_hr_source:      rd.restingHR?.source      ?? null,
+    sleep_hours:            rd.sleepHours?.value      ?? null,
+    sleep_source:           rd.sleepHours?.source     ?? null,
+    steps:                  rd.steps?.value           ?? null,
+    steps_source:           rd.steps?.source          ?? null,
+    active_calories:        rd.activeCalories?.value  ?? null,
+    active_calories_source: rd.activeCalories?.source ?? null,
+    total_calories:         rd.totalCalories?.value   ?? null,
+    total_calories_source:  rd.totalCalories?.source  ?? null,
+  }, { onConflict: 'user_id,date' });
+}
+
+function cacheToReadiness(row: Record<string, any>): WearableHealthData {
+  const r = (val: any, src: any) =>
+    val != null ? { value: val as number, source: (src as string) ?? 'Cached' } : null;
+  return {
+    hrv:            r(row.hrv, row.hrv_source),
+    restingHR:      r(row.resting_hr, row.resting_hr_source),
+    sleepHours:     r(row.sleep_hours, row.sleep_source),
+    steps:          r(row.steps, row.steps_source),
+    activeCalories: r(row.active_calories, row.active_calories_source),
+    basalCalories:  null,
+    totalCalories:  r(row.total_calories, row.total_calories_source),
+  };
+}
+
+// ─── Shimmer skeleton ─────────────────────────────────────────────────────────
+
+function ShimmerBox({ width = 64, height = 26 }: { width?: number; height?: number }) {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.65, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3,  duration: 700, useNativeDriver: true }),
+      ]),
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [opacity]);
+  return (
+    <Animated.View style={{ width, height, backgroundColor: Colors.nested, borderRadius: 6, opacity }} />
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
@@ -233,6 +287,7 @@ export default function HomeScreen() {
   const [peakScore, setPeakScore]             = useState<PeakScoreResult | null>(null);
   const [tdeeBase, setTdeeBase]               = useState<number | null>(null);
   const [bmr, setBmr]                         = useState<number | null>(null);
+  const [fetchingFresh, setFetchingFresh]     = useState(false);
   const [externalWorkouts, setExternalWorkouts] = useState<ExternalWorkout[]>([]);
   const [profileGoal, setProfileGoal]         = useState<string | null>(null);
   const [preferredUnits, setPreferredUnits]   = useState<string | null>(null);
@@ -293,7 +348,7 @@ export default function HomeScreen() {
 
     const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
-    const [progsRes, logsRes, profileRes, extStreakRes] = await Promise.all([
+    const [progsRes, logsRes, profileRes, extStreakRes, cacheRes] = await Promise.all([
       supabase.from('programs').select('*').eq('user_id', uid)
         .order('week_number', { ascending: true }),
       supabase.from('session_logs').select('completed_at')
@@ -306,6 +361,12 @@ export default function HomeScreen() {
         .select('start_time')
         .eq('user_id', uid)
         .gte('start_time', new Date(Date.now() - 60 * 86_400_000).toISOString()),
+      supabase.from('daily_health_readings')
+        .select('*')
+        .eq('user_id', uid)
+        .order('date', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
     if (!mounted.current || myId !== loadIdRef.current) return;
 
@@ -367,6 +428,26 @@ export default function HomeScreen() {
     setHealthConnected(isHealthConnected);
 
     setLoading(false);
+
+    // Apply cached health data immediately so metrics display before the background fetch.
+    const cacheRow = cacheRes.data as Record<string, any> | null;
+    if (cacheRow && (isHealthConnected || isWhoopConnected)) {
+      const cachedRd = cacheToReadiness(cacheRow);
+      setReadinessData(cachedRd);
+      setHealthData({
+        steps:             cachedRd.steps?.value         ?? null,
+        activeCalories:    cachedRd.activeCalories?.value ?? null,
+        totalCalories:     cachedRd.totalCalories?.value  ?? null,
+        restingHR:         cachedRd.restingHR?.value      ?? null,
+        hrv:               cachedRd.hrv?.value            ?? null,
+        sleepHours:        cachedRd.sleepHours?.value     ?? null,
+        exerciseMinutes:   null,
+        lastActiveCalSync: null,
+      });
+      console.log('[cache] applied daily_health_readings row from:', cacheRow.date);
+    }
+    // Show shimmer on metric cards while background fetch runs (only if no cache → no readinessData yet)
+    if (isHealthConnected || isWhoopConnected) setFetchingFresh(true);
 
     detectCandidates(uid)
       .then(() => getPendingCandidates(uid))
@@ -459,6 +540,8 @@ export default function HomeScreen() {
             }
           }
           setReadinessData(rd);
+          setFetchingFresh(false);
+          saveHealthCache(uid, rd, new Date().toLocaleDateString('en-CA')).catch(() => {});
           if (profileData) {
             const wearables = getConnectedWearables(profileData);
             const tdee = computeTDEEFromProfile(profileData);
@@ -475,7 +558,7 @@ export default function HomeScreen() {
           const rhr   = rd.restingHR?.value    ?? null;
           console.log('[home] readiness row final values:', { hrv, sleep, rhr });
         })
-        .catch(e => console.log('[home] readiness fetch error:', e));
+        .catch(e => { console.log('[home] readiness fetch error:', e); setFetchingFresh(false); });
 
     } else if (isWhoopConnected) {
       console.log('[health] Apple Health not connected — running Whoop-only path');
@@ -492,6 +575,8 @@ export default function HomeScreen() {
           const rd = mergeWhoopIntoHealthData(empty, whoopData);
           console.log('[health] Whoop-only merged readiness:', JSON.stringify(rd));
           setReadinessData(rd);
+          setFetchingFresh(false);
+          saveHealthCache(uid, rd, new Date().toLocaleDateString('en-CA')).catch(() => {});
           setHealthData({
             steps:             rd.steps?.value         ?? null,
             activeCalories:    rd.activeCalories?.value ?? null,
@@ -526,6 +611,7 @@ export default function HomeScreen() {
           console.log('[home] Whoop-only readiness row final values:', { hrv, sleep, rhr });
         } catch (e) {
           console.log('[home] whoop-only fetch error:', e);
+          setFetchingFresh(false);
         }
       })();
     } else {
@@ -686,23 +772,40 @@ export default function HomeScreen() {
           {/* Steps */}
           <View style={[styles.statCard, { flex: 1 }]}>
             <Footprints color={Colors.textSecondary} size={20} strokeWidth={1.5} />
-            <Text style={styles.statVal}>
-              {hasWearable && healthData?.steps != null ? healthData.steps.toLocaleString('en-US') : '--'}
-            </Text>
+            {fetchingFresh && !readinessData && hasWearable ? (
+              <ShimmerBox width={64} height={26} />
+            ) : (
+              <Text style={styles.statVal}>
+                {hasWearable && healthData?.steps != null ? healthData.steps.toLocaleString('en-US') : '--'}
+              </Text>
+            )}
             <Text style={styles.statLabel}>Steps</Text>
             {!hasWearable && <Text style={styles.statSub}>Connect Health</Text>}
           </View>
           {/* Active Calories */}
           <View style={[styles.statCard, { flex: 1 }]}>
             <Zap color={Colors.textSecondary} size={20} strokeWidth={1.5} />
-            <Text style={styles.statVal}>
-              {hasWearable && healthData?.activeCalories != null ? `${healthData.activeCalories}` : '--'}
-            </Text>
+            {fetchingFresh && !readinessData && hasWearable ? (
+              <ShimmerBox width={64} height={26} />
+            ) : (
+              <Text style={styles.statVal}>
+                {hasWearable && healthData?.activeCalories != null ? `${healthData.activeCalories}` : '--'}
+              </Text>
+            )}
             <Text style={styles.statLabel}>Active</Text>
             {!hasWearable && <Text style={styles.statSub}>Connect Health</Text>}
           </View>
           {/* Total calories — Whoop cycle total or BMR + active projection */}
           {(() => {
+            if (fetchingFresh && !readinessData && hasWearable) {
+              return (
+                <View style={[styles.statCard, { flex: 1 }]}>
+                  <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
+                  <ShimmerBox width={64} height={26} />
+                  <Text style={styles.statLabel}>Total</Text>
+                </View>
+              );
+            }
             const whoopTotal = readinessData?.totalCalories?.source?.includes('Whoop')
               ? readinessData.totalCalories.value : null;
             if (whoopTotal != null) {
@@ -779,6 +882,8 @@ export default function HomeScreen() {
                         ? t.reading.value.toFixed(1)
                         : Math.round(t.reading.value as number)}{t.unit}
                     </Text>
+                  ) : fetchingFresh && !readinessData && hasWearable ? (
+                    <ShimmerBox width={56} height={32} />
                   ) : (
                     <Text style={styles.connectWearable}>Connect wearable</Text>
                   )}
