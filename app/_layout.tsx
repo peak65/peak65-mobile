@@ -30,6 +30,7 @@ import WaitingScreen from './(main)/waiting';
 import CoachScreen from './(main)/coach';
 import CoachAthleteScreen from './(main)/coach-athlete';
 import UpdateProgramScreen from './(main)/update-program';
+import MessagesScreen from './(main)/messages';
 
 // ─── Shared types used across screens ────────────────────────────────────────
 
@@ -114,6 +115,7 @@ export type TabParamList = {
   Home: undefined;
   Program: undefined;
   History: undefined;
+  Messages: undefined;
   Coach: undefined;
   Profile: undefined;
 };
@@ -125,19 +127,26 @@ const MainStack = createNativeStackNavigator<MainStackParamList>();
 const Tab       = createBottomTabNavigator<TabParamList>();
 
 const TAB_ICON_NAMES: Record<keyof TabParamList, React.ComponentProps<typeof Feather>['name']> = {
-  Home:    'home',
-  Program: 'clipboard',
-  History: 'clock',
-  Coach:   'activity',
-  Profile: 'user',
+  Home:     'home',
+  Program:  'clipboard',
+  History:  'clock',
+  Messages: 'message-square',
+  Coach:    'activity',
+  Profile:  'user',
 };
 
 // Context that makes isCoach available to MainTabs without prop drilling
 // through the navigator's component= API.
 const CoachContext = React.createContext(false);
 
+export const UnreadContext = React.createContext<{
+  hasUnread: boolean;
+  setHasUnread: (v: boolean) => void;
+}>({ hasUnread: false, setHasUnread: () => {} });
+
 function MainTabs() {
-  const isCoach = React.useContext(CoachContext);
+  const isCoach           = React.useContext(CoachContext);
+  const { hasUnread }     = React.useContext(UnreadContext);
 
   return (
     <Tab.Navigator
@@ -155,16 +164,22 @@ function MainTabs() {
           tabBarActiveTintColor:   Colors.accent,
           tabBarInactiveTintColor: Colors.textSecondary,
           tabBarIcon: ({ color }) => (
-            <Feather name={iconName} color={color} size={24} />
+            <View>
+              <Feather name={iconName} color={color} size={24} />
+              {route.name === 'Messages' && hasUnread && (
+                <View style={{ position: 'absolute', top: 0, right: -4, width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.accent }} />
+              )}
+            </View>
           ),
         };
       }}
     >
-      <Tab.Screen name="Home"    component={HomeScreen} />
-      <Tab.Screen name="Program" component={ProgramScreen} />
-      <Tab.Screen name="History" component={HistoryScreen} />
+      <Tab.Screen name="Home"     component={HomeScreen} />
+      <Tab.Screen name="Program"  component={ProgramScreen} />
+      <Tab.Screen name="History"  component={HistoryScreen} />
+      <Tab.Screen name="Messages" component={MessagesScreen} />
       {isCoach && <Tab.Screen name="Coach" component={CoachScreen} />}
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Profile"  component={ProfileScreen} />
     </Tab.Navigator>
   );
 }
@@ -193,6 +208,16 @@ function MainNavigator({ initialRoute }: { initialRoute: keyof MainStackParamLis
 }
 
 // ─── Push token registration ─────────────────────────────────────────────────
+
+async function checkUnread(userId: string): Promise<boolean> {
+  const { count } = await supabase
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('athlete_id', userId)
+    .is('read_at', null)
+    .neq('sender_id', userId);
+  return (count ?? 0) > 0;
+}
 
 async function registerPushToken(userId: string) {
   if (Platform.OS !== 'ios') return;
@@ -335,9 +360,10 @@ class ErrorBoundary extends React.Component<
 // ─── Root layout ──────────────────────────────────────────────────────────────
 
 export default function RootLayout() {
-  const [appState, setAppState] = useState<AppState>('loading');
-  const [isCoach, setIsCoach]   = useState(false);
-  const resolvingRef            = React.useRef(false);
+  const [appState,   setAppState]   = useState<AppState>('loading');
+  const [isCoach,    setIsCoach]    = useState(false);
+  const [hasUnread,  setHasUnread]  = useState(false);
+  const resolvingRef                = React.useRef(false);
 
   const [fontsLoaded] = useFonts({
     BarlowCondensed_700Bold,
@@ -385,6 +411,7 @@ export default function RootLayout() {
           if (newState === 'authenticated' && session?.user?.id) {
             detectCandidates(session.user.id).catch(() => {});
             registerPushToken(session.user.id).catch(() => {});
+            checkUnread(session.user.id).then(u => setHasUnread(u)).catch(() => {});
           }
         } catch (err) {
           console.log('[layout] auth handler error:', err);
@@ -418,9 +445,11 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <CoachContext.Provider value={isCoach}>
-        <NavigationContainer>
-          <MainNavigator initialRoute={initialRoute} />
-        </NavigationContainer>
+        <UnreadContext.Provider value={{ hasUnread, setHasUnread }}>
+          <NavigationContainer>
+            <MainNavigator initialRoute={initialRoute} />
+          </NavigationContainer>
+        </UnreadContext.Provider>
       </CoachContext.Provider>
     </ErrorBoundary>
   );
