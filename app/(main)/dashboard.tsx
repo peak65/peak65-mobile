@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { supabase } from '../../lib/supabase';
+import { Colors } from '../../lib/theme';
 
 export default function DashboardScreen() {
   async function handleLogout() {
@@ -27,7 +28,7 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#080808',
+    backgroundColor: Colors.background,
     paddingHorizontal: 24,
   },
   content: {
@@ -38,22 +39,22 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 36,
     fontWeight: '800',
-    color: '#f0ede8',
+    color: Colors.textPrimary,
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: '#8a877f',
+    color: Colors.textSecondary,
   },
   logoutButton: {
-    backgroundColor: '#e8ff47',
+    backgroundColor: Colors.accent,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
     marginBottom: 16,
   },
   logoutText: {
-    color: '#080808',
+    color: Colors.background,
     fontSize: 16,
     fontWeight: '700',
   },

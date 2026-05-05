@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import { Colors } from '../../lib/theme';
+import { ArrowLeft } from 'lucide-react-native';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -23,12 +25,6 @@ type Checkin = {
   body_fat_percentage: number | null;
 };
 
-// ─── Colours ──────────────────────────────────────────────────────────────────
-
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
 
 // ─── Bar chart ────────────────────────────────────────────────────────────────
 
@@ -83,23 +79,23 @@ const chartStyles = StyleSheet.create({
     gap: 4,
   },
   barVal: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 10,
     textAlign: 'center',
   },
   bar: {
     width: 28,
-    backgroundColor: YELLOW,
+    backgroundColor: Colors.accent,
     borderRadius: 4,
     minHeight: 4,
   },
   barLabel: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 10,
     textAlign: 'center',
   },
   unit: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 12,
     textAlign: 'right',
     marginTop: 4,
@@ -109,7 +105,7 @@ const chartStyles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 14,
   },
 });
@@ -202,7 +198,7 @@ export default function CheckinScreen(_props: Props) {
             onPress={() => navigation.goBack()}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Text style={styles.backArrow}>←</Text>
+            <ArrowLeft color={Colors.textPrimary} size={22} strokeWidth={1.5} />
           </TouchableOpacity>
           <Text style={styles.screenTitle}>Check-in</Text>
           <View style={{ width: 32 }} />
@@ -228,21 +224,21 @@ export default function CheckinScreen(_props: Props) {
         <TextInput
           style={styles.input}
           placeholder={`Weight (${weightUnit})`}
-          placeholderTextColor={GREY}
+          placeholderTextColor={Colors.textSecondary}
           value={weight}
           onChangeText={setWeight}
           keyboardType="decimal-pad"
-          selectionColor={YELLOW}
+          selectionColor={Colors.accent}
         />
 
         <TextInput
           style={[styles.input, { marginTop: 10 }]}
           placeholder="Body fat % (optional)"
-          placeholderTextColor={GREY}
+          placeholderTextColor={Colors.textSecondary}
           value={bodyFat}
           onChangeText={setBodyFat}
           keyboardType="decimal-pad"
-          selectionColor={YELLOW}
+          selectionColor={Colors.accent}
         />
 
         <TouchableOpacity
@@ -275,7 +271,7 @@ export default function CheckinScreen(_props: Props) {
         </View>
 
         {loading ? (
-          <ActivityIndicator color={YELLOW} style={{ marginTop: 32 }} />
+          <ActivityIndicator color={Colors.accent} style={{ marginTop: 32 }} />
         ) : activeTab === 'weight' ? (
           <BarChart values={weightValues} labels={weightLabels} unit={weightUnit} />
         ) : (
@@ -291,7 +287,7 @@ export default function CheckinScreen(_props: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BLACK,
+    backgroundColor: Colors.background,
   },
   content: {
     paddingHorizontal: 24,
@@ -305,20 +301,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 16,
   },
-  backArrow: {
-    color: OFF_WHITE,
-    fontSize: 22,
-    width: 32,
-  },
   screenTitle: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 20,
     fontWeight: '700',
   },
 
   // Section label
   sectionLabel: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -334,41 +325,41 @@ const styles = StyleSheet.create({
   },
   unitBtn: {
     flex: 1,
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: '#262626',
+    borderColor: Colors.border,
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
   unitBtnSelected: {
-    backgroundColor: YELLOW,
-    borderColor: YELLOW,
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
   },
   unitBtnText: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 15,
     fontWeight: '600',
   },
   unitBtnTextSelected: {
-    color: BLACK,
+    color: Colors.background,
   },
 
   // Inputs
   input: {
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: '#262626',
+    borderColor: Colors.border,
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 16,
   },
 
   // Log button
   logBtn: {
-    backgroundColor: YELLOW,
+    backgroundColor: Colors.accent,
     borderRadius: 10,
     paddingVertical: 16,
     alignItems: 'center',
@@ -378,7 +369,7 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   logBtnText: {
-    color: BLACK,
+    color: Colors.background,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -386,7 +377,7 @@ const styles = StyleSheet.create({
   // Tabs
   tabRow: {
     flexDirection: 'row',
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
     borderRadius: 10,
     padding: 4,
     gap: 4,
@@ -399,14 +390,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   tabActive: {
-    backgroundColor: YELLOW,
+    backgroundColor: Colors.accent,
   },
   tabText: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 14,
     fontWeight: '600',
   },
   tabTextActive: {
-    color: BLACK,
+    color: Colors.background,
   },
 });

@@ -17,12 +17,8 @@ import {
   fetchAllWhoopData, upsertWhoopWorkouts, mergeWhoopIntoHealthData,
 } from '../../lib/whoopApi';
 import SliderInput from '../../components/SliderInput';
-
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
-const CARD_BG   = '#111111';
+import { Colors, Fonts } from '../../lib/theme';
+import { ChevronRight } from 'lucide-react-native';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -144,11 +140,11 @@ function SliderModal({
 
 const sliderModalStyles = StyleSheet.create({
   valueText: {
-    color: OFF_WHITE, fontSize: 44, fontWeight: '800',
+    color: Colors.textPrimary, fontFamily: Fonts.metricHeavy, fontSize: 44,
     textAlign: 'center', letterSpacing: -1, marginBottom: 4,
   },
   rangeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
-  rangeText: { color: GREY, fontSize: 12 },
+  rangeText: { color: Colors.textSecondary, fontSize: 12 },
 });
 
 // ─── TDEE computation (delegated to lib/tdee.ts) ─────────────────────────────
@@ -173,7 +169,7 @@ function PickerModal({
             <TouchableOpacity key={opt.value}
               style={[styles.pickerOption, value === opt.value && styles.pickerOptionActive]}
               onPress={() => { onSelect(opt.value); onClose(); }}>
-              <Text style={[styles.pickerOptionText, value === opt.value && { color: BLACK }]}>
+              <Text style={[styles.pickerOptionText, value === opt.value && { color: Colors.background }]}>
                 {opt.label}
               </Text>
             </TouchableOpacity>
@@ -212,7 +208,7 @@ function MultiSelectModal({
               <TouchableOpacity key={opt}
                 style={[styles.pickerOption, selected.includes(opt) && styles.pickerOptionActive]}
                 onPress={() => toggle(opt)}>
-                <Text style={[styles.pickerOptionText, selected.includes(opt) && { color: BLACK }]}>
+                <Text style={[styles.pickerOptionText, selected.includes(opt) && { color: Colors.background }]}>
                   {opt}
                 </Text>
               </TouchableOpacity>
@@ -269,7 +265,7 @@ function HealthReadingRow({
     <View style={styles.healthRow}>
       <Text style={styles.settingLabel}>{label}</Text>
       <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[styles.settingValue, reading && { color: OFF_WHITE }]}>{display}</Text>
+        <Text style={[styles.settingValue, reading && { color: Colors.textPrimary }]}>{display}</Text>
         {reading && onSourcePress ? (
           <TouchableOpacity onPress={onSourcePress} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
             <Text style={styles.healthSource}>{confidence === 'medium' ? '⚠️ ' : ''}{reading.source} ⓘ</Text>
@@ -294,7 +290,7 @@ function SettingRow({
       <Text style={styles.settingLabel}>{label}</Text>
       <View style={styles.settingRight}>
         <Text style={styles.settingValue} numberOfLines={1}>{value || '—'}</Text>
-        {!!onPress && <Text style={styles.settingChevron}>›</Text>}
+        {!!onPress && <ChevronRight color={Colors.textSecondary} size={16} strokeWidth={1.5} />}
       </View>
     </TouchableOpacity>
   );
@@ -686,7 +682,7 @@ export default function ProfileScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <ActivityIndicator color={YELLOW} style={{ flex: 1 }} />
+        <ActivityIndicator color={Colors.accent} style={{ flex: 1 }} />
       </SafeAreaView>
     );
   }
@@ -844,7 +840,7 @@ export default function ProfileScreen() {
                   </View>
                   <Text style={styles.gsArrow}>→</Text>
                   <View style={[styles.gsGoalChip, styles.gsGoalChipNew]}>
-                    <Text style={[styles.gsGoalChipText, { color: BLACK }]}>
+                    <Text style={[styles.gsGoalChipText, { color: Colors.background }]}>
                       {targetGoal === 'hyrox' ? 'Hyrox' : 'General Fitness'}
                     </Text>
                   </View>
@@ -869,7 +865,7 @@ export default function ProfileScreen() {
                   <TouchableOpacity key={d.value}
                     style={[styles.pickerOption, gsDivision === d.value && styles.pickerOptionActive]}
                     onPress={() => setGsDivision(d.value)}>
-                    <Text style={[styles.pickerOptionText, gsDivision === d.value && { color: BLACK }]}>{d.label}</Text>
+                    <Text style={[styles.pickerOptionText, gsDivision === d.value && { color: Colors.background }]}>{d.label}</Text>
                   </TouchableOpacity>
                 ))}
                 <Text style={styles.gsFieldLabel}>Race Date (optional)</Text>
@@ -878,8 +874,8 @@ export default function ProfileScreen() {
                   value={gsRaceDate}
                   onChangeText={setGsRaceDate}
                   placeholder="YYYY-MM-DD"
-                  placeholderTextColor={GREY}
-                  selectionColor={YELLOW}
+                  placeholderTextColor={Colors.textSecondary}
+                  selectionColor={Colors.accent}
                 />
                 <Text style={styles.gsFieldLabel}>Goal Time (optional)</Text>
                 <TextInput
@@ -887,8 +883,8 @@ export default function ProfileScreen() {
                   value={gsGoalTime}
                   onChangeText={setGsGoalTime}
                   placeholder="e.g. 1:30:00"
-                  placeholderTextColor={GREY}
-                  selectionColor={YELLOW}
+                  placeholderTextColor={Colors.textSecondary}
+                  selectionColor={Colors.accent}
                 />
                 <Text style={styles.gsFieldLabel}>Run Confidence</Text>
                 <Text style={styles.gsSub}>1 = needs the most work, 5 = your strongest asset</Text>
@@ -897,7 +893,7 @@ export default function ProfileScreen() {
                     <TouchableOpacity key={n}
                       style={[styles.gsConfidenceBtn, gsRunConfidence === n && styles.gsConfidenceBtnActive]}
                       onPress={() => setGsRunConfidence(n)}>
-                      <Text style={[styles.gsConfidenceBtnText, gsRunConfidence === n && { color: BLACK }]}>{n}</Text>
+                      <Text style={[styles.gsConfidenceBtnText, gsRunConfidence === n && { color: Colors.background }]}>{n}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -906,7 +902,7 @@ export default function ProfileScreen() {
                   <TouchableOpacity key={w}
                     style={[styles.pickerOption, gsWeaknesses.includes(w) && styles.pickerOptionActive]}
                     onPress={() => setGsWeaknesses(p => p.includes(w) ? p.filter(x => x !== w) : [...p, w])}>
-                    <Text style={[styles.pickerOptionText, gsWeaknesses.includes(w) && { color: BLACK }]}>{w}</Text>
+                    <Text style={[styles.pickerOptionText, gsWeaknesses.includes(w) && { color: Colors.background }]}>{w}</Text>
                   </TouchableOpacity>
                 ))}
                 <TouchableOpacity style={[styles.saveBtn, { marginTop: 16, marginBottom: 8 }]} onPress={executeGoalSwitch}>
@@ -925,7 +921,7 @@ export default function ProfileScreen() {
                   <TouchableOpacity key={g.value}
                     style={[styles.pickerOption, gsPrimaryGoal === g.value && styles.pickerOptionActive]}
                     onPress={() => setGsPrimaryGoal(g.value)}>
-                    <Text style={[styles.pickerOptionText, gsPrimaryGoal === g.value && { color: BLACK }]}>{g.label}</Text>
+                    <Text style={[styles.pickerOptionText, gsPrimaryGoal === g.value && { color: Colors.background }]}>{g.label}</Text>
                   </TouchableOpacity>
                 ))}
                 <TouchableOpacity
@@ -943,7 +939,7 @@ export default function ProfileScreen() {
 
             {goalSwitchStep === 'generating' && (
               <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-                <ActivityIndicator color={YELLOW} size="large" />
+                <ActivityIndicator color={Colors.accent} size="large" />
                 <Text style={[styles.pickerTitle, { marginTop: 20 }]}>Building Your Program...</Text>
                 <Text style={styles.gsSub}>
                   Your AI coach is reviewing your profile and generating a personalised plan.
@@ -986,12 +982,12 @@ export default function ProfileScreen() {
               <TextInput
                 style={styles.manualHRVInput}
                 placeholder="e.g. 52"
-                placeholderTextColor={GREY}
+                placeholderTextColor={Colors.textSecondary}
                 value={manualHRVInput}
                 onChangeText={v => { setManualHRVInput(v); setManualHRVError(''); }}
                 keyboardType="number-pad"
                 inputAccessoryViewID="hrv-input-accessory"
-                selectionColor={YELLOW}
+                selectionColor={Colors.accent}
                 maxLength={3}
               />
               {!!manualHRVError && <Text style={styles.manualHRVError}>{manualHRVError}</Text>}
@@ -1086,7 +1082,7 @@ export default function ProfileScreen() {
           <SettingRow label="Equipment" value={toStringArray(profile?.equipment_access).join(', ')} onPress={() => setPicker('equipment')} />
           <TouchableOpacity style={styles.updateProgramRow} onPress={() => (navigation as any).navigate('UpdateProgram')}>
             <Text style={styles.updateProgramText}>Update My Program</Text>
-            <Text style={styles.settingChevron}>›</Text>
+            <ChevronRight color={Colors.accent} size={16} strokeWidth={1.5} />
           </TouchableOpacity>
         </View>
 
@@ -1123,7 +1119,7 @@ export default function ProfileScreen() {
                      isConnected ? 'Connected ✓' : 'Connect'}
                   </Text>
                   {!isConnected && isIOS && !healthConnecting && (
-                    <Text style={styles.settingChevron}>›</Text>
+                    <ChevronRight color={Colors.textSecondary} size={16} strokeWidth={1.5} />
                   )}
                 </View>
               </TouchableOpacity>
@@ -1150,7 +1146,7 @@ export default function ProfileScreen() {
                       {whoopConnecting ? 'Connecting...' : needsReconnect ? 'Reconnect needed' : isConnected ? 'Connected ✓' : 'Connect'}
                     </Text>
                     {(!isConnected || needsReconnect) && !whoopConnecting && (
-                      <Text style={styles.settingChevron}>›</Text>
+                      <ChevronRight color={Colors.textSecondary} size={16} strokeWidth={1.5} />
                     )}
                   </View>
                 </TouchableOpacity>
@@ -1176,7 +1172,7 @@ export default function ProfileScreen() {
                 style={styles.refreshBtn}
               >
                 {healthLoading
-                  ? <ActivityIndicator size="small" color={YELLOW} />
+                  ? <ActivityIndicator size="small" color={Colors.accent} />
                   : <Text style={styles.refreshText}>Refresh</Text>}
               </TouchableOpacity>
             </View>
@@ -1289,45 +1285,45 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BLACK },
+  container: { flex: 1, backgroundColor: Colors.background },
 
   nameBlock: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
-  name: { color: OFF_WHITE, fontSize: 24, fontWeight: '800' },
-  goalBadge: { color: GREY, fontSize: 14, marginTop: 4 },
+  name: { color: Colors.textPrimary, fontSize: 24, fontWeight: '800' },
+  goalBadge: { color: Colors.textSecondary, fontSize: 14, marginTop: 4 },
 
   sectionHeading: {
-    color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
+    color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
     textTransform: 'uppercase', paddingHorizontal: 20, marginTop: 20, marginBottom: 8,
   },
   section: {
-    marginHorizontal: 16, backgroundColor: CARD_BG, borderRadius: 14, overflow: 'hidden',
+    marginHorizontal: 16, backgroundColor: Colors.card, borderRadius: 14, overflow: 'hidden',
   },
   settingRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 15,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#222',
   },
-  settingLabel: { color: OFF_WHITE, fontSize: 15 },
+  settingLabel: { color: Colors.textPrimary, fontSize: 15 },
   settingRight: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '55%' },
-  settingValue: { color: GREY, fontSize: 14, textAlign: 'right', flexShrink: 1 },
-  settingChevron: { color: GREY, fontSize: 18 },
+  settingValue: { color: Colors.textSecondary, fontSize: 14, textAlign: 'right', flexShrink: 1 },
+  settingChevron: { color: Colors.textSecondary, fontSize: 18 },
 
   healthSectionHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 20, marginTop: 20, marginBottom: 8,
   },
   healthSectionTitle: {
-    color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
+    color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
   refreshBtn: { paddingHorizontal: 12, paddingVertical: 4 },
-  refreshText: { color: YELLOW, fontSize: 13, fontWeight: '600' },
+  refreshText: { color: Colors.accent, fontSize: 13, fontWeight: '600' },
   healthRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#222',
   },
-  healthSource: { color: GREY, fontSize: 11, marginTop: 2 },
+  healthSource: { color: Colors.textSecondary, fontSize: 11, marginTop: 2 },
 
   signOutBtn: {
     marginHorizontal: 16, marginTop: 24, backgroundColor: '#1a0000',
@@ -1338,29 +1334,29 @@ const styles = StyleSheet.create({
   // Picker
   pickerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   pickerSheet: {
-    backgroundColor: CARD_BG, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    backgroundColor: Colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: 20, paddingBottom: 40,
   },
-  pickerTitle: { color: OFF_WHITE, fontSize: 16, fontWeight: '700', marginBottom: 14, textAlign: 'center' },
+  pickerTitle: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700', marginBottom: 14, textAlign: 'center' },
   pickerOption: {
     paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#1a1a1a',
     borderRadius: 10, marginBottom: 8,
   },
-  pickerOptionActive: { backgroundColor: YELLOW },
-  pickerOptionText: { color: OFF_WHITE, fontSize: 15 },
-  cancelText: { color: GREY, fontSize: 15, textAlign: 'center' },
+  pickerOptionActive: { backgroundColor: Colors.accent },
+  pickerOptionText: { color: Colors.textPrimary, fontSize: 15 },
+  cancelText: { color: Colors.textSecondary, fontSize: 15, textAlign: 'center' },
   saveBtn: {
-    backgroundColor: YELLOW, borderRadius: 10, paddingVertical: 14,
+    backgroundColor: Colors.accent, borderRadius: 10, paddingVertical: 14,
     alignItems: 'center', marginTop: 12,
   },
-  saveBtnText: { color: BLACK, fontSize: 15, fontWeight: '700' },
+  saveBtnText: { color: Colors.background, fontSize: 15, fontWeight: '700' },
 
   // + Log HRV button inline with HRV row
   logHRVBtn: {
-    borderWidth: 1, borderColor: YELLOW, borderRadius: 6,
+    borderWidth: 1, borderColor: Colors.accent, borderRadius: 6,
     paddingHorizontal: 10, paddingVertical: 4,
   },
-  logHRVBtnText: { color: YELLOW, fontSize: 11, fontWeight: '700' },
+  logHRVBtnText: { color: Colors.accent, fontSize: 11, fontWeight: '700' },
 
   // Manual HRV modal
   manualHRVCard: {
@@ -1373,51 +1369,51 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   inputAccessoryDoneBtn: { paddingHorizontal: 12, paddingVertical: 4 },
-  inputAccessoryDoneText: { color: YELLOW, fontSize: 16, fontWeight: '600' },
-  manualHRVTitle:  { color: OFF_WHITE, fontSize: 18, fontWeight: '800' },
-  manualHRVSub:    { color: GREY, fontSize: 13, lineHeight: 18 },
+  inputAccessoryDoneText: { color: Colors.accent, fontSize: 16, fontWeight: '600' },
+  manualHRVTitle:  { color: Colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  manualHRVSub:    { color: Colors.textSecondary, fontSize: 13, lineHeight: 18 },
   manualHRVInput:  {
     backgroundColor: '#1a1a1a', borderWidth: 1.5, borderColor: '#2a2a2a',
     borderRadius: 10, paddingHorizontal: 16, paddingVertical: 14,
-    color: OFF_WHITE, fontSize: 32, fontWeight: '700', textAlign: 'center',
+    color: Colors.textPrimary, fontSize: 32, fontWeight: '700', textAlign: 'center',
   },
   manualHRVError:  { color: '#ff4444', fontSize: 12 },
-  manualHRVNote:   { color: GREY, fontSize: 11, lineHeight: 16 },
+  manualHRVNote:   { color: Colors.textSecondary, fontSize: 11, lineHeight: 16 },
   manualHRVSaveBtn: {
-    backgroundColor: YELLOW, borderRadius: 12, paddingVertical: 16, alignItems: 'center',
+    backgroundColor: Colors.accent, borderRadius: 12, paddingVertical: 16, alignItems: 'center',
   },
-  manualHRVSaveBtnText: { color: BLACK, fontSize: 15, fontWeight: '800', letterSpacing: 1 },
+  manualHRVSaveBtnText: { color: Colors.background, fontSize: 15, fontWeight: '800', letterSpacing: 1 },
 
   // Goal switching modal
   gsGoalRow:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginVertical: 16 },
   gsGoalChip:        { backgroundColor: '#1a1a1a', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#333' },
-  gsGoalChipNew:     { backgroundColor: YELLOW, borderColor: YELLOW },
-  gsGoalChipText:    { color: OFF_WHITE, fontSize: 14, fontWeight: '700' },
-  gsArrow:           { color: GREY, fontSize: 20 },
-  gsSub:             { color: GREY, fontSize: 13, lineHeight: 18, textAlign: 'center', marginBottom: 12 },
-  gsFieldLabel:      { color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginTop: 16, marginBottom: 6 },
+  gsGoalChipNew:     { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  gsGoalChipText:    { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  gsArrow:           { color: Colors.textSecondary, fontSize: 20 },
+  gsSub:             { color: Colors.textSecondary, fontSize: 13, lineHeight: 18, textAlign: 'center', marginBottom: 12 },
+  gsFieldLabel:      { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginTop: 16, marginBottom: 6 },
   gsTextInput: {
     backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a',
     borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
-    color: OFF_WHITE, fontSize: 16, marginBottom: 4,
+    color: Colors.textPrimary, fontSize: 16, marginBottom: 4,
   },
   gsConfidenceRow:     { flexDirection: 'row', gap: 8, marginVertical: 8 },
   gsConfidenceBtn:     { flex: 1, backgroundColor: '#1a1a1a', borderRadius: 10, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
-  gsConfidenceBtnActive: { backgroundColor: YELLOW, borderColor: YELLOW },
-  gsConfidenceBtnText: { color: OFF_WHITE, fontSize: 16, fontWeight: '700' },
+  gsConfidenceBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  gsConfidenceBtnText: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700' },
 
   // Coached upsell card
   coachedUpsellCard: {
     marginHorizontal: 16, marginTop: 16, backgroundColor: '#111',
-    borderRadius: 14, padding: 18, borderLeftWidth: 3, borderLeftColor: YELLOW, gap: 10,
+    borderRadius: 14, padding: 18, borderLeftWidth: 3, borderLeftColor: Colors.accent, gap: 10,
   },
-  coachedUpsellTitle: { color: OFF_WHITE, fontSize: 15, fontWeight: '800' },
-  coachedUpsellBody:  { color: GREY, fontSize: 13, lineHeight: 18 },
+  coachedUpsellTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '800' },
+  coachedUpsellBody:  { color: Colors.textSecondary, fontSize: 13, lineHeight: 18 },
   coachedUpsellBtns:  { flexDirection: 'row', gap: 10, marginTop: 4 },
-  coachedLearnBtn:    { flex: 1, backgroundColor: YELLOW, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
-  coachedLearnText:   { color: BLACK, fontSize: 13, fontWeight: '700' },
+  coachedLearnBtn:    { flex: 1, backgroundColor: Colors.accent, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  coachedLearnText:   { color: Colors.background, fontSize: 13, fontWeight: '700' },
   coachedNoBtn:       { flex: 1, backgroundColor: '#1a1a1a', borderRadius: 10, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
-  coachedNoText:      { color: GREY, fontSize: 13, fontWeight: '600' },
+  coachedNoText:      { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
 
   // Wearable connection banner
   wearableBanner: {
@@ -1425,13 +1421,13 @@ const styles = StyleSheet.create({
     borderRadius: 12, padding: 14, gap: 10, borderWidth: 1, borderColor: '#3a3000',
   },
   wearableBannerText: { color: '#e8c44a', fontSize: 13, lineHeight: 18 },
-  wearableBannerBtn:  { backgroundColor: YELLOW, borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
-  wearableBannerBtnText: { color: BLACK, fontSize: 13, fontWeight: '700' },
+  wearableBannerBtn:  { backgroundColor: Colors.accent, borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
+  wearableBannerBtnText: { color: Colors.background, fontSize: 13, fontWeight: '700' },
 
   // Update My Program row
   updateProgramRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 15,
   },
-  updateProgramText: { color: YELLOW, fontSize: 15, fontWeight: '600' },
+  updateProgramText: { color: Colors.accent, fontSize: 15, fontWeight: '600' },
 });

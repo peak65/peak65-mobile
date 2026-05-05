@@ -6,13 +6,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList } from '../_layout';
+import { Colors, Fonts } from '../../lib/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'Generating'>;
-
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
 
 const MESSAGES = [
   'Analyzing your profile...',
@@ -155,11 +151,11 @@ export default function GeneratingScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1, backgroundColor: BLACK, paddingHorizontal: 24,
+    flex: 1, backgroundColor: Colors.background, paddingHorizontal: 24,
   },
 
   logo: {
-    color: YELLOW, fontSize: 32, fontWeight: '800',
+    color: Colors.accent, fontSize: 32, fontFamily: Fonts.metricHeavy,
     textAlign: 'center', letterSpacing: -1, paddingTop: 8,
   },
 
@@ -168,25 +164,25 @@ const styles = StyleSheet.create({
   },
 
   heading: {
-    color: OFF_WHITE, fontSize: 18, fontWeight: '600',
+    color: Colors.textPrimary, fontSize: 18, fontWeight: '600',
     textAlign: 'center', letterSpacing: 0.2,
   },
 
   message: {
-    color: YELLOW, fontSize: 26, fontWeight: '700',
+    color: Colors.accent, fontSize: 26, fontFamily: Fonts.metric,
     textAlign: 'center', letterSpacing: -0.3, lineHeight: 34,
   },
 
   retryBtn: { paddingVertical: 8, paddingHorizontal: 16 },
   retryText: {
-    color: YELLOW, fontSize: 15, textAlign: 'center', textDecorationLine: 'underline',
+    color: Colors.accent, fontSize: 15, textAlign: 'center', textDecorationLine: 'underline',
   },
 
   progressTrack: {
-    height: 2, backgroundColor: '#1e1e1e', borderRadius: 1,
+    height: 2, backgroundColor: Colors.nested, borderRadius: 1,
     marginBottom: 24, overflow: 'hidden',
   },
   progressFill: {
-    height: 2, backgroundColor: YELLOW, borderRadius: 1,
+    height: 2, backgroundColor: Colors.accent, borderRadius: 1,
   },
 });

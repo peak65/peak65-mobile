@@ -12,17 +12,9 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 
 import { supabase } from '../../lib/supabase';
 import type { TabParamList } from '../_layout';
+import { Colors, Fonts, scoreColor } from '../../lib/theme';
 
 type Props = BottomTabScreenProps<TabParamList, 'Coach'>;
-
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
-const CARD_BG   = '#111111';
-const GREEN     = '#44ff88';
-const RED       = '#ff4444';
-const DIM       = '#1a1a1a';
 
 type AthleteEntry = {
   coachAthleteId: string;
@@ -40,12 +32,6 @@ const TIER_LABELS: Record<string, string> = {
   coached:    'Coached',
   ai_coached: 'AI Coached',
 };
-
-function scoreColor(score: number): string {
-  if (score >= 80) return GREEN;
-  if (score >= 60) return YELLOW;
-  return RED;
-}
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -166,7 +152,7 @@ export default function CoachScreen({ navigation }: Props) {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={YELLOW} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />
         }
         showsVerticalScrollIndicator={false}
       >
@@ -237,10 +223,10 @@ function SkeletonCard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BLACK,
+    backgroundColor: Colors.background,
   },
   heading: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 28,
     fontWeight: '600',
     paddingHorizontal: 20,
@@ -256,7 +242,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   card: {
-    backgroundColor: CARD_BG,
+    backgroundColor: Colors.card,
     borderRadius: 12,
     padding: 16,
     gap: 8,
@@ -273,7 +259,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -281,7 +267,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: YELLOW,
+    backgroundColor: Colors.accent,
   },
   tierBadge: {
     backgroundColor: '#1e1e00',
@@ -290,7 +276,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   tierText: {
-    color: YELLOW,
+    color: Colors.accent,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.3,
@@ -301,7 +287,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   metaText: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 13,
     flex: 1,
   },
@@ -317,11 +303,11 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   scoreNum: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontFamily: Fonts.metric,
+    fontSize: 16,
   },
   empty: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 15,
     textAlign: 'center',
     marginTop: 80,
@@ -332,13 +318,13 @@ const styles = StyleSheet.create({
   skeletonName: {
     height: 16,
     width: '55%',
-    backgroundColor: DIM,
+    backgroundColor: Colors.nested,
     borderRadius: 4,
   },
   skeletonMeta: {
     height: 13,
     width: '80%',
-    backgroundColor: DIM,
+    backgroundColor: Colors.nested,
     borderRadius: 4,
   },
 });

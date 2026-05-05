@@ -6,6 +6,9 @@ import {
   StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Calendar, Check,
+} from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import type { Program, ProgramDay, ProgramSession, MainStackParamList, ExerciseItem } from '../_layout';
 import {
@@ -13,13 +16,7 @@ import {
   type WorkoutSample,
 } from '../../lib/healthKit';
 import { deriveZonesFromTimeTrial, type TrainingZones } from '../../lib/zoneDerivation';
-
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
-const CARD_BG   = '#111111';
-const GREEN     = '#44ff88';
+import { Colors, Fonts } from '../../lib/theme';
 
 type TimeTrialProfile = {
   goal: string | null;
@@ -129,14 +126,14 @@ function CircuitBlock({ members, rounds, rest }: {
             onPress={() => setCurrentRound(r => Math.max(1, r - 1))}
             style={[styles.circuitRoundBtn, currentRound === 1 && styles.circuitRoundBtnDone]}
           >
-            <Text style={styles.circuitRoundBtnText}>‹</Text>
+            <ChevronLeft color={Colors.accent} size={16} strokeWidth={2} />
           </TouchableOpacity>
           <Text style={styles.circuitRoundText}>Round {currentRound} / {rounds}</Text>
           <TouchableOpacity
             onPress={() => setCurrentRound(r => Math.min(rounds, r + 1))}
             style={[styles.circuitRoundBtn, currentRound === rounds && styles.circuitRoundBtnDone]}
           >
-            <Text style={styles.circuitRoundBtnText}>›</Text>
+            <ChevronRight color={Colors.accent} size={16} strokeWidth={2} />
           </TouchableOpacity>
         </View>
       </View>
@@ -332,7 +329,7 @@ function StrengthSessionSection({
                                 onFocus={() => setFocusedSetKey(setKey)}
                                 onBlur={() => setFocusedSetKey(null)}
                                 keyboardType="numeric"
-                                selectionColor={YELLOW}
+                                selectionColor={Colors.accent}
                               />
                               <View style={styles.setWeightRow}>
                                 <TextInput
@@ -344,7 +341,7 @@ function StrengthSessionSection({
                                   onFocus={() => setFocusedSetKey(setKey)}
                                   onBlur={() => setFocusedSetKey(null)}
                                   keyboardType="numeric"
-                                  selectionColor={YELLOW}
+                                  selectionColor={Colors.accent}
                                 />
                                 <Text style={styles.setWeightSuffix}>lbs</Text>
                               </View>
@@ -472,10 +469,10 @@ function TrialLogCard({
           <TextInput
             style={styles.trialInput}
             placeholder="e.g. 42:30"
-            placeholderTextColor={GREY}
+            placeholderTextColor={Colors.textSecondary}
             value={value}
             onChangeText={onChange}
-            selectionColor={YELLOW}
+            selectionColor={Colors.accent}
             autoCorrect={false}
             autoCapitalize="none"
             keyboardType="numbers-and-punctuation"
@@ -833,12 +830,14 @@ function DayCard({
         style={styles.dayCardHeader}
       >
         <View style={styles.dayCardLeft}>
-          <Text style={[styles.dayName, isToday && { color: YELLOW }]}>{day.day}</Text>
-          {isComplete && <Text style={styles.checkmark}> ✓</Text>}
+          <Text style={[styles.dayName, isToday && { color: Colors.accent }]}>{day.day}</Text>
+          {isComplete && <Check color={Colors.green} size={14} strokeWidth={2.5} style={{ marginLeft: 6 }} />}
         </View>
         <View style={styles.dayCardRight}>
           <Text style={styles.sessionType}>{day.type}</Text>
-          <Text style={styles.chevron}>{expanded ? '▲' : '▼'}</Text>
+          {expanded
+            ? <ChevronUp color={Colors.textSecondary} size={16} strokeWidth={1.5} />
+            : <ChevronDown color={Colors.textSecondary} size={16} strokeWidth={1.5} />}
         </View>
       </TouchableOpacity>
 
@@ -877,14 +876,14 @@ function DayCard({
                         <View style={styles.ttStatusCard}>
                           {(ttStatus === 'matching' || ttStatus === 'matched') && (
                             <View style={styles.ttRow}>
-                              <ActivityIndicator color={YELLOW} size="small" />
+                              <ActivityIndicator color={Colors.accent} size="small" />
                               <Text style={styles.ttStatusText}>
                                 {ttStatus === 'matching' ? 'Searching Apple Health...' : 'Matched · Deriving zones...'}
                               </Text>
                             </View>
                           )}
                           {ttStatus === 'zonesSet' && (
-                            <Text style={styles.ttSuccessText}>✓ Training zones set</Text>
+                            <Text style={styles.ttSuccessText}>Training zones set</Text>
                           )}
                           {ttStatus === 'multiple' && (
                             <TouchableOpacity style={styles.ttRow} onPress={() => setTtModalVisible(true)}>
@@ -898,20 +897,20 @@ function DayCard({
                                 <TextInput
                                   style={styles.ttManualInput}
                                   placeholder={profile?.preferred_units === 'imperial' ? 'mi' : 'km'}
-                                  placeholderTextColor={GREY}
+                                  placeholderTextColor={Colors.textSecondary}
                                   value={ttManualDist}
                                   onChangeText={setTtManualDist}
                                   keyboardType="decimal-pad"
-                                  selectionColor={YELLOW}
+                                  selectionColor={Colors.accent}
                                 />
                                 <TextInput
                                   style={styles.ttManualInput}
                                   placeholder="mm:ss"
-                                  placeholderTextColor={GREY}
+                                  placeholderTextColor={Colors.textSecondary}
                                   value={ttManualDuration}
                                   onChangeText={setTtManualDuration}
                                   keyboardType="numbers-and-punctuation"
-                                  selectionColor={YELLOW}
+                                  selectionColor={Colors.accent}
                                 />
                               </View>
                               <TouchableOpacity
@@ -1125,7 +1124,7 @@ export default function ProgramScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <ActivityIndicator color={YELLOW} style={{ flex: 1 }} />
+        <ActivityIndicator color={Colors.accent} style={{ flex: 1 }} />
       </SafeAreaView>
     );
   }
@@ -1157,13 +1156,13 @@ export default function ProgramScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 60 }}
           keyboardShouldPersistTaps="handled"
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={YELLOW} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
         >
           <Text style={styles.heading}>MY PROGRAM</Text>
 
           {generatingNextWeek && (
             <View style={styles.nextWeekBanner}>
-              <ActivityIndicator size="small" color={YELLOW} style={{ marginRight: 10 }} />
+              <ActivityIndicator size="small" color={Colors.accent} style={{ marginRight: 10 }} />
               <View>
                 <Text style={styles.nextWeekTitle}>Preparing your next week...</Text>
                 <Text style={styles.nextWeekSub}>Your coach is reviewing your session data.</Text>
@@ -1172,9 +1171,9 @@ export default function ProgramScreen() {
           )}
           {nextWeekReady && !generatingNextWeek && activeProgram && allPrograms.some(p => p.week_number === activeProgram.week_number + 1) && (
             <View style={[styles.nextWeekBanner, styles.nextWeekBannerReady]}>
-              <Text style={styles.nextWeekIcon}>🗓</Text>
+              <Calendar color={Colors.green} size={22} strokeWidth={1.5} style={{ marginRight: 12 }} />
               <View>
-                <Text style={[styles.nextWeekTitle, { color: '#44ff88' }]}>
+                <Text style={[styles.nextWeekTitle, { color: Colors.green }]}>
                   Week {activeProgram.week_number + 1} is ready.
                 </Text>
                 <Text style={styles.nextWeekSub}>Tap the arrows above to view it.</Text>
@@ -1188,7 +1187,7 @@ export default function ProgramScreen() {
               disabled={!canGoBack}
               style={styles.weekArrow}
             >
-              <Text style={[styles.weekArrowText, !canGoBack && styles.arrowDisabled]}>‹</Text>
+              <ChevronLeft color={!canGoBack ? '#333' : Colors.textPrimary} size={28} strokeWidth={1.5} />
             </TouchableOpacity>
             <Text style={styles.weekLabel}>Week {displayWeekNum}</Text>
             <TouchableOpacity
@@ -1196,7 +1195,7 @@ export default function ProgramScreen() {
               disabled={!canGoForward}
               style={styles.weekArrow}
             >
-              <Text style={[styles.weekArrowText, !canGoForward && styles.arrowDisabled]}>›</Text>
+              <ChevronRight color={!canGoForward ? '#333' : Colors.textPrimary} size={28} strokeWidth={1.5} />
             </TouchableOpacity>
           </View>
 
@@ -1251,41 +1250,38 @@ export default function ProgramScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BLACK },
+  container: { flex: 1, backgroundColor: Colors.background },
   heading: {
-    color: OFF_WHITE, fontSize: 24, fontWeight: '800',
+    color: Colors.textPrimary, fontSize: 24, fontWeight: '800',
     paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8,
   },
 
   nextWeekBanner: {
     flexDirection: 'row', alignItems: 'center',
     marginHorizontal: 16, marginBottom: 8,
-    backgroundColor: CARD_BG, borderRadius: 14, padding: 16,
+    backgroundColor: Colors.card, borderRadius: 14, padding: 16,
   },
-  nextWeekBannerReady: { borderLeftWidth: 3, borderLeftColor: '#44ff88' },
-  nextWeekTitle: { color: OFF_WHITE, fontSize: 14, fontWeight: '700' },
-  nextWeekSub:   { color: GREY, fontSize: 12, marginTop: 2 },
-  nextWeekIcon:  { fontSize: 22, marginRight: 12 },
+  nextWeekBannerReady: { borderLeftWidth: 3, borderLeftColor: Colors.green },
+  nextWeekTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  nextWeekSub:   { color: Colors.textSecondary, fontSize: 12, marginTop: 2 },
 
   weekRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 24, paddingVertical: 12,
   },
-  weekArrow:     { padding: 8 },
-  weekArrowText: { color: OFF_WHITE, fontSize: 28, fontWeight: '300' },
-  arrowDisabled: { color: '#333' },
-  weekLabel:     { color: OFF_WHITE, fontSize: 17, fontWeight: '700', minWidth: 80, textAlign: 'center' },
+  weekArrow: { padding: 8 },
+  weekLabel: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700', minWidth: 80, textAlign: 'center' },
 
   expandAllBtn: {
     marginHorizontal: 16, marginBottom: 12, paddingVertical: 11,
-    borderRadius: 10, borderWidth: 1, borderColor: YELLOW,
+    borderRadius: 10, borderWidth: 1, borderColor: Colors.accent,
     alignItems: 'center',
   },
-  expandAllText: { color: YELLOW, fontSize: 12, fontWeight: '700', letterSpacing: 1.2 },
+  expandAllText: { color: Colors.accent, fontSize: 12, fontWeight: '700', letterSpacing: 1.2 },
 
   dayList:      { paddingHorizontal: 16, gap: 10 },
-  dayCard:      { backgroundColor: CARD_BG, borderRadius: 14, overflow: 'hidden' },
-  dayCardToday: { borderLeftWidth: 3, borderLeftColor: YELLOW },
+  dayCard:      { backgroundColor: Colors.card, borderRadius: 14, overflow: 'hidden' },
+  dayCardToday: { borderLeftWidth: 3, borderLeftColor: Colors.accent },
 
   dayCardHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -1293,40 +1289,39 @@ const styles = StyleSheet.create({
   },
   dayCardLeft:  { flexDirection: 'row', alignItems: 'center' },
   dayCardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dayName:      { color: OFF_WHITE, fontSize: 15, fontWeight: '700' },
-  checkmark:    { color: GREEN, fontSize: 14 },
-  sessionType:  { color: GREY, fontSize: 13 },
-  chevron:      { color: GREY, fontSize: 12, marginLeft: 4 },
+  dayName:      { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  sessionType:  { color: Colors.textSecondary, fontSize: 13 },
 
   expandedContent: { paddingHorizontal: 16, paddingBottom: 16, gap: 16 },
   sessionWrapper:  { gap: 12 },
 
   sessionBlock:     { gap: 10 },
   sessionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  sessionName:      { color: OFF_WHITE, fontSize: 14, fontWeight: '700', flex: 1 },
-  sessionMeta:      { color: GREY, fontSize: 12 },
-  sessionDesc:      { color: GREY, fontSize: 13, lineHeight: 18 },
+  sessionName:      { color: Colors.textPrimary, fontSize: 14, fontWeight: '700', flex: 1 },
+  sessionMeta:      { color: Colors.textSecondary, fontSize: 12 },
+  sessionDesc:      { color: Colors.textSecondary, fontSize: 13, lineHeight: 18 },
 
   section:      { gap: 8 },
   sectionLabel: {
-    color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase',
+    color: Colors.textSecondary, fontSize: 11, fontWeight: '700',
+    letterSpacing: 1.2, textTransform: 'uppercase',
   },
 
   // Non-strength exercise rows
-  exRow:    { borderLeftWidth: 3, borderLeftColor: YELLOW, paddingLeft: 10, gap: 2 },
-  exName:   { color: OFF_WHITE, fontSize: 14, fontWeight: '600' },
-  exDetail: { color: GREY, fontSize: 13 },
+  exRow:    { borderLeftWidth: 3, borderLeftColor: Colors.accent, paddingLeft: 10, gap: 2 },
+  exName:   { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
+  exDetail: { color: Colors.textSecondary, fontSize: 13 },
 
-  // Superset grouping
+  // Superset grouping — 3px accent at 50% opacity
   supersetGroup: {
-    borderLeftWidth: 2,
-    borderLeftColor: YELLOW,
+    borderLeftWidth: 3,
+    borderLeftColor: 'rgba(232,255,71,0.5)',
     paddingLeft: 10,
     gap: 6,
     marginBottom: 4,
   },
   supersetLabel: {
-    color: YELLOW,
+    color: 'rgba(232,255,71,0.7)',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.2,
@@ -1334,16 +1329,16 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
 
-  // Circuit grouping
+  // Circuit grouping — 3px accent
   circuitGroup: {
-    borderLeftWidth: 2,
-    borderLeftColor: YELLOW,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.accent,
     paddingLeft: 10,
     gap: 6,
     marginBottom: 4,
   },
   circuitLabel: {
-    color: YELLOW,
+    color: Colors.accent,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.2,
@@ -1356,26 +1351,20 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   circuitRoundText: {
-    color: OFF_WHITE,
-    fontSize: 12,
-    fontWeight: '600',
+    color: Colors.textPrimary,
+    fontFamily: Fonts.metric,
+    fontSize: 13,
   },
   circuitRoundBtn: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#222',
+    backgroundColor: Colors.nested,
     alignItems: 'center',
     justifyContent: 'center',
   },
   circuitRoundBtnDone: {
     opacity: 0.3,
-  },
-  circuitRoundBtnText: {
-    color: YELLOW,
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: '700',
   },
   circuitExRow: {
     gap: 2,
@@ -1385,14 +1374,14 @@ const styles = StyleSheet.create({
   // Start Workout button
   startWorkoutBtn: {
     marginTop: 14, paddingVertical: 12, borderRadius: 10,
-    backgroundColor: YELLOW, alignItems: 'center',
+    backgroundColor: Colors.accent, alignItems: 'center',
   },
-  startWorkoutText: { color: BLACK, fontSize: 12, fontWeight: '800', letterSpacing: 1.5 },
+  startWorkoutText: { color: Colors.background, fontSize: 12, fontWeight: '800', letterSpacing: 1.5 },
 
   // Strength block section header
   strBlock:      { gap: 0 },
   strBlockLabel: {
-    color: GREY, fontSize: 11, fontWeight: '700',
+    color: Colors.textSecondary, fontSize: 11, fontWeight: '700',
     letterSpacing: 2, textTransform: 'uppercase', marginBottom: 16,
   },
 
@@ -1401,19 +1390,19 @@ const styles = StyleSheet.create({
 
   // Individual exercise card
   strExCard: {
-    backgroundColor: '#111111',
+    backgroundColor: Colors.card,
     borderRadius: 16,
     padding: 20,
     borderLeftWidth: 3,
-    borderLeftColor: YELLOW,
+    borderLeftColor: Colors.accent,
   },
-  strExName:       { color: OFF_WHITE, fontSize: 17, fontWeight: '700', marginBottom: 4 },
-  strExPrescribed: { color: GREY, fontSize: 13, marginBottom: 16 },
-  strDivider:      { height: 1, backgroundColor: '#1f1f1f', marginBottom: 12 },
+  strExName:       { color: Colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 4 },
+  strExPrescribed: { color: Colors.textSecondary, fontSize: 13, marginBottom: 16 },
+  strDivider:      { height: 1, backgroundColor: Colors.nested, marginBottom: 12 },
 
   // Set row containers
   setRowContainer: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: Colors.nested,
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -1425,7 +1414,7 @@ const styles = StyleSheet.create({
   setRowActive: {
     backgroundColor: '#222222',
     borderLeftWidth: 3,
-    borderLeftColor: YELLOW,
+    borderLeftColor: Colors.accent,
     paddingLeft: 13,
   },
   setRowSaved: { backgroundColor: '#1a2a00' },
@@ -1437,7 +1426,7 @@ const styles = StyleSheet.create({
   },
   setColSpacer: { width: 44 },
   setColHeader: {
-    flex: 1, color: GREY, fontSize: 10, fontWeight: '600',
+    flex: 1, color: Colors.textSecondary, fontSize: 10, fontWeight: '600',
     letterSpacing: 1.5, textTransform: 'uppercase', textAlign: 'center',
   },
 
@@ -1446,9 +1435,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1, textTransform: 'uppercase', width: 44,
   },
   setValuesRow: { flex: 1, flexDirection: 'row', alignItems: 'baseline' },
-  setSavedNum:  { color: YELLOW, fontSize: 22, fontWeight: '700' },
-  setSavedUnit: { color: GREY, fontSize: 12 },
-  setCheck:     { color: GREEN, fontSize: 14, fontWeight: '700', marginLeft: 8 },
+  setSavedNum:  { color: Colors.accent, fontFamily: Fonts.metric, fontSize: 22 },
+  setSavedUnit: { color: Colors.textSecondary, fontSize: 12 },
+  setCheck:     { color: Colors.green, fontSize: 14, fontWeight: '700', marginLeft: 8 },
 
   setRepsInput: {
     width: 70,
@@ -1457,9 +1446,9 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     borderRadius: 8,
     paddingVertical: 6,
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
+    fontFamily: Fonts.metric,
     fontSize: 22,
-    fontWeight: '700',
     textAlign: 'center',
   },
   setWeightRow: {
@@ -1472,17 +1461,17 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     borderRadius: 8,
     paddingVertical: 6,
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
+    fontFamily: Fonts.metric,
     fontSize: 22,
-    fontWeight: '700',
     textAlign: 'center',
   },
   setWeightSuffix: { color: '#b0ada6', fontSize: 12, marginLeft: 4, width: 24 },
-  setInputFocused: { borderColor: YELLOW },
+  setInputFocused: { borderColor: Colors.accent },
 
   // LOG ALL LIFTS button
   logAllBtn: {
-    backgroundColor: YELLOW,
+    backgroundColor: Colors.accent,
     borderRadius: 14,
     paddingVertical: 18,
     alignItems: 'center',
@@ -1490,7 +1479,7 @@ const styles = StyleSheet.create({
   },
   logAllBtnDisabled: { opacity: 0.35 },
   logAllBtnText: {
-    color: BLACK, fontSize: 15, fontWeight: '800', letterSpacing: 1.5,
+    color: Colors.background, fontSize: 15, fontWeight: '800', letterSpacing: 1.5,
   },
   logAllBtnDone: {
     backgroundColor: '#1a2a00',
@@ -1500,51 +1489,51 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   logAllBtnDoneText: {
-    color: YELLOW, fontSize: 15, fontWeight: '800', letterSpacing: 1.5,
+    color: Colors.accent, fontSize: 15, fontWeight: '800', letterSpacing: 1.5,
   },
 
   // Trial / cardio log
   trialCard: {
-    backgroundColor: '#111800', borderRadius: 10, padding: 14, gap: 10,
-    borderLeftWidth: 3, borderLeftColor: YELLOW,
+    backgroundColor: Colors.nested, borderRadius: 10, padding: 14, gap: 10,
+    borderLeftWidth: 3, borderLeftColor: Colors.accent,
   },
-  trialLabel:      { color: OFF_WHITE, fontSize: 13, fontWeight: '600' },
+  trialLabel:      { color: Colors.textPrimary, fontSize: 13, fontWeight: '600' },
   trialInput:      {
-    backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#2a2a2a',
+    backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border,
     borderRadius: 8, paddingHorizontal: 14, paddingVertical: 12,
-    color: OFF_WHITE, fontSize: 18, fontWeight: '700',
+    color: Colors.textPrimary, fontFamily: Fonts.metric, fontSize: 18,
   },
-  trialBtn:        { backgroundColor: YELLOW, borderRadius: 8, paddingVertical: 13, alignItems: 'center' },
+  trialBtn:        { backgroundColor: Colors.accent, borderRadius: 8, paddingVertical: 13, alignItems: 'center' },
   trialBtnDisabled:{ opacity: 0.45 },
-  trialBtnText:    { color: BLACK, fontSize: 14, fontWeight: '700' },
+  trialBtnText:    { color: Colors.background, fontSize: 14, fontWeight: '700' },
 
   trialSavedRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  trialSavedValue: { color: YELLOW, fontSize: 20, fontWeight: '700' },
-  trialSavedBadge: { color: GREEN, fontSize: 12, fontWeight: '700' },
+  trialSavedValue: { color: Colors.accent, fontFamily: Fonts.metric, fontSize: 20 },
+  trialSavedBadge: { color: Colors.green, fontSize: 12, fontWeight: '700' },
 
   completeConfirm:     { paddingVertical: 8, alignItems: 'center' },
-  completeConfirmText: { color: YELLOW, fontSize: 14, fontWeight: '600' },
+  completeConfirmText: { color: Colors.accent, fontSize: 14, fontWeight: '600' },
 
-  restNote:  { color: GREY, fontSize: 14, fontStyle: 'italic' },
-  emptyText: { color: GREY, textAlign: 'center', marginTop: 40, fontSize: 15 },
+  restNote:  { color: Colors.textSecondary, fontSize: 14, fontStyle: 'italic' },
+  emptyText: { color: Colors.textSecondary, textAlign: 'center', marginTop: 40, fontSize: 15 },
 
   // Time trial zone derivation
   ttStatusCard: {
-    backgroundColor: '#0e1a00', borderRadius: 10, padding: 14,
-    borderLeftWidth: 3, borderLeftColor: GREEN, gap: 10,
+    backgroundColor: Colors.nested, borderRadius: 10, padding: 14,
+    borderLeftWidth: 3, borderLeftColor: Colors.green, gap: 10,
   },
   ttRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  ttStatusText: { color: GREY, fontSize: 13, flex: 1 },
-  ttSuccessText: { color: GREEN, fontSize: 13, fontWeight: '700' },
+  ttStatusText: { color: Colors.textSecondary, fontSize: 13, flex: 1 },
+  ttSuccessText: { color: Colors.green, fontSize: 13, fontWeight: '700' },
   ttManualEntry: { gap: 10 },
   ttManualRow:   { flexDirection: 'row', gap: 10 },
   ttManualInput: {
-    flex: 1, backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#2a2a2a',
+    flex: 1, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border,
     borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10,
-    color: OFF_WHITE, fontSize: 15, fontWeight: '600', textAlign: 'center',
+    color: Colors.textPrimary, fontFamily: Fonts.metric, fontSize: 15, textAlign: 'center',
   },
   ttManualBtn: {
-    backgroundColor: YELLOW, borderRadius: 8, paddingVertical: 11, alignItems: 'center',
+    backgroundColor: Colors.accent, borderRadius: 8, paddingVertical: 11, alignItems: 'center',
   },
 
   // Multi-workout selection modal
@@ -1553,16 +1542,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', padding: 24,
   },
   ttModalCard: {
-    backgroundColor: '#1a1a1a', borderRadius: 16, padding: 20,
+    backgroundColor: Colors.nested, borderRadius: 16, padding: 20,
     width: '100%', gap: 14,
   },
-  ttModalTitle: { color: OFF_WHITE, fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  ttModalTitle: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700', marginBottom: 4 },
   ttWorkoutOption: {
     backgroundColor: '#242424', borderRadius: 10, padding: 14,
-    borderLeftWidth: 3, borderLeftColor: YELLOW, gap: 4,
+    borderLeftWidth: 3, borderLeftColor: Colors.accent, gap: 4,
   },
-  ttWorkoutTime:   { color: OFF_WHITE, fontSize: 15, fontWeight: '700' },
-  ttWorkoutDetail: { color: GREY, fontSize: 13 },
+  ttWorkoutTime:   { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  ttWorkoutDetail: { color: Colors.textSecondary, fontSize: 13 },
   ttModalSkipBtn:  { paddingVertical: 8, alignItems: 'center' },
-  ttModalSkipText: { color: GREY, fontSize: 13, textDecorationLine: 'underline' },
+  ttModalSkipText: { color: Colors.textSecondary, fontSize: 13, textDecorationLine: 'underline' },
 });

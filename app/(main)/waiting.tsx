@@ -1,11 +1,12 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Colors } from '../../lib/theme';
 
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
+
+
+
+
 
 export default function WaitingScreen() {
   return (
@@ -25,11 +26,11 @@ export default function WaitingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BLACK,
+    backgroundColor: Colors.background,
     alignItems: 'center',
   },
   logo: {
-    color: YELLOW,
+    color: Colors.accent,
     fontSize: 18,
     fontWeight: '700',
     letterSpacing: -0.5,
@@ -43,20 +44,20 @@ const styles = StyleSheet.create({
     gap: 20,
   },
   heading: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 28,
     fontWeight: '600',
     textAlign: 'center',
   },
   subtext: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 15,
     textAlign: 'center',
     lineHeight: 22,
     maxWidth: 280,
   },
   footnote: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 13,
     textAlign: 'center',
   },

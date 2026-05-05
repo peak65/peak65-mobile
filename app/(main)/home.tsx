@@ -6,6 +6,9 @@ import {
   StyleSheet, ActivityIndicator, Modal, AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  Flame, Footprints, Dumbbell, Heart, Moon, Activity, Calendar,
+} from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import {
   getTodayHealthData, fetchTodayHealthData, fetchTodayWorkouts,
@@ -16,24 +19,15 @@ import { computeTDEEFromProfile } from '../../lib/tdee';
 import { calculatePeakScore, type PeakScoreResult } from '../../lib/peakScore';
 import {
   getConnectedWearables,
-  selectActiveCalorieSource, selectHRVSource, selectRHRSource,
-  selectSleepSource, selectStepsSource, selectTotalCalorieSource,
-  resolveAllSources, type WearableReading,
+  selectHRVSource, selectRHRSource,
+  selectSleepSource, resolveAllSources,
 } from '../../lib/wearablePriority';
 import type { Program, ProgramDay, TabParamList } from '../_layout';
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
+import { Colors, Fonts, scoreColor } from '../../lib/theme';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
-const CARD_BG   = '#111111';
-const GREEN     = '#44ff88';
-const RED       = '#ff4444';
-const ORANGE    = '#ff9944';
 
 const MILESTONES: Record<number, { emoji: string; message: string; sub: string }> = {
   1:   { emoji: '🏆', message: 'First one down. The journey starts now.', sub: 'Session 1 complete.' },
@@ -72,7 +66,6 @@ type HomeProfile = {
   manual_hrv: number | null;
   manual_hrv_date: string | null;
   goal_time: string | null;
-  // TDEE fields
   weight_kg: number | null;
   weight: string | null;
   units: string | null;
@@ -104,12 +97,6 @@ type ExternalWorkout = {
 
 function todayLabel() {
   return new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
-
-function scoreColor(s: number) {
-  if (s >= 80) return GREEN;
-  if (s >= 60) return YELLOW;
-  return RED;
 }
 
 function formatPace(pacePerKm: number, preferredUnits: string | null): string {
@@ -205,10 +192,16 @@ function calculateStreakValue(
     const hasSession  = sessionDates.has(dateStr);
     const countable   = isElite ? hasSession : (hasSession || externalDates.has(dateStr));
     if (countable)  { streak++; continue; }
-    if (i === 0)    { continue; } // today not yet logged — grace period
+    if (i === 0)    { continue; }
     break;
   }
   return streak;
+}
+
+function scoreStatusText(score: number): string {
+  if (score >= 70) return 'Peak Zone';
+  if (score >= 41) return 'Build Zone';
+  return 'Rest Zone';
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -375,29 +368,23 @@ export default function HomeScreen() {
 
     setLoading(false);
 
-    // Detect new workout candidates, then fetch pending ones for confirmation UI
     detectCandidates(uid)
       .then(() => getPendingCandidates(uid))
       .then(candidates => { if (mounted.current && myId === loadIdRef.current) setPendingCandidates(candidates); })
       .catch(e => console.log('[home] candidates error:', e));
 
     if (isHealthConnected) {
-      // ── Apple Health path: HealthKit provides steps/calories; Whoop merges over top ─
-
-      // Fetch simple numeric health data (steps, active cal, lastSync)
       getTodayHealthData()
         .then(async (data) => {
           if (!mounted.current || myId !== loadIdRef.current) return;
           console.log('[health] getTodayHealthData result:', JSON.stringify(data));
           setHealthData(data);
 
-          // TDEE base
           if (profileData) {
             const tdee = computeTDEEFromProfile(profileData);
             if (tdee.ok) setTdeeBase(tdee.value);
           }
 
-          // Live Peak Score
           const score = await calculatePeakScore(uid, {
             hrv: data.hrv,
             rhr: data.restingHR,
@@ -407,7 +394,6 @@ export default function HomeScreen() {
           if (!mounted.current || myId !== loadIdRef.current) return;
           if (score) setPeakScore(score);
 
-          // External workouts
           try {
             const workouts = await fetchTodayWorkouts(uid);
             if (!mounted.current || myId !== loadIdRef.current) return;
@@ -450,8 +436,6 @@ export default function HomeScreen() {
         })
         .catch(e => console.log('[home] healthKit error:', e));
 
-      // Fetch richer readiness data (HRV/Sleep/RHR with wearable-priority sources)
-      // then overlay Whoop API values if Whoop is also connected.
       fetchTodayHealthData()
         .then(async rd => {
           if (!mounted.current || myId !== loadIdRef.current) return;
@@ -483,8 +467,6 @@ export default function HomeScreen() {
         .catch(e => console.log('[home] readiness fetch error:', e));
 
     } else if (isWhoopConnected) {
-      // ── Whoop-only path: Apple Health not connected, pull everything from Whoop API ─
-      // Steps will be "--" (Whoop API has no steps endpoint); HRV/RHR/Sleep/Calories work.
       console.log('[health] Apple Health not connected — running Whoop-only path');
       (async () => {
         try {
@@ -499,7 +481,6 @@ export default function HomeScreen() {
           const rd = mergeWhoopIntoHealthData(empty, whoopData);
           console.log('[health] Whoop-only merged readiness:', JSON.stringify(rd));
           setReadinessData(rd);
-          // Populate healthData so Steps/Active/Total tiles can render
           setHealthData({
             steps:             rd.steps?.value         ?? null,
             activeCalories:    rd.activeCalories?.value ?? null,
@@ -545,7 +526,6 @@ export default function HomeScreen() {
     loadData();
   }, [loadData]));
 
-  // AppState: re-load when app returns to foreground
   const loadDataRef      = useRef(loadData);
   const appStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { loadDataRef.current = loadData; }, [loadData]);
@@ -571,7 +551,7 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <ActivityIndicator color={YELLOW} style={{ flex: 1 }} />
+        <ActivityIndicator color={Colors.accent} style={{ flex: 1 }} />
       </SafeAreaView>
     );
   }
@@ -588,6 +568,8 @@ export default function HomeScreen() {
     ? sessions[0].name
     : sessions.map(s => s.name).filter(Boolean).join(' + ');
   const workoutSummary = todayDay ? buildWorkoutSummary(todayDay) : '';
+
+  const hasWearable = healthConnected || storedProfile?.whoop_connected === true;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -610,7 +592,7 @@ export default function HomeScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={YELLOW} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
       >
 
         {/* Header */}
@@ -620,48 +602,58 @@ export default function HomeScreen() {
         </View>
 
         {/* Peak Score card */}
-        <View style={styles.scoreCard}>
-          <Text style={styles.scoreCardLabel}>PEAK SCORE</Text>
-          {healthConnected && peakScore ? (
-            <>
-              <Text style={[styles.scoreNum, { color: scoreColor(peakScore.score) }]}>
-                {peakScore.score}
-              </Text>
-              <Text style={styles.scoreCoach}>{peakScore.coachingLine}</Text>
-              {peakScore.baselineDay < 14 && (
-                <View style={styles.calibrationBar}>
-                  <View style={[styles.calibrationFill, { width: `${(peakScore.baselineDay / 14) * 100}%` as any }]} />
-                </View>
+        {(() => {
+          const borderColor = healthConnected && peakScore
+            ? scoreColor(peakScore.score)
+            : Colors.card;
+          return (
+            <View style={[styles.scoreCard, { borderColor }]}>
+              <Text style={styles.scoreCardLabel}>PEAK SCORE</Text>
+              {healthConnected && peakScore ? (
+                <>
+                  <Text style={[styles.scoreNum, { color: scoreColor(peakScore.score) }]}>
+                    {peakScore.score}
+                  </Text>
+                  <Text style={styles.scoreCoach}>{peakScore.coachingLine}</Text>
+                  {peakScore.baselineDay < 14 && (
+                    <View style={styles.calibrationBar}>
+                      <View style={[styles.calibrationFill, { width: `${(peakScore.baselineDay / 14) * 100}%` as any, backgroundColor: scoreColor(peakScore.score) }]} />
+                    </View>
+                  )}
+                  <Text style={[styles.scoreWearable, { color: scoreColor(peakScore.score) }]}>
+                    {peakScore.baselineDay < 14
+                      ? `Calibrating — day ${peakScore.baselineDay} of 14`
+                      : scoreStatusText(peakScore.score)}
+                  </Text>
+                </>
+              ) : healthConnected ? (
+                <>
+                  <Text style={[styles.scoreNum, { color: Colors.textSecondary }]}>--</Text>
+                  <Text style={styles.scoreCoach}>Loading your score...</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={[styles.scoreNum, { color: Colors.textSecondary }]}>--</Text>
+                  <Text style={styles.scoreCoach}>Track readiness daily.</Text>
+                  <Text style={styles.scoreWearable}>Connect your wearable for live scores</Text>
+                </>
               )}
-              <Text style={styles.scoreWearable}>
-                {peakScore.baselineDay < 14
-                  ? `Calibrating — day ${peakScore.baselineDay} of 14`
-                  : peakScore.zone === 'peak' ? 'Peak Zone' : peakScore.zone === 'build' ? 'Build Zone' : 'Rest Zone'}
-              </Text>
-            </>
-          ) : healthConnected ? (
-            <>
-              <Text style={[styles.scoreNum, { color: GREY }]}>--</Text>
-              <Text style={styles.scoreCoach}>Loading your score...</Text>
-            </>
-          ) : (
-            <>
-              <Text style={[styles.scoreNum, { color: GREY }]}>--</Text>
-              <Text style={styles.scoreCoach}>Track readiness daily.</Text>
-              <Text style={styles.scoreWearable}>Connect your wearable for live scores</Text>
-            </>
-          )}
-        </View>
+            </View>
+          );
+        })()}
 
         {/* Streak + Sessions row */}
         <View style={styles.row}>
           <View style={[styles.miniCard, { flex: 1 }]}>
-            <Text style={styles.streakNum}>🔥 <Text style={{ color: YELLOW }}>{streak}</Text></Text>
+            <View style={styles.streakRow}>
+              <Flame color={Colors.accent} size={18} strokeWidth={1.5} />
+              <Text style={styles.streakNum}>{streak}</Text>
+            </View>
             <Text style={styles.miniCardLabel}>Day Streak</Text>
             <Text style={styles.miniCardSub}>Keep your plan. Keep your streak.</Text>
           </View>
           <View style={[styles.miniCard, { flex: 1 }]}>
-            <Text style={[styles.streakNum, { color: OFF_WHITE }]}>{sessionCount}</Text>
+            <Text style={styles.streakNum}>{sessionCount}</Text>
             <Text style={styles.miniCardLabel}>Sessions</Text>
             <Text style={styles.miniCardSub}>Every rep counts.</Text>
           </View>
@@ -671,42 +663,42 @@ export default function HomeScreen() {
         <View style={styles.row}>
           {[
             {
-              emoji: '👟',
+              Icon: Footprints,
               label: 'Steps',
-              val: (healthConnected || storedProfile?.whoop_connected === true) && healthData?.steps != null
+              val: hasWearable && healthData?.steps != null
                 ? healthData.steps.toLocaleString('en-US') : '--',
             },
             {
-              emoji: '💪',
+              Icon: Dumbbell,
               label: 'Active',
-              val: (healthConnected || storedProfile?.whoop_connected === true) && healthData?.activeCalories != null
+              val: hasWearable && healthData?.activeCalories != null
                 ? `${healthData.activeCalories}` : '--',
             },
           ].map(s => (
             <View key={s.label} style={[styles.statCard, { flex: 1 }]}>
-              <Text style={styles.statEmoji}>{s.emoji}</Text>
+              <s.Icon color={Colors.textSecondary} size={20} strokeWidth={1.5} />
               <Text style={styles.statVal}>{s.val}</Text>
               <Text style={styles.statLabel}>{s.label}</Text>
-              {!healthConnected && storedProfile?.whoop_connected !== true && (
+              {!hasWearable && (
                 <Text style={styles.statSub}>Connect Health</Text>
               )}
             </View>
           ))}
-          {/* 🔥 Total — Whoop strain + TDEE base (if connected) or TDEE projection */}
+          {/* Total calories — Whoop or TDEE projection */}
           {(() => {
             const whoopTotal = readinessData?.totalCalories?.source?.includes('Whoop')
               ? readinessData.totalCalories.value : null;
             if (whoopTotal != null) {
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
-                  <Text style={styles.statEmoji}>🔥</Text>
+                  <Flame color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                   <Text style={styles.statVal}>{whoopTotal}</Text>
                   <Text style={styles.statLabel}>Total</Text>
                   <Text style={styles.statSub}>Whoop + Est.</Text>
                 </View>
               );
             }
-            const activeSoFar = (healthConnected || storedProfile?.whoop_connected === true) && healthData?.activeCalories != null ? healthData.activeCalories : null;
+            const activeSoFar = hasWearable && healthData?.activeCalories != null ? healthData.activeCalories : null;
             const now          = new Date();
             const hoursElapsed = now.getHours() + now.getMinutes() / 60;
             const basalSoFar   = tdeeBase != null ? Math.round((tdeeBase / 24) * hoursElapsed) : null;
@@ -720,7 +712,7 @@ export default function HomeScreen() {
             if (!healthConnected || projected == null) {
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
-                  <Text style={styles.statEmoji}>🔥</Text>
+                  <Flame color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                   <Text style={styles.statVal}>--</Text>
                   <Text style={styles.statLabel}>Total</Text>
                   {!healthConnected && <Text style={styles.statSub}>Connect Health</Text>}
@@ -729,7 +721,7 @@ export default function HomeScreen() {
             }
             return (
               <View style={[styles.statCard, { flex: 1 }]}>
-                <Text style={styles.statEmoji}>🔥</Text>
+                <Flame color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                 <Text style={styles.statVal}>{projected}</Text>
                 <Text style={styles.statLabel}>Projected</Text>
                 {currentBurn != null && <Text style={styles.statSub}>{currentBurn} so far</Text>}
@@ -745,9 +737,9 @@ export default function HomeScreen() {
           const sleepR = selectSleepSource(readinessData);
           const rhrR   = selectRHRSource(readinessData);
           const tiles = [
-            { emoji: '❤️', label: 'HRV',   reading: hrvR,   unit: 'ms' },
-            { emoji: '😴', label: 'Sleep', reading: sleepR, unit: 'h' },
-            { emoji: '💓', label: 'RHR',   reading: rhrR,   unit: 'bpm' },
+            { Icon: Heart,    label: 'HRV',   reading: hrvR,   unit: 'ms' },
+            { Icon: Moon,     label: 'Sleep', reading: sleepR, unit: 'h' },
+            { Icon: Activity, label: 'RHR',   reading: rhrR,   unit: 'bpm' },
           ] as const;
           return (
             <View style={styles.row}>
@@ -758,11 +750,11 @@ export default function HomeScreen() {
                   onPress={() => navigation.navigate('Profile')}
                   activeOpacity={0.75}
                 >
-                  <Text style={styles.statEmoji}>{t.emoji}</Text>
+                  <t.Icon color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                   {t.reading.noWearable || t.reading.value == null ? (
-                    <Text style={[styles.statVal, { color: GREY }]}>--</Text>
+                    <Text style={[styles.recoveryVal, { color: Colors.textSecondary }]}>--</Text>
                   ) : (
-                    <Text style={styles.statVal}>
+                    <Text style={styles.recoveryVal}>
                       {t.label === 'Sleep'
                         ? t.reading.value.toFixed(1)
                         : Math.round(t.reading.value as number)}{t.unit}
@@ -861,7 +853,7 @@ export default function HomeScreen() {
         {/* Chest strap tip — shown once after first workout detected */}
         {showChestStrapTip && (
           <View style={styles.chestStrapCard}>
-            <Text style={styles.chestStrapTitle}>💡 More accurate HR data</Text>
+            <Text style={styles.chestStrapTitle}>More accurate HR data</Text>
             <Text style={styles.chestStrapBody}>
               Using a chest strap heart rate monitor during workouts gives you more precise HR zones — especially for Hyrox runs and SkiErg intervals.
             </Text>
@@ -880,7 +872,7 @@ export default function HomeScreen() {
         {/* Week 2 generation banner */}
         {generatingWeek2 && (
           <View style={styles.week2Banner}>
-            <ActivityIndicator size="small" color={YELLOW} style={{ marginRight: 10 }} />
+            <ActivityIndicator size="small" color={Colors.accent} style={{ marginRight: 10 }} />
             <View>
               <Text style={styles.week2Title}>Building Week 2...</Text>
               <Text style={styles.week2Sub}>Your coach is reviewing your trial results.</Text>
@@ -889,9 +881,9 @@ export default function HomeScreen() {
         )}
         {week2Ready && !generatingWeek2 && (
           <View style={[styles.week2Banner, styles.week2BannerReady]}>
-            <Text style={styles.week2ReadyIcon}>🗓</Text>
+            <Calendar color={Colors.green} size={22} strokeWidth={1.5} style={{ marginRight: 10 }} />
             <View>
-              <Text style={[styles.week2Title, { color: GREEN }]}>Week 2 is ready.</Text>
+              <Text style={[styles.week2Title, { color: Colors.green }]}>Week 2 is ready.</Text>
               <Text style={styles.week2Sub}>Open the Program tab to view it.</Text>
             </View>
           </View>
@@ -905,94 +897,109 @@ export default function HomeScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BLACK },
+  container: { flex: 1, backgroundColor: Colors.background },
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8,
   },
-  headerLogo: { color: YELLOW, fontSize: 20, fontWeight: '800', letterSpacing: -0.5 },
-  headerDate: { color: GREY, fontSize: 13 },
+  headerLogo: { color: Colors.accent, fontSize: 20, fontWeight: '800', letterSpacing: -0.5 },
+  headerDate: { color: Colors.textSecondary, fontSize: 13 },
 
   // Peak Score card
   scoreCard: {
-    margin: 16, backgroundColor: CARD_BG, borderRadius: 16, padding: 24, alignItems: 'center',
+    margin: 16, backgroundColor: Colors.card, borderRadius: 16, padding: 24,
+    alignItems: 'center', borderWidth: 1.5,
   },
-  scoreCardLabel: { color: GREY, fontSize: 11, fontWeight: '600', letterSpacing: 1.5, textTransform: 'uppercase' },
-  scoreNum: { fontSize: 80, fontWeight: '800', lineHeight: 96 },
-  scoreCoach: { color: OFF_WHITE, fontSize: 14, textAlign: 'center', marginTop: 4 },
-  scoreWearable: { color: GREY, fontSize: 11, textAlign: 'center', marginTop: 8 },
+  scoreCardLabel: {
+    color: Colors.textSecondary, fontSize: 11, fontWeight: '600',
+    letterSpacing: 1.5, textTransform: 'uppercase',
+  },
+  scoreNum: {
+    fontFamily: Fonts.metricHeavy, fontSize: 80, lineHeight: 96,
+  },
+  scoreCoach: { color: Colors.textPrimary, fontSize: 14, textAlign: 'center', marginTop: 4 },
+  scoreWearable: { color: Colors.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 8, fontWeight: '600' },
   calibrationBar: {
-    width: '100%', height: 4, backgroundColor: '#2a2a2a',
+    width: '100%', height: 4, backgroundColor: Colors.nested,
     borderRadius: 2, marginTop: 14, overflow: 'hidden',
   },
-  calibrationFill: { height: '100%', backgroundColor: YELLOW, borderRadius: 2 },
+  calibrationFill: { height: '100%', borderRadius: 2 },
 
   // Mini + stat cards
   row: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginBottom: 10 },
-  miniCard: { backgroundColor: CARD_BG, borderRadius: 14, padding: 16 },
-  streakNum: { fontSize: 32, fontWeight: '800', color: OFF_WHITE, marginBottom: 2 },
-  miniCardLabel: { color: GREY, fontSize: 12, fontWeight: '600', marginBottom: 2 },
-  miniCardSub: { color: GREY, fontSize: 11 },
-  statCard: { backgroundColor: CARD_BG, borderRadius: 14, padding: 12, alignItems: 'center' },
-  statEmoji: { fontSize: 22, marginBottom: 4 },
-  statVal: { color: OFF_WHITE, fontSize: 18, fontWeight: '700' },
-  statLabel: { color: GREY, fontSize: 11, fontWeight: '600', marginTop: 2 },
-  statSub:  { color: GREY, fontSize: 10 },
-  statSync: { color: GREY, fontSize: 9, marginTop: 1 },
-  readinessSource: { color: GREY, fontSize: 9, marginTop: 1, textAlign: 'center' },
+  miniCard: { backgroundColor: Colors.card, borderRadius: 14, padding: 16 },
+  streakRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
+  streakNum: {
+    fontFamily: Fonts.metric, fontSize: 32, color: Colors.textPrimary,
+  },
+  miniCardLabel: { color: Colors.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: 2 },
+  miniCardSub: { color: Colors.textSecondary, fontSize: 11 },
+  statCard: {
+    backgroundColor: Colors.card, borderRadius: 14, padding: 12, alignItems: 'center', gap: 4,
+  },
+  statVal: {
+    fontFamily: Fonts.metric, color: Colors.textPrimary, fontSize: 26,
+  },
+  recoveryVal: {
+    fontFamily: Fonts.metric, color: Colors.textPrimary, fontSize: 32,
+  },
+  statLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600' },
+  statSub:  { color: Colors.textSecondary, fontSize: 10 },
+  statSync: { color: Colors.textSecondary, fontSize: 9, marginTop: 1 },
+  readinessSource: { color: Colors.textSecondary, fontSize: 9, marginTop: 1, textAlign: 'center' },
 
   // Today section header
   todayHeader: {
-    color: YELLOW, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
+    color: Colors.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
     textTransform: 'uppercase', paddingHorizontal: 20, marginTop: 8, marginBottom: 12,
   },
   emptyBlock: { paddingHorizontal: 20, paddingVertical: 24 },
-  emptyText: { color: GREY, fontSize: 15, textAlign: 'center' },
+  emptyText: { color: Colors.textSecondary, fontSize: 15, textAlign: 'center' },
 
   // Compact workout card
   workoutCard: {
-    marginHorizontal: 16, backgroundColor: CARD_BG, borderRadius: 16, padding: 20,
-    borderLeftWidth: 3, borderLeftColor: YELLOW, gap: 12,
+    marginHorizontal: 16, backgroundColor: Colors.card, borderRadius: 16, padding: 20,
+    borderLeftWidth: 3, borderLeftColor: Colors.accent, gap: 12,
   },
   workoutCardTop: { gap: 4 },
   workoutDayLabel: {
-    color: GREY, fontSize: 11, fontWeight: '700',
+    color: Colors.textSecondary, fontSize: 11, fontWeight: '700',
     textTransform: 'uppercase', letterSpacing: 1,
   },
-  workoutSessionTitle: { color: OFF_WHITE, fontSize: 18, fontWeight: '800' },
-  workoutSummary: { color: GREY, fontSize: 13, lineHeight: 18 },
+  workoutSessionTitle: { color: Colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  workoutSummary: { color: Colors.textSecondary, fontSize: 13, lineHeight: 18 },
   viewWorkoutBtn: {
-    backgroundColor: YELLOW, borderRadius: 10, paddingVertical: 13,
+    backgroundColor: Colors.accent, borderRadius: 10, paddingVertical: 13,
     alignItems: 'center', marginTop: 4,
   },
-  viewWorkoutBtnText: { color: BLACK, fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
+  viewWorkoutBtnText: { color: Colors.background, fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
 
   // Off-program / extra workout card
   extraWorkoutCard: {
-    marginHorizontal: 16, marginTop: 10, backgroundColor: CARD_BG,
-    borderRadius: 16, padding: 20, borderLeftWidth: 3, borderLeftColor: ORANGE, gap: 8,
+    marginHorizontal: 16, marginTop: 10, backgroundColor: Colors.card,
+    borderRadius: 16, padding: 20, borderLeftWidth: 3, borderLeftColor: '#ff9944', gap: 8,
   },
   extraWorkoutHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   extraWorkoutBadge: {
-    color: ORANGE, fontSize: 10, fontWeight: '700', letterSpacing: 1,
+    color: '#ff9944', fontSize: 10, fontWeight: '700', letterSpacing: 1,
   },
-  extraWorkoutType: { color: OFF_WHITE, fontSize: 16, fontWeight: '800' },
-  extraWorkoutMeta:  { color: GREY, fontSize: 13 },
-  extraWorkoutHR:    { color: GREY, fontSize: 12, marginTop: 2 },
-  extraWorkoutCoach: { color: OFF_WHITE, fontSize: 13, lineHeight: 18 },
+  extraWorkoutType: { color: Colors.textPrimary, fontSize: 16, fontWeight: '800' },
+  extraWorkoutMeta:  { color: Colors.textSecondary, fontSize: 13 },
+  extraWorkoutHR:    { color: Colors.textSecondary, fontSize: 12, marginTop: 2 },
+  extraWorkoutCoach: { color: Colors.textPrimary, fontSize: 13, lineHeight: 18 },
   acknowledgeBtn: {
-    backgroundColor: '#1a1a1a', borderRadius: 10, paddingVertical: 11,
-    alignItems: 'center', marginTop: 4, borderWidth: 1, borderColor: '#333',
+    backgroundColor: Colors.nested, borderRadius: 10, paddingVertical: 11,
+    alignItems: 'center', marginTop: 4, borderWidth: 1, borderColor: Colors.border,
   },
-  acknowledgeBtnText: { color: GREY, fontSize: 13, fontWeight: '700', letterSpacing: 0.5 },
+  acknowledgeBtnText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '700', letterSpacing: 0.5 },
 
   // Primary button (milestone modal)
   primaryBtn: {
-    backgroundColor: YELLOW, borderRadius: 12, paddingVertical: 16,
+    backgroundColor: Colors.accent, borderRadius: 12, paddingVertical: 16,
     alignItems: 'center', marginHorizontal: 16, marginBottom: 10,
   },
-  primaryBtnText: { color: BLACK, fontSize: 16, fontWeight: '700' },
+  primaryBtnText: { color: Colors.background, fontSize: 16, fontWeight: '700' },
 
   // Milestone modal
   milestoneOverlay: {
@@ -1001,33 +1008,32 @@ const styles = StyleSheet.create({
   },
   milestoneCard: { alignItems: 'center', gap: 12, width: '100%' },
   milestoneEmoji: { fontSize: 64 },
-  milestoneNum: { color: YELLOW, fontSize: 72, fontWeight: '800' },
-  milestoneMsg: { color: OFF_WHITE, fontSize: 22, fontWeight: '700', textAlign: 'center' },
-  milestoneSub: { color: GREY, fontSize: 15, textAlign: 'center', marginBottom: 16 },
+  milestoneNum: { color: Colors.accent, fontFamily: Fonts.metricHeavy, fontSize: 72 },
+  milestoneMsg: { color: Colors.textPrimary, fontSize: 22, fontWeight: '700', textAlign: 'center' },
+  milestoneSub: { color: Colors.textSecondary, fontSize: 15, textAlign: 'center', marginBottom: 16 },
 
   // Chest strap tip card
   chestStrapCard: {
-    marginHorizontal: 16, marginTop: 10, backgroundColor: CARD_BG,
+    marginHorizontal: 16, marginTop: 10, backgroundColor: Colors.card,
     borderRadius: 16, padding: 18, gap: 10,
     borderLeftWidth: 3, borderLeftColor: '#4488ff',
   },
-  chestStrapTitle: { color: OFF_WHITE, fontSize: 14, fontWeight: '700' },
-  chestStrapBody:  { color: GREY, fontSize: 13, lineHeight: 18 },
+  chestStrapTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  chestStrapBody:  { color: Colors.textSecondary, fontSize: 13, lineHeight: 18 },
   chestStrapBtn: {
-    backgroundColor: '#1a1a1a', borderRadius: 10, paddingVertical: 11,
-    alignItems: 'center', borderWidth: 1, borderColor: '#333',
+    backgroundColor: Colors.nested, borderRadius: 10, paddingVertical: 11,
+    alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
   },
-  chestStrapBtnText: { color: GREY, fontSize: 13, fontWeight: '700', letterSpacing: 0.5 },
+  chestStrapBtnText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '700', letterSpacing: 0.5 },
 
   // Week 2 banner
   week2Banner: {
     flexDirection: 'row', alignItems: 'center',
     marginHorizontal: 16, marginTop: 12, marginBottom: 4,
-    backgroundColor: CARD_BG, borderRadius: 14, padding: 16,
-    borderLeftWidth: 3, borderLeftColor: YELLOW,
+    backgroundColor: Colors.card, borderRadius: 14, padding: 16,
+    borderLeftWidth: 3, borderLeftColor: Colors.accent,
   },
-  week2BannerReady: { borderLeftColor: GREEN },
-  week2ReadyIcon: { fontSize: 22, marginRight: 10 },
-  week2Title: { color: YELLOW, fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  week2Sub:   { color: GREY, fontSize: 12 },
+  week2BannerReady: { borderLeftColor: Colors.green },
+  week2Title: { color: Colors.accent, fontSize: 14, fontWeight: '700', marginBottom: 2 },
+  week2Sub:   { color: Colors.textSecondary, fontSize: 12 },
 });

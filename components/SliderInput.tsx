@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { View, PanResponder, StyleSheet } from 'react-native';
+import { Colors } from '../lib/theme';
 
-const YELLOW = '#e8ff47';
 const THUMB_RADIUS = 13;
 
 type Props = {
@@ -82,7 +82,7 @@ const styles = StyleSheet.create({
   },
   fill: {
     height: '100%',
-    backgroundColor: YELLOW,
+    backgroundColor: Colors.accent,
     borderRadius: 3,
   },
   thumb: {
@@ -90,6 +90,6 @@ const styles = StyleSheet.create({
     width: THUMB_RADIUS * 2,
     height: THUMB_RADIUS * 2,
     borderRadius: THUMB_RADIUS,
-    backgroundColor: YELLOW,
+    backgroundColor: Colors.accent,
   },
 });

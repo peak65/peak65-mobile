@@ -16,6 +16,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainStackParamList, ProgramSession, SessionBlock, ExerciseItem } from '../_layout';
 import { supabase } from '../../lib/supabase';
+import { Colors, Fonts } from '../../lib/theme';
 
 // Optional keep-awake — requires: npx expo install expo-keep-awake
 function useKeepAwake() {
@@ -31,12 +32,6 @@ function useKeepAwake() {
   }, []);
 }
 
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
-const CARD_BG   = '#111111';
-const DIM       = '#1a1a1a';
 
 type Nav   = NativeStackNavigationProp<MainStackParamList, 'LiveWorkout'>;
 type Route = RouteProp<MainStackParamList, 'LiveWorkout'>;
@@ -232,7 +227,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
 }
 const pb = StyleSheet.create({
   track: { height: 3, backgroundColor: '#222', width: '100%' },
-  fill:  { height: 3, backgroundColor: YELLOW },
+  fill:  { height: 3, backgroundColor: Colors.accent },
 });
 
 function RestCountdown({ seconds, label, onSkip }: { seconds: number; label: string; onSkip: () => void }) {
@@ -256,11 +251,11 @@ function RestCountdown({ seconds, label, onSkip }: { seconds: number; label: str
 }
 const rc = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  restLabel: { color: GREY, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 12 },
-  countdown: { color: YELLOW, fontSize: 88, fontWeight: '800', fontVariant: ['tabular-nums' as const] },
-  restNote:  { color: GREY, fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 32 },
+  restLabel: { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 12 },
+  countdown: { color: Colors.accent, fontSize: 88, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const] },
+  restNote:  { color: Colors.textSecondary, fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 32 },
   skip:      { marginTop: 40 },
-  skipText:  { color: GREY, fontSize: 13, fontWeight: '600', letterSpacing: 1 },
+  skipText:  { color: Colors.textSecondary, fontSize: 13, fontWeight: '600', letterSpacing: 1 },
 });
 
 function SwapSheet({ visible, onClose, onSelect }: { visible: boolean; onClose: () => void; onSelect: (l: string) => void }) {
@@ -293,13 +288,13 @@ function SwapSheet({ visible, onClose, onSelect }: { visible: boolean; onClose: 
 const sw = StyleSheet.create({
   backdrop:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' },
   sheet:      { backgroundColor: '#161616', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 48 },
-  title:      { color: OFF_WHITE, fontSize: 13, fontWeight: '800', letterSpacing: 2, marginBottom: 4 },
-  sub:        { color: GREY, fontSize: 13, marginBottom: 20 },
+  title:      { color: Colors.textPrimary, fontSize: 13, fontWeight: '800', letterSpacing: 2, marginBottom: 4 },
+  sub:        { color: Colors.textSecondary, fontSize: 13, marginBottom: 20 },
   row:        { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#222' },
-  optLabel:   { color: OFF_WHITE, fontSize: 15, fontWeight: '600' },
-  optNote:    { color: GREY, fontSize: 13, marginTop: 2 },
+  optLabel:   { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  optNote:    { color: Colors.textSecondary, fontSize: 13, marginTop: 2 },
   cancel:     { marginTop: 20, alignItems: 'center' },
-  cancelText: { color: GREY, fontSize: 13, fontWeight: '700', letterSpacing: 1 },
+  cancelText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '700', letterSpacing: 1 },
 });
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
@@ -645,7 +640,7 @@ function TransitionTimer({ seconds, onDone }: { seconds: number; onDone: () => v
   }, [rem, seconds]);
   return (
     <View style={{ alignItems: 'center', marginTop: 32 }}>
-      <Text style={{ color: YELLOW, fontSize: 48, fontWeight: '800', fontVariant: ['tabular-nums' as const] }}>
+      <Text style={{ color: Colors.accent, fontSize: 48, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const] }}>
         {formatTime(rem)}
       </Text>
       {canStart && (
@@ -655,7 +650,7 @@ function TransitionTimer({ seconds, onDone }: { seconds: number; onDone: () => v
       )}
       {!canStart && (
         <TouchableOpacity style={{ marginTop: 24 }} onPress={onDone}>
-          <Text style={{ color: GREY, fontSize: 13 }}>Skip transition</Text>
+          <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Skip transition</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -689,11 +684,11 @@ function Z2Phase({
 }
 const z2 = StyleSheet.create({
   container:   { flex: 1, padding: 28, justifyContent: 'center' },
-  sessionName: { color: GREY, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 12 },
-  desc:        { color: OFF_WHITE, fontSize: 16, lineHeight: 22, marginBottom: 20 },
-  pace:        { color: YELLOW, fontSize: 18, fontWeight: '700', marginBottom: 32 },
-  timer:       { color: OFF_WHITE, fontSize: 72, fontWeight: '800', fontVariant: ['tabular-nums' as const], textAlign: 'center' },
-  timerLabel:  { color: GREY, fontSize: 12, fontWeight: '700', letterSpacing: 2, textAlign: 'center' },
+  sessionName: { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 12 },
+  desc:        { color: Colors.textPrimary, fontSize: 16, lineHeight: 22, marginBottom: 20 },
+  pace:        { color: Colors.accent, fontSize: 18, fontWeight: '700', marginBottom: 32 },
+  timer:       { color: Colors.textPrimary, fontSize: 72, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const], textAlign: 'center' },
+  timerLabel:  { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 2, textAlign: 'center' },
 });
 
 // ─── Metcon Phase ─────────────────────────────────────────────────────────────
@@ -745,16 +740,16 @@ function MetconPhase({
 }
 const mc = StyleSheet.create({
   container: { padding: 24, paddingBottom: 60 },
-  format:    { color: GREY, fontSize: 13, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
-  timer:     { color: YELLOW, fontSize: 72, fontWeight: '800', fontVariant: ['tabular-nums' as const] },
-  timeCap:   { color: GREY, fontSize: 14, marginBottom: 24 },
+  format:    { color: Colors.textSecondary, fontSize: 13, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
+  timer:     { color: Colors.accent, fontSize: 72, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const] },
+  timeCap:   { color: Colors.textSecondary, fontSize: 14, marginBottom: 24 },
   movList:   { gap: 12, marginBottom: 28, marginTop: 12 },
-  movRow:    { borderLeftWidth: 3, borderLeftColor: YELLOW, paddingLeft: 12, gap: 2 },
-  movName:   { color: OFF_WHITE, fontSize: 16, fontWeight: '600' },
-  movReps:   { color: YELLOW, fontSize: 14, fontWeight: '700' },
-  movNote:   { color: GREY, fontSize: 13 },
-  roundBtn:  { backgroundColor: CARD_BG, borderRadius: 14, padding: 20, alignItems: 'center', borderWidth: 2, borderColor: YELLOW },
-  roundBtnTxt: { color: YELLOW, fontSize: 18, fontWeight: '800', letterSpacing: 1 },
+  movRow:    { borderLeftWidth: 3, borderLeftColor: Colors.accent, paddingLeft: 12, gap: 2 },
+  movName:   { color: Colors.textPrimary, fontSize: 16, fontWeight: '600' },
+  movReps:   { color: Colors.accent, fontSize: 14, fontWeight: '700' },
+  movNote:   { color: Colors.textSecondary, fontSize: 13 },
+  roundBtn:  { backgroundColor: Colors.card, borderRadius: 14, padding: 20, alignItems: 'center', borderWidth: 2, borderColor: Colors.accent },
+  roundBtnTxt: { color: Colors.accent, fontSize: 18, fontWeight: '800', letterSpacing: 1 },
 });
 
 // ─── Generic Phase (warm-up / cool-down) ─────────────────────────────────────
@@ -787,11 +782,11 @@ function GenericPhase({
 const gp = StyleSheet.create({
   container:  { flex: 1, padding: 28, justifyContent: 'center' },
   header:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 28 },
-  blockLabel: { color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 2 },
-  elapsed:    { color: GREY, fontSize: 13, fontVariant: ['tabular-nums' as const] },
-  name:       { color: OFF_WHITE, fontSize: 34, fontWeight: '800', lineHeight: 40, marginBottom: 10 },
-  detail:     { color: GREY, fontSize: 16, marginBottom: 8 },
-  note:       { color: GREY, fontSize: 14, lineHeight: 20, marginBottom: 24 },
+  blockLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 2 },
+  elapsed:    { color: Colors.textSecondary, fontSize: 13, fontVariant: ['tabular-nums' as const] },
+  name:       { color: Colors.textPrimary, fontSize: 34, fontWeight: '800', lineHeight: 40, marginBottom: 10 },
+  detail:     { color: Colors.textSecondary, fontSize: 16, marginBottom: 8 },
+  note:       { color: Colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 24 },
   btn:        { marginTop: 40 },
 });
 
@@ -846,14 +841,14 @@ function RunIntervalPhase({
 const rp = StyleSheet.create({
   container:  { padding: 28, paddingBottom: 60, flexGrow: 1 },
   header:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 28 },
-  blockLabel: { color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, flex: 1 },
-  elapsed:    { color: GREY, fontSize: 13, fontVariant: ['tabular-nums' as const] },
-  name:       { color: OFF_WHITE, fontSize: 32, fontWeight: '800', lineHeight: 38, marginBottom: 6 },
-  distance:   { color: GREY, fontSize: 18, marginBottom: 16 },
-  pace:       { color: YELLOW, fontSize: 28, fontWeight: '800', marginBottom: 8 },
-  note:       { color: GREY, fontSize: 14, lineHeight: 20, marginBottom: 12 },
+  blockLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, flex: 1 },
+  elapsed:    { color: Colors.textSecondary, fontSize: 13, fontVariant: ['tabular-nums' as const] },
+  name:       { color: Colors.textPrimary, fontSize: 32, fontWeight: '800', lineHeight: 38, marginBottom: 6 },
+  distance:   { color: Colors.textSecondary, fontSize: 18, marginBottom: 16 },
+  pace:       { color: Colors.accent, fontSize: 28, fontFamily: Fonts.metric, marginBottom: 8 },
+  note:       { color: Colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 12 },
   swapBtn:    { marginTop: 4 },
-  swapTxt:    { color: GREY, fontSize: 12, fontWeight: '700', letterSpacing: 1 },
+  swapTxt:    { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 1 },
 });
 
 // ─── Strength Phase ───────────────────────────────────────────────────────────
@@ -897,9 +892,9 @@ function StrengthPhase({
               value={repsInput}
               onChangeText={onRepsChange}
               placeholder={numReps || '—'}
-              placeholderTextColor={GREY}
+              placeholderTextColor={Colors.textSecondary}
               keyboardType="number-pad"
-              selectionColor={YELLOW}
+              selectionColor={Colors.accent}
             />
           </View>
           <View style={sp.inputGroup}>
@@ -909,9 +904,9 @@ function StrengthPhase({
               value={weightInput}
               onChangeText={onWeightChange}
               placeholder={lastWeight ?? '0'}
-              placeholderTextColor={GREY}
+              placeholderTextColor={Colors.textSecondary}
               keyboardType="decimal-pad"
-              selectionColor={YELLOW}
+              selectionColor={Colors.accent}
             />
           </View>
         </View>
@@ -934,19 +929,19 @@ function StrengthPhase({
 const sp = StyleSheet.create({
   container:   { padding: 28, paddingBottom: 60, flexGrow: 1 },
   header:      { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  blockLabel:  { color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 2 },
-  elapsed:     { color: GREY, fontSize: 13, fontVariant: ['tabular-nums' as const] },
-  setCounter:  { color: GREY, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
-  name:        { color: OFF_WHITE, fontSize: 28, fontWeight: '800', lineHeight: 32, marginBottom: 4 },
-  prescribed:  { color: GREY, fontSize: 14, marginBottom: 4 },
-  note:        { color: GREY, fontSize: 13, lineHeight: 18, marginBottom: 8 },
-  lastWeight:  { color: GREY, fontSize: 13, marginBottom: 20 },
+  blockLabel:  { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 2 },
+  elapsed:     { color: Colors.textSecondary, fontSize: 13, fontVariant: ['tabular-nums' as const] },
+  setCounter:  { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
+  name:        { color: Colors.textPrimary, fontSize: 28, fontWeight: '800', lineHeight: 32, marginBottom: 4 },
+  prescribed:  { color: Colors.textSecondary, fontSize: 14, marginBottom: 4 },
+  note:        { color: Colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 8 },
+  lastWeight:  { color: Colors.textSecondary, fontSize: 13, marginBottom: 20 },
   inputRow:    { flexDirection: 'row', gap: 16, marginBottom: 20 },
   inputGroup:  { flex: 1, gap: 6 },
-  inputLabel:  { color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
+  inputLabel:  { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
   input: {
-    backgroundColor: DIM, borderRadius: 10, padding: 14,
-    color: OFF_WHITE, fontSize: 28, fontWeight: '800', textAlign: 'center',
+    backgroundColor: Colors.nested, borderRadius: 10, padding: 14,
+    color: Colors.textPrimary, fontSize: 28, fontFamily: Fonts.metric, textAlign: 'center',
     borderWidth: 1, borderColor: '#2a2a2a',
   },
   prevSets: { marginTop: 24, gap: 4 },
@@ -956,29 +951,29 @@ const sp = StyleSheet.create({
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: BLACK },
+  container:    { flex: 1, backgroundColor: Colors.background },
   centerPad:    { padding: 24, paddingBottom: 60, flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
   transContainer: { flex: 1, padding: 28, justifyContent: 'center', alignItems: 'center' },
-  transTag:     { color: YELLOW, fontSize: 11, fontWeight: '800', letterSpacing: 2, marginBottom: 16 },
-  transTitle:   { color: OFF_WHITE, fontSize: 40, fontWeight: '900', textAlign: 'center' },
-  transSub:     { color: GREY, fontSize: 15, textAlign: 'center', marginTop: 12, lineHeight: 22 },
+  transTag:     { color: Colors.accent, fontSize: 11, fontWeight: '800', letterSpacing: 2, marginBottom: 16 },
+  transTitle:   { color: Colors.textPrimary, fontSize: 40, fontWeight: '900', textAlign: 'center' },
+  transSub:     { color: Colors.textSecondary, fontSize: 15, textAlign: 'center', marginTop: 12, lineHeight: 22 },
 
-  primaryBtn:    { backgroundColor: YELLOW, borderRadius: 14, padding: 18, alignItems: 'center', width: '100%' },
+  primaryBtn:    { backgroundColor: Colors.accent, borderRadius: 14, padding: 18, alignItems: 'center', width: '100%' },
   btnOff:        { opacity: 0.5 },
-  primaryBtnTxt: { color: BLACK, fontSize: 14, fontWeight: '800', letterSpacing: 1.5 },
+  primaryBtnTxt: { color: Colors.background, fontSize: 14, fontWeight: '800', letterSpacing: 1.5 },
 
-  completeTitle:   { color: OFF_WHITE, fontSize: 48, fontWeight: '900', lineHeight: 52, textAlign: 'center', marginBottom: 8 },
-  completeSub:     { color: GREY, fontSize: 14, marginBottom: 40, textAlign: 'center' },
+  completeTitle:   { color: Colors.textPrimary, fontSize: 48, fontFamily: Fonts.metricHeavy, lineHeight: 52, textAlign: 'center', marginBottom: 8 },
+  completeSub:     { color: Colors.textSecondary, fontSize: 14, marginBottom: 40, textAlign: 'center' },
   statRow:  { flexDirection: 'row', gap: 40, marginBottom: 48 },
   stat:     { alignItems: 'center', gap: 4 },
-  statVal:  { color: YELLOW, fontSize: 36, fontWeight: '800' },
-  statLbl:  { color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
+  statVal:  { color: Colors.accent, fontSize: 36, fontFamily: Fonts.metric },
+  statLbl:  { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
 
-  rpeLabel: { color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 2, marginBottom: 16 },
+  rpeLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 2, marginBottom: 16 },
   rpeRow:   { flexDirection: 'row', gap: 6, marginBottom: 12, flexWrap: 'wrap', justifyContent: 'center' },
-  rpeDot:   { width: 36, height: 36, borderRadius: 18, backgroundColor: DIM, alignItems: 'center', justifyContent: 'center' },
-  rpeDotOn: { backgroundColor: YELLOW },
-  rpeTxt:   { color: GREY, fontSize: 14, fontWeight: '700' },
-  rpeTxtOn: { color: BLACK },
-  rpeDesc:  { color: GREY, fontSize: 13, textAlign: 'center', marginBottom: 40 },
+  rpeDot:   { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.nested, alignItems: 'center', justifyContent: 'center' },
+  rpeDotOn: { backgroundColor: Colors.accent },
+  rpeTxt:   { color: Colors.textSecondary, fontSize: 14, fontWeight: '700' },
+  rpeTxtOn: { color: Colors.background },
+  rpeDesc:  { color: Colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 40 },
 });

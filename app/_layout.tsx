@@ -5,9 +5,17 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { Session } from '@supabase/supabase-js';
+import {
+  useFonts,
+  BarlowCondensed_700Bold,
+  BarlowCondensed_900Black,
+} from '@expo-google-fonts/barlow-condensed';
+import * as SplashScreen from 'expo-splash-screen';
+import { Home, ClipboardList, Clock, Activity, User } from 'lucide-react-native';
 
 import { supabase } from '../lib/supabase';
 import { detectCandidates } from '../lib/sessionMatcher';
+import { Colors } from '../lib/theme';
 import LoginScreen from './auth/login';
 import SignupScreen from './auth/signup';
 import OnboardingScreen from './onboarding/index';
@@ -113,15 +121,12 @@ const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const MainStack = createNativeStackNavigator<MainStackParamList>();
 const Tab       = createBottomTabNavigator<TabParamList>();
 
-const YELLOW = '#e8ff47';
-const GREY   = '#8a877f';
-
-const TAB_ICONS: Record<keyof TabParamList, string> = {
-  Home:    '⌂',
-  Program: '▦',
-  History: '◷',
-  Coach:   '◈',
-  Profile: '◉',
+const TAB_ICON_COMPONENTS: Record<keyof TabParamList, React.ComponentType<{ color: string; size: number; strokeWidth: number }>> = {
+  Home:    Home,
+  Program: ClipboardList,
+  History: Clock,
+  Coach:   Activity,
+  Profile: User,
 };
 
 // Context that makes isCoach available to MainTabs without prop drilling
@@ -133,22 +138,24 @@ function MainTabs() {
 
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: '#111111',
-          borderTopWidth: 0,
-          elevation: 0,
-          shadowOpacity: 0,
-        },
-        tabBarActiveTintColor: YELLOW,
-        tabBarInactiveTintColor: GREY,
-        tabBarIcon: ({ color }) => (
-          <Text style={{ color, fontSize: 20, lineHeight: 24 }}>
-            {TAB_ICONS[route.name as keyof TabParamList]}
-          </Text>
-        ),
-      })}
+      screenOptions={({ route }) => {
+        const IconComponent = TAB_ICON_COMPONENTS[route.name as keyof TabParamList];
+        return {
+          headerShown: false,
+          tabBarStyle: {
+            backgroundColor: Colors.background,
+            borderTopWidth: 1,
+            borderTopColor: Colors.border,
+            elevation: 0,
+            shadowOpacity: 0,
+          },
+          tabBarActiveTintColor:   Colors.accent,
+          tabBarInactiveTintColor: Colors.textSecondary,
+          tabBarIcon: ({ color }) => (
+            <IconComponent color={color} size={24} strokeWidth={1.5} />
+          ),
+        };
+      }}
     >
       <Tab.Screen name="Home"    component={HomeScreen} />
       <Tab.Screen name="Program" component={ProgramScreen} />
@@ -310,6 +317,17 @@ export default function RootLayout() {
   const [appState, setAppState] = useState<AppState>('loading');
   const [isCoach, setIsCoach]   = useState(false);
 
+  const [fontsLoaded] = useFonts({
+    BarlowCondensed_700Bold,
+    BarlowCondensed_900Black,
+  });
+
+  useEffect(() => {
+    if (fontsLoaded) {
+      void SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [fontsLoaded]);
+
   useEffect(() => {
     // INITIAL_SESSION fires after the Supabase client finishes reading the
     // persisted session from AsyncStorage — the earliest safe point to query.
@@ -343,7 +361,7 @@ export default function RootLayout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  if (appState === 'loading') return null;
+  if (appState === 'loading' || !fontsLoaded) return null;
 
   if (appState === 'unauthenticated') {
     return (

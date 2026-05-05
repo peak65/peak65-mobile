@@ -8,13 +8,10 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList } from '../_layout';
+import { Colors, Fonts } from '../../lib/theme';
+import { ArrowLeft } from 'lucide-react-native';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'UpdateProgram'>;
-
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -358,7 +355,7 @@ export default function UpdateProgramScreen({ navigation }: Props) {
                 mode="date"
                 display="inline"
                 themeVariant="dark"
-                accentColor={YELLOW}
+                accentColor={Colors.accent}
                 minimumDate={new Date()}
                 onChange={(_e, d) => {
                   if (d) setForm(p => ({ ...p, raceDate: d.toISOString().split('T')[0] }));
@@ -469,7 +466,7 @@ export default function UpdateProgramScreen({ navigation }: Props) {
                   style={[s.confidenceBtn, form.runConfidence === n && s.confidenceBtnSelected]}
                   onPress={() => setForm(p => ({ ...p, runConfidence: n }))}
                 >
-                  <Text style={[s.confidenceBtnText, form.runConfidence === n && { color: BLACK }]}>{n}</Text>
+                  <Text style={[s.confidenceBtnText, form.runConfidence === n && { color: Colors.background }]}>{n}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -508,10 +505,10 @@ export default function UpdateProgramScreen({ navigation }: Props) {
                 const changed = f.oldVal !== f.newVal;
                 return (
                   <View key={f.label} style={s.reviewRow}>
-                    <Text style={[s.reviewLabel, changed && { color: YELLOW }]}>{f.label}</Text>
+                    <Text style={[s.reviewLabel, changed && { color: Colors.accent }]}>{f.label}</Text>
                     <View style={s.reviewValues}>
                       {changed && <Text style={s.reviewOld}>{f.oldVal}</Text>}
-                      <Text style={[s.reviewNew, changed && { color: YELLOW }]}>{f.newVal}</Text>
+                      <Text style={[s.reviewNew, changed && { color: Colors.accent }]}>{f.newVal}</Text>
                     </View>
                   </View>
                 );
@@ -575,7 +572,7 @@ export default function UpdateProgramScreen({ navigation }: Props) {
           onPress={handleBack}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <Text style={s.backArrow}>←</Text>
+          <ArrowLeft color={Colors.textPrimary} size={22} strokeWidth={1.5} />
         </TouchableOpacity>
         <View style={s.progressBarTrack}>
           <View style={[s.progressBarFill, { width: `${progress * 100}%` as any }]} />
@@ -624,10 +621,10 @@ export default function UpdateProgramScreen({ navigation }: Props) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BLACK },
+  container: { flex: 1, backgroundColor: Colors.background },
 
   logo: {
-    color: YELLOW, fontSize: 36, fontWeight: '800',
+    color: Colors.accent, fontSize: 36, fontFamily: Fonts.metricHeavy,
     textAlign: 'center', letterSpacing: -1, paddingTop: 8, paddingBottom: 4,
   },
 
@@ -635,12 +632,11 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 20, paddingVertical: 12, gap: 12,
   },
-  backBtn:        { width: 32 },
-  backArrow:      { color: OFF_WHITE, fontSize: 22 },
+  backBtn: { width: 32 },
   progressBarTrack: {
-    flex: 1, height: 3, backgroundColor: '#1e1e1e', borderRadius: 2, overflow: 'hidden',
+    flex: 1, height: 3, backgroundColor: Colors.nested, borderRadius: 2, overflow: 'hidden',
   },
-  progressBarFill: { height: 3, backgroundColor: YELLOW, borderRadius: 2 },
+  progressBarFill: { height: 3, backgroundColor: Colors.accent, borderRadius: 2 },
 
   scrollContent: {
     flexGrow: 1, justifyContent: 'center',
@@ -650,64 +646,64 @@ const s = StyleSheet.create({
 
   stepContent: { gap: 10 },
   label: {
-    color: OFF_WHITE, fontSize: 22, fontWeight: '800',
+    color: Colors.textPrimary, fontSize: 22, fontWeight: '800',
     lineHeight: 28, marginBottom: 8, letterSpacing: -0.3,
   },
-  sublabel: { color: GREY, fontSize: 13, marginTop: -4, marginBottom: 4, lineHeight: 18 },
+  sublabel: { color: Colors.textSecondary, fontSize: 13, marginTop: -4, marginBottom: 4, lineHeight: 18 },
 
   option: {
-    backgroundColor: '#111', borderRadius: 12, paddingVertical: 16,
-    paddingHorizontal: 18, borderWidth: 1, borderColor: '#222',
+    backgroundColor: Colors.card, borderRadius: 12, paddingVertical: 16,
+    paddingHorizontal: 18, borderWidth: 1, borderColor: Colors.border,
   },
-  optionSelected:     { backgroundColor: YELLOW, borderColor: YELLOW },
-  optionText:         { color: OFF_WHITE, fontSize: 16 },
-  optionTextSelected: { color: BLACK, fontWeight: '700' },
+  optionSelected:     { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  optionText:         { color: Colors.textPrimary, fontSize: 16 },
+  optionTextSelected: { color: Colors.background, fontWeight: '700' },
 
   confidenceRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
   confidenceBtn: {
-    flex: 1, backgroundColor: '#111', borderRadius: 12,
-    paddingVertical: 16, alignItems: 'center', borderWidth: 1, borderColor: '#222',
+    flex: 1, backgroundColor: Colors.card, borderRadius: 12,
+    paddingVertical: 16, alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
   },
-  confidenceBtnSelected: { backgroundColor: YELLOW, borderColor: YELLOW },
-  confidenceBtnText:     { color: OFF_WHITE, fontSize: 18, fontWeight: '700' },
+  confidenceBtnSelected: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  confidenceBtnText:     { color: Colors.textPrimary, fontSize: 18, fontWeight: '700' },
 
   footer:   { paddingHorizontal: 24, paddingBottom: 20, paddingTop: 8, gap: 10 },
   skipBtn:  { alignItems: 'center', paddingVertical: 4 },
-  skipText: { color: GREY, fontSize: 15, textDecorationLine: 'underline' },
+  skipText: { color: Colors.textSecondary, fontSize: 15, textDecorationLine: 'underline' },
   continueBtn: {
-    backgroundColor: YELLOW, borderRadius: 14, paddingVertical: 18, alignItems: 'center',
+    backgroundColor: Colors.accent, borderRadius: 14, paddingVertical: 18, alignItems: 'center',
   },
   continueBtnDisabled: { opacity: 0.35 },
-  continueBtnText: { color: BLACK, fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
+  continueBtnText: { color: Colors.background, fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
 
   // Review
   reviewCard: {
-    backgroundColor: '#111', borderRadius: 14, overflow: 'hidden', marginTop: 8,
+    backgroundColor: Colors.card, borderRadius: 14, overflow: 'hidden', marginTop: 8,
   },
   reviewRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
     paddingHorizontal: 16, paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#222',
   },
-  reviewLabel:  { color: GREY, fontSize: 14, fontWeight: '600', flex: 1 },
+  reviewLabel:  { color: Colors.textSecondary, fontSize: 14, fontWeight: '600', flex: 1 },
   reviewValues: { flex: 2, alignItems: 'flex-end', gap: 2 },
-  reviewOld:    { color: GREY, fontSize: 12, textDecorationLine: 'line-through' },
-  reviewNew:    { color: OFF_WHITE, fontSize: 14, fontWeight: '600', textAlign: 'right' },
+  reviewOld:    { color: Colors.textSecondary, fontSize: 12, textDecorationLine: 'line-through' },
+  reviewNew:    { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', textAlign: 'right' },
 
   // Generating
   genBody: {
     flex: 1, alignItems: 'center', justifyContent: 'center', gap: 28, paddingHorizontal: 24,
   },
-  genHeading: { color: OFF_WHITE, fontSize: 18, fontWeight: '600', textAlign: 'center' },
+  genHeading: { color: Colors.textPrimary, fontSize: 18, fontWeight: '600', textAlign: 'center' },
   genMsg: {
-    color: YELLOW, fontSize: 26, fontWeight: '700',
+    color: Colors.accent, fontSize: 26, fontFamily: Fonts.metric,
     textAlign: 'center', letterSpacing: -0.3, lineHeight: 34,
   },
   retryBtn:  { paddingVertical: 8, paddingHorizontal: 16 },
-  retryText: { color: YELLOW, fontSize: 15, textAlign: 'center', textDecorationLine: 'underline' },
+  retryText: { color: Colors.accent, fontSize: 15, textAlign: 'center', textDecorationLine: 'underline' },
   progressTrack: {
-    height: 2, backgroundColor: '#1e1e1e', borderRadius: 1,
+    height: 2, backgroundColor: Colors.nested, borderRadius: 1,
     marginHorizontal: 24, marginBottom: 24, overflow: 'hidden',
   },
-  progressFill: { height: 2, backgroundColor: YELLOW, borderRadius: 1 },
+  progressFill: { height: 2, backgroundColor: Colors.accent, borderRadius: 1 },
 });

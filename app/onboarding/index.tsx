@@ -16,6 +16,8 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList } from '../_layout';
 import SliderWithScrollLock from '../../components/SliderWithScrollLock';
+import { Colors, Fonts } from '../../lib/theme';
+import { ArrowLeft } from 'lucide-react-native';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -155,13 +157,6 @@ function formatWeightDisplay(weightKg: number, imperial: boolean): string {
   if (!imperial) return `${Math.round(weightKg)} kg`;
   return `${Math.round(weightKg / 0.453592)} lb`;
 }
-
-// ─── Colours ──────────────────────────────────────────────────────────────────
-
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
 
 // ─── Initial state ────────────────────────────────────────────────────────────
 
@@ -482,8 +477,8 @@ export default function OnboardingScreen({ navigation }: Props) {
           autoCapitalize={keyboardType === 'default' ? 'words' : 'none'}
           autoFocus
           placeholder={placeholder}
-          placeholderTextColor={GREY}
-          selectionColor={YELLOW}
+          placeholderTextColor={Colors.textSecondary}
+          selectionColor={Colors.accent}
         />
         {ageError && <Text style={styles.errorText}>Age must be between 13 and 99</Text>}
       </View>
@@ -590,7 +585,7 @@ export default function OnboardingScreen({ navigation }: Props) {
             mode="date"
             display="inline"
             themeVariant="dark"
-            accentColor={YELLOW}
+            accentColor={Colors.accent}
             minimumDate={new Date()}
             onChange={(_event, date) => {
               if (date) setData(prev => ({ ...prev, race_date: date }));
@@ -643,8 +638,8 @@ export default function OnboardingScreen({ navigation }: Props) {
           onChangeText={text => setData(prev => ({ ...prev, body_weight: text }))}
           keyboardType="decimal-pad"
           placeholder={data.weight_unit === 'lbs' ? 'e.g. 170' : 'e.g. 77'}
-          placeholderTextColor={GREY}
-          selectionColor={YELLOW}
+          placeholderTextColor={Colors.textSecondary}
+          selectionColor={Colors.accent}
           autoFocus
         />
       </View>
@@ -940,7 +935,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       <SafeAreaView style={styles.loadingScreen} edges={['top', 'bottom']}>
         <Text style={styles.logo}>Peak 65</Text>
         <View style={styles.loadingBody}>
-          {!apiError && <ActivityIndicator size="large" color={YELLOW} style={{ marginBottom: 28 }} />}
+          {!apiError && <ActivityIndicator size="large" color={Colors.accent} style={{ marginBottom: 28 }} />}
           <Text style={styles.loadingTitle}>Building your program...</Text>
           {apiError ? (
             <TouchableOpacity onPress={handleRetry} style={styles.retryBtn}>
@@ -969,7 +964,7 @@ export default function OnboardingScreen({ navigation }: Props) {
           disabled={step === 0}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          {step > 0 && <Text style={styles.backArrow}>←</Text>}
+          {step > 0 && <ArrowLeft color={Colors.textPrimary} size={22} strokeWidth={1.5} />}
         </TouchableOpacity>
 
         <View style={styles.progressTrack}>
@@ -1030,14 +1025,14 @@ export default function OnboardingScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BLACK,
+    backgroundColor: Colors.background,
   },
 
   // Logo
   logo: {
-    color: YELLOW,
+    color: Colors.accent,
     fontSize: 36,
-    fontWeight: '800',
+    fontFamily: Fonts.metricHeavy,
     textAlign: 'center',
     letterSpacing: -1,
     paddingTop: 8,
@@ -1057,20 +1052,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backArrow: {
-    color: OFF_WHITE,
-    fontSize: 22,
-  },
   progressTrack: {
     flex: 1,
     height: 4,
-    backgroundColor: '#1e1e1e',
+    backgroundColor: Colors.nested,
     borderRadius: 2,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: YELLOW,
+    backgroundColor: Colors.accent,
     borderRadius: 2,
   },
 
@@ -1090,57 +1081,57 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   label: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 26,
     fontWeight: '700',
     lineHeight: 34,
     marginBottom: 10,
   },
   sublabel: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 14,
     marginTop: -6,
   },
 
   // Text input
   textInput: {
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: '#262626',
+    borderColor: Colors.border,
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 18,
   },
   textInputError: {
-    borderColor: '#ff5c5c',
+    borderColor: Colors.red,
   },
   errorText: {
-    color: '#ff5c5c',
+    color: Colors.red,
     fontSize: 13,
   },
 
   // Options (single + multi select)
   option: {
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: '#262626',
+    borderColor: Colors.border,
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 15,
   },
   optionSelected: {
-    backgroundColor: YELLOW,
-    borderColor: YELLOW,
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
   },
   optionText: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 16,
     lineHeight: 22,
   },
   optionTextSelected: {
-    color: BLACK,
+    color: Colors.background,
     fontWeight: '600',
   },
 
@@ -1163,7 +1154,7 @@ const styles = StyleSheet.create({
 
   // Slider display
   sliderValueText: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 52,
     fontWeight: '800',
     textAlign: 'center',
@@ -1176,7 +1167,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   sliderRangeText: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 12,
   },
 
@@ -1187,29 +1178,29 @@ const styles = StyleSheet.create({
   },
   unitBtn: {
     flex: 1,
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: '#262626',
+    borderColor: Colors.border,
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: 'center',
   },
   unitBtnSelected: {
-    backgroundColor: YELLOW,
-    borderColor: YELLOW,
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
   },
   unitBtnText: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
   },
   unitBtnTextSelected: {
-    color: BLACK,
+    color: Colors.background,
   },
 
   // Date picker (iOS inline)
   datePicker: {
-    backgroundColor: BLACK,
+    backgroundColor: Colors.background,
     marginTop: 4,
   },
 
@@ -1225,12 +1216,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   skipText: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 15,
     textDecorationLine: 'underline',
   },
   continueBtn: {
-    backgroundColor: YELLOW,
+    backgroundColor: Colors.accent,
     borderRadius: 10,
     paddingVertical: 16,
     alignItems: 'center',
@@ -1239,7 +1230,7 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   continueBtnText: {
-    color: BLACK,
+    color: Colors.background,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -1247,7 +1238,7 @@ const styles = StyleSheet.create({
   // Loading screen
   loadingScreen: {
     flex: 1,
-    backgroundColor: BLACK,
+    backgroundColor: Colors.background,
     paddingHorizontal: 24,
   },
   loadingBody: {
@@ -1256,14 +1247,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   loadingTitle: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 22,
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 12,
   },
   loadingSubtext: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 15,
     textAlign: 'center',
   },
@@ -1273,7 +1264,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   retryText: {
-    color: YELLOW,
+    color: Colors.accent,
     fontSize: 15,
     textAlign: 'center',
     textDecorationLine: 'underline',

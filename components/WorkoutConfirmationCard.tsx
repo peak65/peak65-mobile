@@ -2,12 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { confirmMatch, snoozeCandidate } from '../lib/sessionMatcher';
 import type { CandidateRow } from '../lib/sessionMatcher';
-
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
-const CARD_BG   = '#111111';
+import { Colors } from '../lib/theme';
 
 const WORKOUT_TYPE_LABELS: Record<string, string> = {
   run:      'Run',
@@ -60,7 +55,7 @@ export default function WorkoutConfirmationCard({
   if (loading) {
     return (
       <View style={styles.card}>
-        <ActivityIndicator color={YELLOW} />
+        <ActivityIndicator color={Colors.accent} />
       </View>
     );
   }
@@ -117,39 +112,39 @@ const styles = StyleSheet.create({
   card: {
     marginHorizontal: 16,
     marginBottom: 12,
-    backgroundColor: CARD_BG,
+    backgroundColor: Colors.card,
     borderRadius: 16,
     padding: 16,
     borderLeftWidth: 3,
-    borderLeftColor: YELLOW,
+    borderLeftColor: Colors.accent,
     minHeight: 60,
     justifyContent: 'center',
   },
   label: {
-    color: YELLOW,
+    color: Colors.accent,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1.2,
     marginBottom: 4,
   },
   subLabel: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 13,
     marginBottom: 12,
   },
   workoutLine: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
   },
   matchLine: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 13,
     marginBottom: 14,
   },
   sessionName: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontWeight: '600',
   },
   btnRow: {
@@ -159,32 +154,32 @@ const styles = StyleSheet.create({
   },
   confirmBtn: {
     flex: 1,
-    backgroundColor: YELLOW,
+    backgroundColor: Colors.accent,
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
   confirmBtnText: {
-    color: BLACK,
+    color: Colors.background,
     fontSize: 13,
     fontWeight: '700',
   },
   alternateBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: GREY,
+    borderColor: Colors.textSecondary,
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
   alternateBtnText: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 13,
     fontWeight: '600',
   },
   sessionChip: {
     borderWidth: 1,
-    borderColor: GREY,
+    borderColor: Colors.textSecondary,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 16,
@@ -192,7 +187,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sessionChipText: {
-    color: OFF_WHITE,
+    color: Colors.textPrimary,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -201,7 +196,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   skipText: {
-    color: GREY,
+    color: Colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 0.5,

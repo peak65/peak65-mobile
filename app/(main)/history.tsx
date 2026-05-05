@@ -4,13 +4,10 @@ import {
   StyleSheet, ActivityIndicator, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { X, ChevronRight } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
+import { Colors, Fonts } from '../../lib/theme';
 
-const YELLOW    = '#e8ff47';
-const BLACK     = '#080808';
-const OFF_WHITE = '#f0ede8';
-const GREY      = '#8a877f';
-const CARD_BG   = '#111111';
 const ORANGE    = '#ff9944';
 const BAR_MAX_H = 80;
 
@@ -93,11 +90,11 @@ function fmtDuration(s: number | null): string {
 }
 
 function rpeColor(rpe: number | null): string {
-  if (!rpe) return GREY;
-  if (rpe <= 3) return '#44ff88';
-  if (rpe <= 6) return YELLOW;
+  if (!rpe) return Colors.textSecondary;
+  if (rpe <= 3) return Colors.green;
+  if (rpe <= 6) return Colors.accent;
   if (rpe <= 8) return '#ff9944';
-  return '#ff4444';
+  return Colors.red;
 }
 
 function getSessionTitle(log: SessionLog): string {
@@ -190,7 +187,7 @@ function SessionDetailModal({
           <View style={styles.detailHeader}>
             <Text style={styles.detailTitle}>{getSessionTitle(log)}</Text>
             <TouchableOpacity onPress={onClose} style={styles.detailCloseBtn}>
-              <Text style={styles.detailCloseText}>✕</Text>
+              <X color={Colors.textSecondary} size={20} strokeWidth={1.5} />
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
@@ -257,7 +254,7 @@ function WorkoutDetailModal({
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.detailCloseBtn}>
-              <Text style={styles.detailCloseText}>✕</Text>
+              <X color={Colors.textSecondary} size={20} strokeWidth={1.5} />
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
@@ -303,7 +300,7 @@ function WorkoutDetailModal({
               {workout.effort_zone && workout.effort_zone !== 'unknown' && (
                 <View style={styles.detailCell}>
                   <Text style={styles.detailCellLabel}>Effort Zone</Text>
-                  <Text style={[styles.detailCellVal, { color: YELLOW }]}>{workout.effort_zone.toUpperCase()}</Text>
+                  <Text style={[styles.detailCellVal, { color: Colors.accent }]}>{workout.effort_zone.toUpperCase()}</Text>
                 </View>
               )}
               <View style={styles.detailCell}>
@@ -391,7 +388,7 @@ export default function HistoryScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <ActivityIndicator color={YELLOW} style={{ flex: 1 }} />
+        <ActivityIndicator color={Colors.accent} style={{ flex: 1 }} />
       </SafeAreaView>
     );
   }
@@ -428,18 +425,18 @@ export default function HistoryScreen() {
                 <TouchableOpacity key={u}
                   style={[styles.unitBtn, weightUnit === u && styles.unitBtnActive]}
                   onPress={() => setWeightUnit(u)}>
-                  <Text style={[styles.unitBtnText, weightUnit === u && { color: BLACK }]}>{u}</Text>
+                  <Text style={[styles.unitBtnText, weightUnit === u && { color: Colors.background }]}>{u}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
             <TextInput style={styles.input} placeholder={`Weight (${weightUnit})`}
-              placeholderTextColor={GREY} value={weight} onChangeText={setWeight}
-              keyboardType="decimal-pad" selectionColor={YELLOW} />
+              placeholderTextColor={Colors.textSecondary} value={weight} onChangeText={setWeight}
+              keyboardType="decimal-pad" selectionColor={Colors.accent} />
             <TextInput style={[styles.input, { marginTop: 10 }]}
               placeholder="Body fat % (optional)"
-              placeholderTextColor={GREY} value={bodyFat} onChangeText={setBodyFat}
-              keyboardType="decimal-pad" selectionColor={YELLOW} />
+              placeholderTextColor={Colors.textSecondary} value={bodyFat} onChangeText={setBodyFat}
+              keyboardType="decimal-pad" selectionColor={Colors.accent} />
 
             <TouchableOpacity
               style={[styles.saveBtn, (!parseFloat(weight) || saving) && { opacity: 0.4 }]}
@@ -476,7 +473,7 @@ export default function HistoryScreen() {
           <View style={styles.card}>
             <View style={styles.checkinCardRow}>
               <View>
-                <Text style={styles.cardTitle}>📊 Body Check-In</Text>
+                <Text style={styles.cardTitle}>Body Check-In</Text>
                 <Text style={styles.cardSub}>
                   Log your weight and body fat % to track progress
                 </Text>
@@ -496,7 +493,7 @@ export default function HistoryScreen() {
                     <TouchableOpacity key={t.key}
                       style={[styles.tab, activeTab === t.key && styles.tabActive]}
                       onPress={() => setActiveTab(t.key as 'weight' | 'bodyfat')}>
-                      <Text style={[styles.tabText, activeTab === t.key && { color: BLACK }]}>
+                      <Text style={[styles.tabText, activeTab === t.key && { color: Colors.background }]}>
                         {t.label}
                       </Text>
                     </TouchableOpacity>
@@ -564,7 +561,7 @@ export default function HistoryScreen() {
                               </Text>
                             </View>
                           )}
-                          <Text style={styles.chevron}>›</Text>
+                          <ChevronRight color={Colors.textSecondary} size={18} strokeWidth={1.5} />
                         </View>
                       </View>
                     </TouchableOpacity>
@@ -595,7 +592,7 @@ export default function HistoryScreen() {
                         <View style={styles.offProgramBadge}>
                           <Text style={styles.offProgramText}>OFF-PROGRAM</Text>
                         </View>
-                        <Text style={styles.chevron}>›</Text>
+                        <ChevronRight color={Colors.textSecondary} size={18} strokeWidth={1.5} />
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -610,60 +607,59 @@ export default function HistoryScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BLACK },
-  heading: { color: OFF_WHITE, fontSize: 24, fontWeight: '800', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
+  container: { flex: 1, backgroundColor: Colors.background },
+  heading: { color: Colors.textPrimary, fontSize: 24, fontWeight: '800', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
   sectionHeading: {
-    color: GREY, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
+    color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
     textTransform: 'uppercase', paddingHorizontal: 20, marginTop: 20, marginBottom: 10,
   },
-  emptyText: { color: GREY, fontSize: 14, textAlign: 'center', paddingHorizontal: 20, paddingVertical: 24 },
+  emptyText: { color: Colors.textSecondary, fontSize: 14, textAlign: 'center', paddingHorizontal: 20, paddingVertical: 24 },
 
   statsRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginBottom: 16 },
-  statCard: { flex: 1, backgroundColor: CARD_BG, borderRadius: 12, padding: 14, alignItems: 'center' },
-  statVal: { color: OFF_WHITE, fontSize: 22, fontWeight: '800', marginBottom: 2 },
-  statLabel: { color: GREY, fontSize: 11, fontWeight: '600' },
+  statCard: { flex: 1, backgroundColor: Colors.card, borderRadius: 12, padding: 14, alignItems: 'center' },
+  statVal: { color: Colors.textPrimary, fontFamily: Fonts.metric, fontSize: 26, marginBottom: 2 },
+  statLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600' },
 
-  card: { marginHorizontal: 16, backgroundColor: CARD_BG, borderRadius: 14, padding: 16, marginBottom: 10 },
+  card: { marginHorizontal: 16, backgroundColor: Colors.card, borderRadius: 14, padding: 16, marginBottom: 10 },
   checkinCardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
-  cardTitle: { color: OFF_WHITE, fontSize: 15, fontWeight: '700', marginBottom: 4 },
-  cardSub: { color: GREY, fontSize: 12, maxWidth: '80%' },
-  logBtn: { backgroundColor: YELLOW, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  logBtnText: { color: BLACK, fontSize: 12, fontWeight: '700' },
+  cardTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 4 },
+  cardSub: { color: Colors.textSecondary, fontSize: 12, maxWidth: '80%' },
+  logBtn: { backgroundColor: Colors.accent, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  logBtnText: { color: Colors.background, fontSize: 12, fontWeight: '700' },
 
   // Chart tabs
   tabRow: {
-    flexDirection: 'row', backgroundColor: '#1a1a1a', borderRadius: 8,
+    flexDirection: 'row', backgroundColor: Colors.nested, borderRadius: 8,
     padding: 3, gap: 3, marginBottom: 12,
   },
   tab: { flex: 1, paddingVertical: 7, alignItems: 'center', borderRadius: 6 },
-  tabActive: { backgroundColor: YELLOW },
-  tabText: { color: GREY, fontSize: 13, fontWeight: '600' },
+  tabActive: { backgroundColor: Colors.accent },
+  tabText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
 
   // Chart
   chartEmpty: { paddingVertical: 20, alignItems: 'center' },
-  chartEmptyText: { color: GREY, fontSize: 13 },
+  chartEmptyText: { color: Colors.textSecondary, fontSize: 13 },
   barsRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingBottom: 4, minHeight: BAR_MAX_H + 40 },
   barCol: { width: 44, alignItems: 'center', gap: 4 },
-  bar: { width: 28, backgroundColor: YELLOW, borderRadius: 4, minHeight: 4 },
-  barVal: { color: GREY, fontSize: 10, textAlign: 'center' },
-  barLabel: { color: GREY, fontSize: 10, textAlign: 'center' },
-  barUnit: { color: GREY, fontSize: 11, textAlign: 'right', marginTop: 4 },
+  bar: { width: 28, backgroundColor: Colors.accent, borderRadius: 4, minHeight: 4 },
+  barVal: { color: Colors.textSecondary, fontFamily: Fonts.metric, fontSize: 10, textAlign: 'center' },
+  barLabel: { color: Colors.textSecondary, fontSize: 10, textAlign: 'center' },
+  barUnit: { color: Colors.textSecondary, fontSize: 11, textAlign: 'right', marginTop: 4 },
 
   // Session log list
   logList: { paddingHorizontal: 16, gap: 8 },
-  logCard: { backgroundColor: CARD_BG, borderRadius: 12, padding: 14 },
+  logCard: { backgroundColor: Colors.card, borderRadius: 12, padding: 14 },
   logRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  logDate: { color: GREY, fontSize: 12, marginBottom: 2 },
-  logType: { color: OFF_WHITE, fontSize: 15, fontWeight: '600' },
+  logDate: { color: Colors.textSecondary, fontSize: 12, marginBottom: 2 },
+  logType: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
   logMeta: { alignItems: 'flex-end', gap: 4 },
-  logDuration: { color: GREY, fontSize: 13 },
+  logDuration: { color: Colors.textSecondary, fontSize: 13 },
   rpeBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   rpeBadgeText: { fontSize: 12, fontWeight: '700' },
-  chevron: { color: GREY, fontSize: 18, lineHeight: 20 },
 
   // External workout entries
   extWorkoutCard: { borderLeftWidth: 2, borderLeftColor: ORANGE },
-  extWorkoutSrc: { color: GREY, fontSize: 11 },
+  extWorkoutSrc: { color: Colors.textSecondary, fontSize: 11 },
   offProgramBadge: {
     backgroundColor: '#ff994422', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3,
   },
@@ -672,52 +668,51 @@ const styles = StyleSheet.create({
   // Detail modal
   detailBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
   detailSheet: {
-    backgroundColor: CARD_BG, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    backgroundColor: Colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
     padding: 24, paddingBottom: 48, maxHeight: '80%',
   },
   detailHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6,
   },
-  detailTitle: { color: OFF_WHITE, fontSize: 20, fontWeight: '800', flex: 1, marginRight: 12 },
+  detailTitle: { color: Colors.textPrimary, fontSize: 20, fontWeight: '800', flex: 1, marginRight: 12 },
   detailOffBadge: { color: ORANGE, fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
   detailCloseBtn: { padding: 4 },
-  detailCloseText: { color: GREY, fontSize: 18 },
-  detailDate: { color: GREY, fontSize: 13, marginBottom: 20 },
+  detailDate: { color: Colors.textSecondary, fontSize: 13, marginBottom: 20 },
   detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
   detailCell: {
-    backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, minWidth: '45%', flex: 1,
+    backgroundColor: Colors.nested, borderRadius: 10, padding: 12, minWidth: '45%', flex: 1,
   },
-  detailCellLabel: { color: GREY, fontSize: 11, fontWeight: '600', marginBottom: 4, letterSpacing: 0.5 },
-  detailCellVal: { color: OFF_WHITE, fontSize: 17, fontWeight: '700' },
+  detailCellLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600', marginBottom: 4, letterSpacing: 0.5 },
+  detailCellVal: { color: Colors.textPrimary, fontFamily: Fonts.metric, fontSize: 20 },
   detailSectionLabel: {
-    color: YELLOW, fontSize: 11, fontWeight: '700', letterSpacing: 1,
+    color: Colors.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1,
     textTransform: 'uppercase', marginBottom: 8,
   },
-  detailNotes: { color: OFF_WHITE, fontSize: 14, lineHeight: 20 },
+  detailNotes: { color: Colors.textPrimary, fontSize: 14, lineHeight: 20 },
 
   // Check-in modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalSheet: {
-    backgroundColor: CARD_BG, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    backgroundColor: Colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: 24, paddingBottom: 40,
   },
-  modalTitle: { color: OFF_WHITE, fontSize: 18, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
+  modalTitle: { color: Colors.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
   unitRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   unitBtn: {
-    flex: 1, backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#262626',
+    flex: 1, backgroundColor: Colors.nested, borderWidth: 1, borderColor: Colors.border,
     borderRadius: 10, paddingVertical: 12, alignItems: 'center',
   },
-  unitBtnActive: { backgroundColor: YELLOW, borderColor: YELLOW },
-  unitBtnText: { color: OFF_WHITE, fontSize: 15, fontWeight: '600' },
+  unitBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  unitBtnText: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
   input: {
-    backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#262626',
+    backgroundColor: Colors.nested, borderWidth: 1, borderColor: Colors.border,
     borderRadius: 10, paddingHorizontal: 16, paddingVertical: 14,
-    color: OFF_WHITE, fontSize: 16,
+    color: Colors.textPrimary, fontSize: 16,
   },
   saveBtn: {
-    backgroundColor: YELLOW, borderRadius: 10, paddingVertical: 16,
+    backgroundColor: Colors.accent, borderRadius: 10, paddingVertical: 16,
     alignItems: 'center', marginTop: 14,
   },
-  saveBtnText: { color: BLACK, fontSize: 16, fontWeight: '700' },
-  cancelText: { color: GREY, fontSize: 15, textAlign: 'center' },
+  saveBtnText: { color: Colors.background, fontSize: 16, fontWeight: '700' },
+  cancelText: { color: Colors.textSecondary, fontSize: 15, textAlign: 'center' },
 });

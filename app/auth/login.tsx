@@ -15,6 +15,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { supabase } from '../../lib/supabase';
 import type { AuthStackParamList } from '../_layout';
+import { Colors, Fonts } from '../../lib/theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
@@ -56,20 +57,22 @@ export default function LoginScreen({ navigation }: Props) {
         <TextInput
           style={styles.input}
           placeholder="Email"
-          placeholderTextColor="#555"
+          placeholderTextColor={Colors.textSecondary}
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
           keyboardType="email-address"
+          selectionColor={Colors.accent}
         />
 
         <TextInput
           style={styles.input}
           placeholder="Password"
-          placeholderTextColor="#555"
+          placeholderTextColor={Colors.textSecondary}
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          selectionColor={Colors.accent}
         />
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -95,7 +98,7 @@ export default function LoginScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#080808',
+    backgroundColor: Colors.background,
   },
   inner: {
     flex: 1,
@@ -105,8 +108,8 @@ const styles = StyleSheet.create({
   },
   logo: {
     fontSize: 48,
-    fontWeight: '800',
-    color: '#e8ff47',
+    fontFamily: Fonts.metricHeavy,
+    color: Colors.accent,
     marginBottom: 48,
     letterSpacing: -1,
   },
@@ -115,22 +118,22 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   input: {
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: '#222',
+    borderColor: Colors.border,
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    color: '#f0ede8',
+    color: Colors.textPrimary,
     fontSize: 16,
   },
   error: {
-    color: '#ff5c5c',
+    color: Colors.red,
     fontSize: 14,
     textAlign: 'center',
   },
   button: {
-    backgroundColor: '#e8ff47',
+    backgroundColor: Colors.accent,
     borderRadius: 8,
     paddingVertical: 16,
     alignItems: 'center',
@@ -140,12 +143,12 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#080808',
+    color: Colors.background,
     fontSize: 16,
     fontWeight: '700',
   },
   link: {
-    color: '#8a877f',
+    color: Colors.textSecondary,
     textAlign: 'center',
     fontSize: 14,
     marginTop: 8,
