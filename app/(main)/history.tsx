@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, Modal,
@@ -11,6 +11,7 @@ const BLACK     = '#080808';
 const OFF_WHITE = '#f0ede8';
 const GREY      = '#8a877f';
 const CARD_BG   = '#111111';
+const ORANGE    = '#ff9944';
 const BAR_MAX_H = 80;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -26,10 +27,118 @@ type Checkin = {
 type SessionLog = {
   id: string;
   completed_at: string;
-  day_index: number;
+  day_index: number | null;
   rpe: number | null;
   duration: number | null;
+  week_number: number | null;
+  log_value: string | null;
+  notes: string | null;
+  session_type: string | null;
+  title: string | null;
+  day_type: string | null;
 };
+
+type ExternalWorkout = {
+  id: string;
+  workout_type: string;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  calories: number | null;
+  source: string;
+  acknowledged: boolean;
+  distance_km: number | null;
+  avg_hr: number | null;
+  max_hr: number | null;
+  pace_per_km: number | null;
+  effort_zone: string | null;
+};
+
+type HistoryItem =
+  | { kind: 'session'; data: SessionLog }
+  | { kind: 'workout'; data: ExternalWorkout };
+
+const WORKOUT_TYPE_LABELS: Record<string, string> = {
+  run:      'Running',
+  bike:     'Cycling',
+  strength: 'Strength Training',
+  hiit:     'HIIT',
+  swim:     'Swimming',
+  row:      'Rowing',
+  hike:     'Hiking',
+  walk:     'Walking',
+  yoga:     'Yoga',
+  cross:    'Cross Training',
+  other:    'Workout',
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fmtDateShort(iso: string) {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+}
+
+function fmtTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+function fmtDuration(s: number | null): string {
+  if (!s) return '';
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function rpeColor(rpe: number | null): string {
+  if (!rpe) return GREY;
+  if (rpe <= 3) return '#44ff88';
+  if (rpe <= 6) return YELLOW;
+  if (rpe <= 8) return '#ff9944';
+  return '#ff4444';
+}
+
+function getSessionTitle(log: SessionLog): string {
+  const clean = (v: string | null | undefined) =>
+    v && v !== 'undefined' && v !== 'null' && v.trim().length > 0 ? v.trim() : null;
+  if (clean(log.session_type)) return clean(log.session_type)!;
+  if (clean(log.title))        return clean(log.title)!;
+  if (clean(log.day_type))     return clean(log.day_type)!;
+  if (log.day_index != null && log.day_index >= 0 && log.day_index <= 6) {
+    return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][log.day_index] + ' Session';
+  }
+  return 'Training Session';
+}
+
+function formatPace(pacePerKm: number, imperial: boolean): string {
+  const pace = imperial ? pacePerKm * 1.60934 : pacePerKm;
+  const mins = Math.floor(pace / 60);
+  const secs = Math.round(pace % 60).toString().padStart(2, '0');
+  return `${mins}:${secs}/${imperial ? 'mi' : 'km'}`;
+}
+
+function formatDistance(distKm: number, imperial: boolean): string {
+  if (imperial) return `${(distKm * 0.621371).toFixed(2)} mi`;
+  return `${distKm.toFixed(2)} km`;
+}
+
+function longestStreak(logs: SessionLog[]): number {
+  const dates = [...new Set(logs.map(l =>
+    new Date(l.completed_at).toLocaleDateString('en-CA')))]
+    .sort().reverse();
+  let max = 0, cur = 0;
+  for (let i = 0; i < dates.length; i++) {
+    if (i === 0) { cur = 1; max = 1; continue; }
+    const prev = new Date(dates[i - 1] + 'T00:00:00');
+    const curr = new Date(dates[i] + 'T00:00:00');
+    const diff = Math.round((prev.getTime() - curr.getTime()) / 86_400_000);
+    if (diff === 1) { cur++; max = Math.max(max, cur); }
+    else cur = 1;
+  }
+  return max;
+}
 
 // ─── Bar chart ────────────────────────────────────────────────────────────────
 
@@ -65,51 +174,161 @@ function BarChart({ values, labels, unit }: { values: number[]; labels: string[]
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Detail modal ─────────────────────────────────────────────────────────────
 
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+function SessionDetailModal({
+  log,
+  onClose,
+}: {
+  log: SessionLog;
+  onClose: () => void;
+}) {
+  return (
+    <Modal transparent animationType="slide" visible onRequestClose={onClose}>
+      <View style={styles.detailBackdrop}>
+        <View style={styles.detailSheet}>
+          <View style={styles.detailHeader}>
+            <Text style={styles.detailTitle}>{getSessionTitle(log)}</Text>
+            <TouchableOpacity onPress={onClose} style={styles.detailCloseBtn}>
+              <Text style={styles.detailCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={styles.detailDate}>{fmtDate(log.completed_at)}</Text>
+
+            <View style={styles.detailGrid}>
+              {log.week_number != null && (
+                <View style={styles.detailCell}>
+                  <Text style={styles.detailCellLabel}>Week</Text>
+                  <Text style={styles.detailCellVal}>{log.week_number}</Text>
+                </View>
+              )}
+              {log.duration != null && (
+                <View style={styles.detailCell}>
+                  <Text style={styles.detailCellLabel}>Duration</Text>
+                  <Text style={styles.detailCellVal}>{fmtDuration(log.duration)}</Text>
+                </View>
+              )}
+              {log.rpe != null && (
+                <View style={styles.detailCell}>
+                  <Text style={styles.detailCellLabel}>RPE</Text>
+                  <Text style={[styles.detailCellVal, { color: rpeColor(log.rpe) }]}>{log.rpe}/10</Text>
+                </View>
+              )}
+              {log.log_value != null && (
+                <View style={styles.detailCell}>
+                  <Text style={styles.detailCellLabel}>Trial Result</Text>
+                  <Text style={styles.detailCellVal}>{log.log_value}</Text>
+                </View>
+              )}
+            </View>
+
+            {log.notes ? (
+              <>
+                <Text style={styles.detailSectionLabel}>Notes</Text>
+                <Text style={styles.detailNotes}>{log.notes}</Text>
+              </>
+            ) : null}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
-function fmtDuration(s: number | null): string {
-  if (!s) return '';
-  const m = Math.floor(s / 60);
-  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
-}
+function WorkoutDetailModal({
+  workout,
+  imperial,
+  onClose,
+}: {
+  workout: ExternalWorkout;
+  imperial: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <Modal transparent animationType="slide" visible onRequestClose={onClose}>
+      <View style={styles.detailBackdrop}>
+        <View style={styles.detailSheet}>
+          <View style={styles.detailHeader}>
+            <View>
+              <Text style={styles.detailOffBadge}>OFF-PROGRAM</Text>
+              <Text style={styles.detailTitle}>
+                {WORKOUT_TYPE_LABELS[workout.workout_type] ?? workout.workout_type}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={styles.detailCloseBtn}>
+              <Text style={styles.detailCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={styles.detailDate}>
+              {fmtDate(workout.start_time)} · {fmtTime(workout.start_time)}
+            </Text>
 
-function rpeColor(rpe: number | null): string {
-  if (!rpe) return GREY;
-  if (rpe <= 3) return '#44ff88';
-  if (rpe <= 6) return YELLOW;
-  if (rpe <= 8) return '#ff9944';
-  return '#ff4444';
-}
-
-function longestStreak(logs: SessionLog[]): number {
-  const dates = [...new Set(logs.map(l =>
-    new Date(l.completed_at).toLocaleDateString('en-CA')))]
-    .sort().reverse();
-  let max = 0, cur = 0;
-  for (let i = 0; i < dates.length; i++) {
-    if (i === 0) { cur = 1; max = 1; continue; }
-    const prev = new Date(dates[i - 1] + 'T00:00:00');
-    const curr = new Date(dates[i] + 'T00:00:00');
-    const diff = Math.round((prev.getTime() - curr.getTime()) / 86_400_000);
-    if (diff === 1) { cur++; max = Math.max(max, cur); }
-    else cur = 1;
-  }
-  return max;
+            <View style={styles.detailGrid}>
+              <View style={styles.detailCell}>
+                <Text style={styles.detailCellLabel}>Duration</Text>
+                <Text style={styles.detailCellVal}>{workout.duration_minutes}m</Text>
+              </View>
+              {workout.distance_km != null && workout.distance_km > 0 && (
+                <View style={styles.detailCell}>
+                  <Text style={styles.detailCellLabel}>Distance</Text>
+                  <Text style={styles.detailCellVal}>{formatDistance(workout.distance_km, imperial)}</Text>
+                </View>
+              )}
+              {workout.calories != null && (
+                <View style={styles.detailCell}>
+                  <Text style={styles.detailCellLabel}>Calories</Text>
+                  <Text style={styles.detailCellVal}>{workout.calories} kcal</Text>
+                </View>
+              )}
+              {workout.avg_hr != null && (
+                <View style={styles.detailCell}>
+                  <Text style={styles.detailCellLabel}>Avg HR</Text>
+                  <Text style={styles.detailCellVal}>{workout.avg_hr} bpm</Text>
+                </View>
+              )}
+              {workout.max_hr != null && (
+                <View style={styles.detailCell}>
+                  <Text style={styles.detailCellLabel}>Max HR</Text>
+                  <Text style={styles.detailCellVal}>{workout.max_hr} bpm</Text>
+                </View>
+              )}
+              {workout.pace_per_km != null && (
+                <View style={styles.detailCell}>
+                  <Text style={styles.detailCellLabel}>Pace</Text>
+                  <Text style={styles.detailCellVal}>{formatPace(workout.pace_per_km, imperial)}</Text>
+                </View>
+              )}
+              {workout.effort_zone && workout.effort_zone !== 'unknown' && (
+                <View style={styles.detailCell}>
+                  <Text style={styles.detailCellLabel}>Effort Zone</Text>
+                  <Text style={[styles.detailCellVal, { color: YELLOW }]}>{workout.effort_zone.toUpperCase()}</Text>
+                </View>
+              )}
+              <View style={styles.detailCell}>
+                <Text style={styles.detailCellLabel}>Source</Text>
+                <Text style={styles.detailCellVal}>{workout.source}</Text>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function HistoryScreen() {
-  const [logs, setLogs]             = useState<SessionLog[]>([]);
-  const [checkins, setCheckins]     = useState<Checkin[]>([]);
-  const [profile, setProfile]       = useState<{ fitness_goal: string; weight_unit: string } | null>(null);
-  const [loading, setLoading]       = useState(true);
-  const [checkinOpen, setCheckinOpen] = useState(false);
-  const [activeTab, setActiveTab]   = useState<'weight' | 'bodyfat'>('weight');
+  const [logs, setLogs]                   = useState<SessionLog[]>([]);
+  const [externalWorkouts, setExternalWorkouts] = useState<ExternalWorkout[]>([]);
+  const [checkins, setCheckins]           = useState<Checkin[]>([]);
+  const [profile, setProfile]             = useState<{ fitness_goal: string; weight_unit: string; preferred_units: string | null } | null>(null);
+  const [loading, setLoading]             = useState(true);
+  const [checkinOpen, setCheckinOpen]     = useState(false);
+  const [activeTab, setActiveTab]         = useState<'weight' | 'bodyfat'>('weight');
+  const [selectedItem, setSelectedItem]   = useState<HistoryItem | null>(null);
 
   // Checkin form
   const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>('lbs');
@@ -117,21 +336,32 @@ export default function HistoryScreen() {
   const [bodyFat, setBodyFat]       = useState('');
   const [saving, setSaving]         = useState(false);
 
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     const { data: authData } = await supabase.auth.getUser();
+    if (!mounted.current) { setLoading(false); return; }
     if (!authData.user) { setLoading(false); return; }
 
-    const [profRes, logsRes, checkinsRes] = await Promise.all([
-      supabase.from('profiles').select('fitness_goal, weight_unit').eq('id', authData.user.id).single(),
+    const [profRes, logsRes, checkinsRes, extRes] = await Promise.all([
+      supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units').eq('id', authData.user.id).single(),
       supabase.from('session_logs').select('*').eq('user_id', authData.user.id)
         .order('completed_at', { ascending: false }),
       supabase.from('checkins').select('*').eq('user_id', authData.user.id)
         .order('created_at', { ascending: true }).limit(20),
+      supabase.from('external_workouts').select('*').eq('user_id', authData.user.id)
+        .order('start_time', { ascending: false }),
     ]);
 
+    if (!mounted.current) { setLoading(false); return; }
     setProfile(profRes.data);
     setLogs(logsRes.data ?? []);
+    setExternalWorkouts(extRes.data ?? []);
     setCheckins(checkinsRes.data ?? []);
     if (profRes.data?.weight_unit) setWeightUnit(profRes.data.weight_unit as 'lbs' | 'kg');
     setLoading(false);
@@ -171,12 +401,22 @@ export default function HistoryScreen() {
 
   const totalSessions = logs.length;
   const best = longestStreak(logs);
+  const imperial = (profile?.preferred_units ?? 'imperial') === 'imperial';
 
   const weightCheckins = checkins.filter(c => c.weight != null);
   const bfCheckins     = checkins.filter(c => c.body_fat_percentage != null);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Session detail modal */}
+      {selectedItem?.kind === 'session' && (
+        <SessionDetailModal log={selectedItem.data} onClose={() => setSelectedItem(null)} />
+      )}
+      {/* External workout detail modal */}
+      {selectedItem?.kind === 'workout' && (
+        <WorkoutDetailModal workout={selectedItem.data} imperial={imperial} onClose={() => setSelectedItem(null)} />
+      )}
+
       {/* Check-in modal */}
       <Modal visible={checkinOpen} transparent animationType="slide">
         <View style={styles.modalBackdrop}>
@@ -246,7 +486,6 @@ export default function HistoryScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Chart */}
             {checkins.length > 0 && (
               <>
                 <View style={styles.tabRow}>
@@ -266,13 +505,13 @@ export default function HistoryScreen() {
                 {activeTab === 'weight' ? (
                   <BarChart
                     values={weightCheckins.map(c => c.weight as number)}
-                    labels={weightCheckins.map(c => fmtDate(c.created_at))}
+                    labels={weightCheckins.map(c => fmtDateShort(c.created_at))}
                     unit={weightUnit}
                   />
                 ) : (
                   <BarChart
                     values={bfCheckins.map(c => c.body_fat_percentage as number)}
-                    labels={bfCheckins.map(c => fmtDate(c.created_at))}
+                    labels={bfCheckins.map(c => fmtDateShort(c.created_at))}
                     unit="%"
                   />
                 )}
@@ -281,42 +520,90 @@ export default function HistoryScreen() {
           </View>
         )}
 
-        {/* Sessions list */}
+        {/* Sessions + External Workouts — interleaved by date */}
         <Text style={styles.sectionHeading}>SESSIONS</Text>
-        {logs.length === 0 ? (
+        {logs.length === 0 && externalWorkouts.length === 0 ? (
           <Text style={styles.emptyText}>
             No sessions logged yet. Complete your first workout to start tracking.
           </Text>
-        ) : (
-          <View style={styles.logList}>
-            {logs.map(log => (
-              <View key={log.id} style={styles.logCard}>
-                <View style={styles.logRow}>
-                  <View>
-                    <Text style={styles.logDate}>{fmtDate(log.completed_at)}</Text>
-                    <Text style={styles.logType}>
-                      {log.day_index !== null
-                        ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][log.day_index] + ' Session'
-                        : 'Session'}
-                    </Text>
-                  </View>
-                  <View style={styles.logMeta}>
-                    {log.duration != null && (
-                      <Text style={styles.logDuration}>{fmtDuration(log.duration)}</Text>
-                    )}
-                    {log.rpe != null && (
-                      <View style={[styles.rpeBadge, { backgroundColor: rpeColor(log.rpe) + '22' }]}>
-                        <Text style={[styles.rpeBadgeText, { color: rpeColor(log.rpe) }]}>
-                          RPE {log.rpe}
-                        </Text>
+        ) : (() => {
+          const items: HistoryItem[] = [
+            ...logs.map(l => ({ kind: 'session' as const, data: l })),
+            ...externalWorkouts.map(w => ({ kind: 'workout' as const, data: w })),
+          ].sort((a, b) => {
+            const da = a.kind === 'session' ? a.data.completed_at : a.data.start_time;
+            const db = b.kind === 'session' ? b.data.completed_at : b.data.start_time;
+            return new Date(db).getTime() - new Date(da).getTime();
+          });
+
+          return (
+            <View style={styles.logList}>
+              {items.map(item => {
+                if (item.kind === 'session') {
+                  const log = item.data;
+                  return (
+                    <TouchableOpacity
+                      key={`s-${log.id}`}
+                      style={styles.logCard}
+                      onPress={() => setSelectedItem(item)}
+                      activeOpacity={0.75}
+                    >
+                      <View style={styles.logRow}>
+                        <View>
+                          <Text style={styles.logDate}>{fmtDateShort(log.completed_at)}</Text>
+                          <Text style={styles.logType}>{getSessionTitle(log)}</Text>
+                        </View>
+                        <View style={styles.logMeta}>
+                          {log.duration != null && (
+                            <Text style={styles.logDuration}>{fmtDuration(log.duration)}</Text>
+                          )}
+                          {log.rpe != null && (
+                            <View style={[styles.rpeBadge, { backgroundColor: rpeColor(log.rpe) + '22' }]}>
+                              <Text style={[styles.rpeBadgeText, { color: rpeColor(log.rpe) }]}>
+                                RPE {log.rpe}
+                              </Text>
+                            </View>
+                          )}
+                          <Text style={styles.chevron}>›</Text>
+                        </View>
                       </View>
-                    )}
-                  </View>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
+                    </TouchableOpacity>
+                  );
+                }
+
+                const w = item.data;
+                return (
+                  <TouchableOpacity
+                    key={`w-${w.id}`}
+                    style={[styles.logCard, styles.extWorkoutCard]}
+                    onPress={() => setSelectedItem(item)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={styles.logRow}>
+                      <View style={{ gap: 2 }}>
+                        <Text style={styles.logDate}>{fmtDateShort(w.start_time)}</Text>
+                        <Text style={styles.logType}>
+                          {WORKOUT_TYPE_LABELS[w.workout_type] ?? w.workout_type}
+                        </Text>
+                        <Text style={styles.extWorkoutSrc}>{w.source}</Text>
+                      </View>
+                      <View style={styles.logMeta}>
+                        <Text style={styles.logDuration}>{w.duration_minutes}m</Text>
+                        {w.calories != null && (
+                          <Text style={styles.logDuration}>{w.calories} kcal</Text>
+                        )}
+                        <View style={styles.offProgramBadge}>
+                          <Text style={styles.offProgramText}>OFF-PROGRAM</Text>
+                        </View>
+                        <Text style={styles.chevron}>›</Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          );
+        })()}
       </ScrollView>
     </SafeAreaView>
   );
@@ -372,6 +659,41 @@ const styles = StyleSheet.create({
   logDuration: { color: GREY, fontSize: 13 },
   rpeBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   rpeBadgeText: { fontSize: 12, fontWeight: '700' },
+  chevron: { color: GREY, fontSize: 18, lineHeight: 20 },
+
+  // External workout entries
+  extWorkoutCard: { borderLeftWidth: 2, borderLeftColor: ORANGE },
+  extWorkoutSrc: { color: GREY, fontSize: 11 },
+  offProgramBadge: {
+    backgroundColor: '#ff994422', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3,
+  },
+  offProgramText: { color: ORANGE, fontSize: 11, fontWeight: '700' },
+
+  // Detail modal
+  detailBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
+  detailSheet: {
+    backgroundColor: CARD_BG, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, paddingBottom: 48, maxHeight: '80%',
+  },
+  detailHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6,
+  },
+  detailTitle: { color: OFF_WHITE, fontSize: 20, fontWeight: '800', flex: 1, marginRight: 12 },
+  detailOffBadge: { color: ORANGE, fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
+  detailCloseBtn: { padding: 4 },
+  detailCloseText: { color: GREY, fontSize: 18 },
+  detailDate: { color: GREY, fontSize: 13, marginBottom: 20 },
+  detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
+  detailCell: {
+    backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, minWidth: '45%', flex: 1,
+  },
+  detailCellLabel: { color: GREY, fontSize: 11, fontWeight: '600', marginBottom: 4, letterSpacing: 0.5 },
+  detailCellVal: { color: OFF_WHITE, fontSize: 17, fontWeight: '700' },
+  detailSectionLabel: {
+    color: YELLOW, fontSize: 11, fontWeight: '700', letterSpacing: 1,
+    textTransform: 'uppercase', marginBottom: 8,
+  },
+  detailNotes: { color: OFF_WHITE, fontSize: 14, lineHeight: 20 },
 
   // Check-in modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },

@@ -35,11 +35,30 @@ const SUPABASE_ANON_KEY =
     user_id uuid references auth.users(id) on delete cascade,
     program_id uuid references public.programs(id),
     day_index integer,
+    day_name text,
+    week_number integer,
+    session_name text,
+    log_field text,
+    log_value text,
+    completed boolean default false,
     rpe integer,
     duration integer,
     notes text,
     completed_at timestamp with time zone default now()
   );
+
+  -- Wearable / Apple Health connection state:
+  alter table public.profiles add column if not exists wearable_connected boolean default false;
+  alter table public.profiles add column if not exists wearable_type text;
+
+  -- Run these if the tables already exist:
+  alter table public.programs add column if not exists week_number integer default 1;
+  alter table public.session_logs add column if not exists day_name text;
+  alter table public.session_logs add column if not exists week_number integer;
+  alter table public.session_logs add column if not exists session_name text;
+  alter table public.session_logs add column if not exists log_field text;
+  alter table public.session_logs add column if not exists log_value text;
+  alter table public.session_logs add column if not exists completed boolean default false;
 */
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {

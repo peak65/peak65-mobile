@@ -67,14 +67,32 @@ function isStrengthSession(session: ProgramSession): boolean {
 
 type ExGroup =
   | { kind: 'single'; ex: ExerciseItem; origIdx: number }
-  | { kind: 'superset'; members: { ex: ExerciseItem; origIdx: number }[] };
+  | { kind: 'superset'; members: { ex: ExerciseItem; origIdx: number }[] }
+  | { kind: 'circuit'; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number; rest: string | null };
 
 function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
   const groups: ExGroup[] = [];
   let i = 0;
   while (i < exercises.length) {
     const ex = exercises[i];
-    if (ex.superset_id) {
+    if (ex.circuit_id) {
+      const cId = ex.circuit_id;
+      const members: { ex: ExerciseItem; origIdx: number }[] = [];
+      while (i < exercises.length && exercises[i].circuit_id === cId) {
+        members.push({ ex: exercises[i], origIdx: i });
+        i++;
+      }
+      if (members.length === 1) {
+        groups.push({ kind: 'single', ex: members[0].ex, origIdx: members[0].origIdx });
+      } else {
+        groups.push({
+          kind: 'circuit',
+          members,
+          rounds: members[0].ex.circuit_rounds ?? 4,
+          rest: members[0].ex.circuit_rest ?? null,
+        });
+      }
+    } else if (ex.superset_id) {
       const ssId = ex.superset_id;
       const members: { ex: ExerciseItem; origIdx: number }[] = [];
       while (i < exercises.length && exercises[i].superset_id === ssId) {
@@ -92,6 +110,52 @@ function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
     }
   }
   return groups;
+}
+
+// ─── Circuit group component ──────────────────────────────────────────────────
+
+function CircuitBlock({ members, rounds, rest }: {
+  members: { ex: ExerciseItem; origIdx: number }[];
+  rounds: number;
+  rest: string | null;
+}) {
+  const [currentRound, setCurrentRound] = useState(1);
+  return (
+    <View style={styles.circuitGroup}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <Text style={styles.circuitLabel}>CIRCUIT — {rounds} ROUNDS</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity
+            onPress={() => setCurrentRound(r => Math.max(1, r - 1))}
+            style={[styles.circuitRoundBtn, currentRound === 1 && styles.circuitRoundBtnDone]}
+          >
+            <Text style={styles.circuitRoundBtnText}>‹</Text>
+          </TouchableOpacity>
+          <Text style={styles.circuitRoundText}>Round {currentRound} / {rounds}</Text>
+          <TouchableOpacity
+            onPress={() => setCurrentRound(r => Math.min(rounds, r + 1))}
+            style={[styles.circuitRoundBtn, currentRound === rounds && styles.circuitRoundBtnDone]}
+          >
+            <Text style={styles.circuitRoundBtnText}>›</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      {members.map(({ ex, origIdx }, mi) => {
+        const note = ex.notes || ex.note;
+        const isLast = mi === members.length - 1;
+        return (
+          <View key={origIdx} style={[styles.circuitExRow, isLast && { marginBottom: 0 }]}>
+            <Text style={styles.exName}>{ex.name}</Text>
+            {!!ex.reps && <Text style={styles.exDetail}>{ex.reps}</Text>}
+            {!!note    && <Text style={styles.exDetail}>{note}</Text>}
+          </View>
+        );
+      })}
+      {!!rest && (
+        <Text style={[styles.exDetail, { marginTop: 8 }]}>Rest after round: {rest}</Text>
+      )}
+    </View>
+  );
 }
 
 // ─── Exercise renderer (non-strength sessions) ───────────────────────────────
@@ -115,6 +179,9 @@ function ExerciseSection({
         <View key={bi} style={styles.section}>
           <Text style={styles.sectionLabel}>{block.block_name}</Text>
           {groupBySuperset(block.exercises ?? []).map((group, gi) => {
+            if (group.kind === 'circuit') {
+              return <CircuitBlock key={gi} members={group.members} rounds={group.rounds} rest={group.rest} />;
+            }
             if (group.kind === 'superset') {
               return (
                 <View key={gi} style={styles.supersetGroup}>
@@ -288,6 +355,17 @@ function StrengthSessionSection({
                     );
                   };
 
+                  if (group.kind === 'circuit') {
+                    return (
+                      <View key={gi} style={styles.circuitGroup}>
+                        <Text style={styles.circuitLabel}>CIRCUIT — {group.rounds} ROUNDS</Text>
+                        {group.members.map(({ ex, origIdx }) => renderStrExCard(ex, origIdx))}
+                        {!!group.rest && (
+                          <Text style={[styles.exDetail, { marginTop: 4 }]}>Rest after round: {group.rest}</Text>
+                        )}
+                      </View>
+                    );
+                  }
                   if (group.kind === 'superset') {
                     return (
                       <View key={gi} style={styles.supersetGroup}>
@@ -301,6 +379,9 @@ function StrengthSessionSection({
               </View>
             ) : (
               groupBySuperset(block.exercises ?? []).map((group, gi) => {
+                if (group.kind === 'circuit') {
+                  return <CircuitBlock key={gi} members={group.members} rounds={group.rounds} rest={group.rest} />;
+                }
                 if (group.kind === 'superset') {
                   return (
                     <View key={gi} style={styles.supersetGroup}>
@@ -1251,6 +1332,54 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: 'uppercase',
     marginBottom: 2,
+  },
+
+  // Circuit grouping
+  circuitGroup: {
+    borderLeftWidth: 2,
+    borderLeftColor: YELLOW,
+    paddingLeft: 10,
+    gap: 6,
+    marginBottom: 4,
+  },
+  circuitLabel: {
+    color: YELLOW,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  circuitRoundTracker: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  circuitRoundText: {
+    color: OFF_WHITE,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  circuitRoundBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#222',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  circuitRoundBtnDone: {
+    opacity: 0.3,
+  },
+  circuitRoundBtnText: {
+    color: YELLOW,
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+  circuitExRow: {
+    gap: 2,
+    marginBottom: 8,
   },
 
   // Start Workout button

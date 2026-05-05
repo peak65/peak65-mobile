@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, Modal, Platform, Alert, TextInput,
@@ -303,6 +303,7 @@ function SettingRow({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
+  const navigation = useNavigation();
   const [profile, setProfile]             = useState<Profile | null>(null);
   const [email, setEmail]                 = useState('');
   const [loading, setLoading]             = useState(true);
@@ -328,6 +329,15 @@ export default function ProfileScreen() {
   const [gsPrimaryGoal, setGsPrimaryGoal]       = useState('');
   const [showCoachedUpsell, setShowCoachedUpsell] = useState(false);
   const [whoopConnecting, setWhoopConnecting]     = useState(false);
+
+  const mounted      = useRef(true);
+  const loadIdRef    = useRef(0);
+  const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   // profileOverride: pass freshly-loaded data from `load` before setProfile resolves.
   async function loadHealthData(userId: string, profileOverride?: Profile | null) {
@@ -394,6 +404,7 @@ export default function ProfileScreen() {
         }
       }
 
+      if (!mounted.current) return;
       setHealthData(data);
       const today = new Date().toISOString().slice(0, 10);
 
@@ -492,12 +503,15 @@ export default function ProfileScreen() {
   }
 
   const load = useCallback(async () => {
+    const myId = ++loadIdRef.current;
     setLoading(true);
     const { data: authData } = await supabase.auth.getUser();
+    if (!mounted.current || myId !== loadIdRef.current) { setLoading(false); return; }
     if (!authData.user) { setLoading(false); return; }
     setEmail(authData.user.email ?? '');
 
     const { data } = await supabase.from('profiles').select('*').eq('id', authData.user.id).single();
+    if (!mounted.current || myId !== loadIdRef.current) { setLoading(false); return; }
 
     if ((data?.whoop_access_token || data?.whoop_refresh_token) && !data?.whoop_connected) {
       await supabase.from('profiles').update({ whoop_connected: true }).eq('id', authData.user.id);
@@ -530,10 +544,17 @@ export default function ProfileScreen() {
     const sub = AppState.addEventListener('change', next => {
       if (next === 'active') {
         console.log('[health] auto-refresh triggered by: foreground');
-        loadRef.current();
+        if (loadTimerRef.current) clearTimeout(loadTimerRef.current);
+        loadTimerRef.current = setTimeout(() => {
+          loadTimerRef.current = null;
+          loadRef.current();
+        }, 500);
       }
     });
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      if (loadTimerRef.current) clearTimeout(loadTimerRef.current);
+    };
   }, []);
 
   async function updateProfile(patch: Partial<Profile>) {
@@ -1063,6 +1084,10 @@ export default function ProfileScreen() {
           <SettingRow label="Session Length" value={profile?.session_length === '60' ? '~1 hour' : profile?.session_length === '90' ? '~1.5–2 hours' : profile?.session_length ?? ''} onPress={() => setPicker('length')} />
           <SettingRow label="Availability" value={profile?.availability === 'once' ? 'Once a day' : profile?.availability === 'both' ? 'Twice a day' : profile?.availability ?? ''} onPress={() => setPicker('availability')} />
           <SettingRow label="Equipment" value={toStringArray(profile?.equipment_access).join(', ')} onPress={() => setPicker('equipment')} />
+          <TouchableOpacity style={styles.updateProgramRow} onPress={() => (navigation as any).navigate('UpdateProgram')}>
+            <Text style={styles.updateProgramText}>Update My Program</Text>
+            <Text style={styles.settingChevron}>›</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Wearables section */}
@@ -1402,4 +1427,11 @@ const styles = StyleSheet.create({
   wearableBannerText: { color: '#e8c44a', fontSize: 13, lineHeight: 18 },
   wearableBannerBtn:  { backgroundColor: YELLOW, borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
   wearableBannerBtnText: { color: BLACK, fontSize: 13, fontWeight: '700' },
+
+  // Update My Program row
+  updateProgramRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 15,
+  },
+  updateProgramText: { color: YELLOW, fontSize: 15, fontWeight: '600' },
 });

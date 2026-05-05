@@ -2,18 +2,20 @@
   "expo": {
     "name": "peak65-mobile",
     "slug": "peak65-mobile",
+    "scheme": "peak65",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.peak65-mobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,7 +29,15 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "react-native-health",
+        {
+          "isClinicalDataEnabled": false,
+          "healthSharePermission": "Peak 65 reads your Apple Health data to personalize your training and track recovery.",
+          "healthUpdatePermission": "Peak 65 may write workout data to Apple Health."
+        }
+      ]
     ]
   }
 }
