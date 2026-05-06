@@ -9,11 +9,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Modal, Vibration, Alert, KeyboardAvoidingView,
-  Platform, StatusBar,
+  Platform, StatusBar, ActivityIndicator,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainStackParamList, ProgramSession, SessionBlock, ExerciseItem } from '../_layout';
@@ -122,6 +122,34 @@ async function playBeep(freqHz: number, durationMs: number): Promise<void> {
   } catch {}
 }
 
+const BODYWEIGHT_NAMES = [
+  'burpee', 'push-up', 'push up', 'pushup', 'pull-up', 'pull up', 'pullup',
+  'chin-up', 'chin up', 'chinup', 'lunge', 'squat', 'sit-up', 'sit up', 'situp',
+  'plank', 'hollow hold', 'hollow body', 'mountain climber', 'box jump',
+  'dip', 'ring dip', 'jumping jack', 'bear crawl', 'inchworm', 'walkout',
+  'v-up', 'v up', 'glute bridge', 'hip thrust', 'air squat', 'tuck jump',
+  'broad jump', 'step-up', 'step up', 'calf raise', 'jump squat',
+];
+
+function isBodyweightExercise(name: string): boolean {
+  const lower = name.toLowerCase();
+  return BODYWEIGHT_NAMES.some(bw => lower.includes(bw));
+}
+
+function parseDurationSecs(reps: string | undefined): number | null {
+  if (!reps) return null;
+  const s = reps.toLowerCase().trim();
+  const colon = s.match(/^(\d+):(\d+)$/);
+  if (colon) return parseInt(colon[1]) * 60 + parseInt(colon[2]);
+  const mins = s.match(/(\d+)\s*min/);
+  const secs = s.match(/(\d+)\s*s(?:ec)?/);
+  if (!mins && !secs) return null;
+  let t = 0;
+  if (mins) t += parseInt(mins[1]) * 60;
+  if (secs) t += parseInt(secs[1]);
+  return t > 0 ? t : null;
+}
+
 function isRunExercise(ex: ExerciseItem): boolean {
   const reps = String(ex.reps ?? '');
   if (/\d+\s*(km|m\b|800|400|200|1k|mile|min|sec)/i.test(reps)) return true;
@@ -213,37 +241,57 @@ function buildSteps(session: ProgramSession): Step[] {
     let blockHadRun = false;
     let blockHadStrength = false;
 
-    for (const ex of exercises) {
-      if (isRunExercise(ex)) {
-        // If we just transitioned from non-run to run (not warmup), add a transition
-        if (prevKind === 'strength') {
-          steps.push({ kind: 'transition', from: 'Strength', to: 'Run', seconds: 60 });
-        }
-        const total = ex.sets ?? 1;
-        for (let i = 0; i < total; i++) {
-          steps.push({ kind: 'run_interval', exercise: ex, intervalNum: i + 1, totalIntervals: total, blockName: block.block_name });
-          if (i < total - 1) {
-            steps.push({ kind: 'rest', seconds: parseRestSeconds(ex.rest, 120), label: 'Recovery' });
+    const strengthExes = exercises.filter(e => isStrengthExercise(e, block.block_name));
+    const isCircuit = /circuit|superset|complex/i.test(block.block_name) && strengthExes.length > 1;
+
+    if (isCircuit) {
+      // Circuit: interleave all exercises per round before repeating
+      if (blockHadRun || prevKind === 'run') {
+        steps.push({ kind: 'transition', from: 'Run', to: 'Strength', seconds: 90 });
+      }
+      const rounds = Math.max(...strengthExes.map(e => e.sets ?? 1));
+      const circuitRestSecs = parseRestSeconds(strengthExes[0]?.circuit_rest ?? strengthExes[0]?.rest, 60);
+      for (let round = 0; round < rounds; round++) {
+        for (const ex of strengthExes) {
+          if (round < (ex.sets ?? 1)) {
+            steps.push({ kind: 'strength', exercise: ex, setNum: round + 1, totalSets: ex.sets ?? 1, blockName: block.block_name });
           }
         }
-        blockHadRun = true;
-      } else if (isStrengthExercise(ex, block.block_name)) {
-        // If transitioning from run block to strength
-        if (blockHadRun || prevKind === 'run') {
-          steps.push({ kind: 'transition', from: 'Run', to: 'Strength', seconds: 90 });
-          blockHadRun = false;
+        if (round < rounds - 1) {
+          steps.push({ kind: 'rest', seconds: circuitRestSecs, label: 'Circuit rest' });
         }
-        const total = ex.sets ?? 1;
-        for (let s = 0; s < total; s++) {
-          steps.push({ kind: 'strength', exercise: ex, setNum: s + 1, totalSets: total, blockName: block.block_name });
-          if (s < total - 1) {
-            steps.push({ kind: 'rest', seconds: parseRestSeconds(ex.rest, 90), label: ex.rest ?? 'Rest' });
+      }
+      blockHadStrength = true;
+    } else {
+      for (const ex of exercises) {
+        if (isRunExercise(ex)) {
+          if (prevKind === 'strength') {
+            steps.push({ kind: 'transition', from: 'Strength', to: 'Run', seconds: 60 });
           }
+          const total = ex.sets ?? 1;
+          for (let i = 0; i < total; i++) {
+            steps.push({ kind: 'run_interval', exercise: ex, intervalNum: i + 1, totalIntervals: total, blockName: block.block_name });
+            if (i < total - 1) {
+              steps.push({ kind: 'rest', seconds: parseRestSeconds(ex.rest, 120), label: 'Recovery' });
+            }
+          }
+          blockHadRun = true;
+        } else if (isStrengthExercise(ex, block.block_name)) {
+          if (blockHadRun || prevKind === 'run') {
+            steps.push({ kind: 'transition', from: 'Run', to: 'Strength', seconds: 90 });
+            blockHadRun = false;
+          }
+          const total = ex.sets ?? 1;
+          for (let s = 0; s < total; s++) {
+            steps.push({ kind: 'strength', exercise: ex, setNum: s + 1, totalSets: total, blockName: block.block_name });
+            if (s < total - 1) {
+              steps.push({ kind: 'rest', seconds: parseRestSeconds(ex.rest, 90), label: ex.rest ?? 'Rest' });
+            }
+          }
+          blockHadStrength = true;
+        } else {
+          steps.push({ kind: 'generic', exercise: ex, blockName: block.block_name });
         }
-        blockHadStrength = true;
-      } else {
-        // Unrecognized exercise in main work — show generically
-        steps.push({ kind: 'generic', exercise: ex, blockName: block.block_name });
       }
     }
 
@@ -365,6 +413,7 @@ const sw = StyleSheet.create({
 export default function LiveWorkoutScreen() {
   const navigation = useNavigation<Nav>();
   const route      = useRoute<Route>();
+  const insets     = useSafeAreaInsets();
   const { sessionJson, programId, weekNumber, dayName } = route.params;
   const session: ProgramSession = JSON.parse(sessionJson);
 
@@ -389,6 +438,8 @@ export default function LiveWorkoutScreen() {
   const [swapVisible, setSwapVisible] = useState(false);
   const [swapLabel,   setSwapLabel]   = useState<string | null>(null);
   const [userId,      setUserId]      = useState<string | null>(null);
+  const [savedLogId,  setSavedLogId]  = useState<string | null>(null);
+  const [hrZoneStep,  setHrZoneStep]  = useState<'none' | 'prompt' | 'uploading' | 'done'>('none');
 
   // Metcon state
   const [metconRounds,   setMetconRounds]   = useState(0);
@@ -404,7 +455,7 @@ export default function LiveWorkoutScreen() {
   const afterRest = useRef<() => void>(() => {});
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+    supabase.auth.getSession().then(({ data: { session } }) => setUserId(session?.user?.id ?? null));
   }, []);
 
   // Global elapsed timer
@@ -526,11 +577,12 @@ export default function LiveWorkoutScreen() {
     triggerRest(restS, step.exercise.rest ?? `${restS}s rest`);
   }
 
-  async function saveSession(full: boolean) {
-    if (!userId) return;
+  async function saveSession(full: boolean): Promise<string | null> {
+    if (!userId) return null;
     setSaving(true);
+    let insertedId: string | null = null;
     try {
-      await supabase.from('session_logs').insert({
+      const { data } = await supabase.from('session_logs').insert({
         user_id:      userId,
         program_id:   programId,
         day_name:     dayName,
@@ -538,15 +590,20 @@ export default function LiveWorkoutScreen() {
         session_name: session.name,
         log_field:    'live_workout',
         log_value:    `${Math.round(elapsed / 60)} min`,
+        duration:     elapsed,
         weights_used: loggedSets.length > 0 ? JSON.stringify(loggedSets) : null,
+        rpe:          full ? rpe : null,
         rpe_logged:   full ? rpe : null,
         completed:    full,
         completed_at: new Date().toISOString(),
-      });
+      }).select('id').single();
+      insertedId = (data as any)?.id ?? null;
+      if (insertedId) setSavedLogId(insertedId);
     } catch (e) {
       console.log('[live-workout] save error:', e);
     }
     setSaving(false);
+    return insertedId;
   }
 
   function confirmDiscard() {
@@ -561,13 +618,54 @@ export default function LiveWorkoutScreen() {
   }
 
   async function saveAndExit() {
-    await saveSession(true);
-    navigation.goBack();
+    const logId = await saveSession(true);
+    if (logId) {
+      setHrZoneStep('prompt');
+    } else {
+      navigation.goBack();
+    }
   }
 
   // ── COMPLETE ─────────────────────────────────────────────────────────────────
 
   if (phase === 'complete') {
+    if (hrZoneStep === 'prompt') {
+      return (
+        <SafeAreaView style={s.container}>
+          <StatusBar barStyle="light-content" />
+          <ScrollView contentContainerStyle={s.centerPad}>
+            <Text style={s.completeTitle}>SESSION{'\n'}COMPLETE.</Text>
+            <Text style={s.completeSub}>{session.name}</Text>
+            <View style={{ height: 1, backgroundColor: '#222', width: '100%', marginVertical: 24 }} />
+            <Text style={[s.rpeLabel, { marginBottom: 8 }]}>ADD YOUR HEART RATE ZONES?</Text>
+            <Text style={{ color: Colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 28 }}>
+              Upload a screenshot from Whoop, Garmin, Polar, or any HR app. Your coach uses zone data to optimise future sessions.
+            </Text>
+            <TouchableOpacity
+              style={[s.primaryBtn, { marginBottom: 16 }]}
+              onPress={() => setHrZoneStep('uploading')}
+            >
+              <Text style={s.primaryBtnTxt}>UPLOAD SCREENSHOT</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Skip for now</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      );
+    }
+
+    if (hrZoneStep === 'uploading') {
+      return (
+        <HRZoneUploader
+          sessionLogId={savedLogId}
+          userId={userId}
+          onDone={() => navigation.goBack()}
+          onSkip={() => navigation.goBack()}
+        />
+      );
+    }
+
     return (
       <SafeAreaView style={s.container}>
         <StatusBar barStyle="light-content" />
@@ -643,7 +741,7 @@ export default function LiveWorkoutScreen() {
       <StatusBar barStyle="light-content" />
       <ProgressBar done={stepIdx} total={totalSteps} />
       <TouchableOpacity
-        style={{ position: 'absolute', top: 16, left: 16, zIndex: 10, padding: 8 }}
+        style={{ position: 'absolute', top: insets.top + 8, left: 16, zIndex: 10, padding: 8 }}
         onPress={confirmDiscard}
       >
         <Feather name="x" color={Colors.textSecondary} size={22} />
@@ -837,6 +935,37 @@ const mc = StyleSheet.create({
 
 // ─── Generic Phase (warm-up / cool-down) ─────────────────────────────────────
 
+function IntervalCountdown({ seconds, onDone }: { seconds: number; onDone: () => void }) {
+  const [rem, setRem] = useState(seconds);
+  useEffect(() => { setRem(seconds); }, [seconds]);
+  useEffect(() => {
+    if (rem <= 0) {
+      try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); } catch {}
+      playBeep(880, 400);
+      Vibration.vibrate([0, 200, 100, 200]);
+      onDone();
+      return;
+    }
+    if (rem === 3) {
+      try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); } catch {}
+      playBeep(440, 150);
+    }
+    const id = setTimeout(() => setRem(r => r - 1), 1000);
+    return () => clearTimeout(id);
+  }, [rem, onDone]);
+  const pct = seconds > 0 ? Math.min((seconds - rem) / seconds, 1) : 1;
+  return (
+    <View style={{ alignItems: 'center', marginTop: 16 }}>
+      <Text style={{ color: Colors.accent, fontSize: 72, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const] }}>
+        {formatTime(rem)}
+      </Text>
+      <View style={{ width: '60%', height: 3, backgroundColor: '#222', borderRadius: 2, marginTop: 8, overflow: 'hidden' }}>
+        <View style={{ height: 3, width: `${Math.round(pct * 100)}%` as unknown as number, backgroundColor: Colors.accent, borderRadius: 2 }} />
+      </View>
+    </View>
+  );
+}
+
 function GenericPhase({
   step, elapsed, isLast, onDone,
 }: {
@@ -846,7 +975,8 @@ function GenericPhase({
   onDone: () => void;
 }) {
   const ex = step.exercise;
-  const detail = ex.sets && ex.reps ? `${ex.sets} × ${ex.reps}` : (ex.reps ?? '');
+  const durationSecs = parseDurationSecs(String(ex.reps ?? ''));
+  const detail = !durationSecs && ex.sets && ex.reps ? `${ex.sets} × ${ex.reps}` : (ex.reps ?? '');
   return (
     <View style={gp.container}>
       <View style={gp.header}>
@@ -854,11 +984,15 @@ function GenericPhase({
         <Text style={gp.elapsed}>{formatTime(elapsed)}</Text>
       </View>
       <Text style={gp.name}>{ex.name}</Text>
-      {!!detail && <Text style={gp.detail}>{detail}</Text>}
+      {!!detail && !durationSecs && <Text style={gp.detail}>{detail}</Text>}
       {!!(ex.notes || ex.note) && <Text style={gp.note}>{ex.notes || ex.note}</Text>}
-      <TouchableOpacity style={[s.primaryBtn, gp.btn]} onPress={onDone}>
-        <Text style={s.primaryBtnTxt}>{isLast ? 'FINISH' : 'DONE →'}</Text>
-      </TouchableOpacity>
+      {durationSecs ? (
+        <IntervalCountdown seconds={durationSecs} onDone={onDone} />
+      ) : (
+        <TouchableOpacity style={[s.primaryBtn, gp.btn]} onPress={onDone}>
+          <Text style={s.primaryBtnTxt}>{isLast ? 'FINISH' : 'DONE →'}</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -914,9 +1048,17 @@ function RunIntervalPhase({
           <Text style={rp.swapTxt}>SWAP RUN →</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[s.primaryBtn, { marginTop: 32 }]} onPress={onDone}>
-          <Text style={s.primaryBtnTxt}>{isLast ? 'FINISH' : step.intervalNum === step.totalIntervals ? 'DONE →' : `NEXT INTERVAL →`}</Text>
-        </TouchableOpacity>
+        {(() => {
+          const durationSecs = parseDurationSecs(String(ex.reps ?? ''));
+          if (durationSecs) {
+            return <IntervalCountdown seconds={durationSecs} onDone={onDone} />;
+          }
+          return (
+            <TouchableOpacity style={[s.primaryBtn, { marginTop: 32 }]} onPress={onDone}>
+              <Text style={s.primaryBtnTxt}>{isLast ? 'FINISH' : step.intervalNum === step.totalIntervals ? 'DONE →' : 'NEXT INTERVAL →'}</Text>
+            </TouchableOpacity>
+          );
+        })()}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -951,6 +1093,7 @@ function StrengthPhase({
   const ex         = step.exercise;
   const numReps    = String(ex.reps ?? '').match(/\d+/)?.[0] ?? '';
   const lastWeight = prevSets.length > 0 ? prevSets[prevSets.length - 1].weight : null;
+  const isBW       = isBodyweightExercise(ex.name);
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -965,10 +1108,10 @@ function StrengthPhase({
         <Text style={sp.prescribed}>{ex.sets} × {ex.reps}{ex.rest ? ` · ${ex.rest} rest` : ''}</Text>
         {!!(ex.notes || ex.note) && <Text style={sp.note}>{ex.notes || ex.note}</Text>}
 
-        {lastWeight && <Text style={sp.lastWeight}>Last set: {lastWeight} lbs</Text>}
+        {!isBW && lastWeight && <Text style={sp.lastWeight}>Last set: {lastWeight} lbs</Text>}
 
         <View style={sp.inputRow}>
-          <View style={sp.inputGroup}>
+          <View style={isBW ? { flex: 1 } : sp.inputGroup}>
             <Text style={sp.inputLabel}>REPS</Text>
             <TextInput
               style={sp.input}
@@ -980,18 +1123,20 @@ function StrengthPhase({
               selectionColor={Colors.accent}
             />
           </View>
-          <View style={sp.inputGroup}>
-            <Text style={sp.inputLabel}>WEIGHT (LBS)</Text>
-            <TextInput
-              style={sp.input}
-              value={weightInput}
-              onChangeText={onWeightChange}
-              placeholder={lastWeight ?? '0'}
-              placeholderTextColor={Colors.textSecondary}
-              keyboardType="decimal-pad"
-              selectionColor={Colors.accent}
-            />
-          </View>
+          {!isBW && (
+            <View style={sp.inputGroup}>
+              <Text style={sp.inputLabel}>WEIGHT (LBS)</Text>
+              <TextInput
+                style={sp.input}
+                value={weightInput}
+                onChangeText={onWeightChange}
+                placeholder={lastWeight ?? '0'}
+                placeholderTextColor={Colors.textSecondary}
+                keyboardType="decimal-pad"
+                selectionColor={Colors.accent}
+              />
+            </View>
+          )}
         </View>
 
         <TouchableOpacity style={[s.primaryBtn, { marginTop: 4 }]} onPress={onLogSet}>
@@ -1030,6 +1175,102 @@ const sp = StyleSheet.create({
   prevSets: { marginTop: 24, gap: 4 },
   prevRow:  { color: '#444', fontSize: 13 },
 });
+
+// ─── HR Zone Uploader ─────────────────────────────────────────────────────────
+
+function HRZoneUploader({
+  sessionLogId, userId, onDone, onSkip,
+}: {
+  sessionLogId: string | null;
+  userId: string | null;
+  onDone: () => void;
+  onSkip: () => void;
+}) {
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  async function pickAndUpload() {
+    let ImagePicker: any;
+    try {
+      ImagePicker = require('expo-image-picker');
+    } catch {
+      Alert.alert('Not available', 'expo-image-picker is not installed. Run: npx expo install expo-image-picker');
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission required', 'Please allow access to your photo library.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      base64: true,
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.base64) return;
+
+    setStatus('loading');
+    try {
+      const base64Image = result.assets[0].base64 as string;
+      const res = await fetch('https://peak65.vercel.app/api/extract-hr-zones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64Image }),
+      });
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const zones = await res.json() as Record<string, number>;
+
+      if (sessionLogId && userId) {
+        await supabase
+          .from('session_logs')
+          .update({ hr_zones: JSON.stringify(zones) })
+          .eq('id', sessionLogId);
+      }
+
+      setStatus('idle');
+      Alert.alert('Zones saved', 'Heart rate zone breakdown added to your session.');
+      onDone();
+    } catch (e: any) {
+      setStatus('error');
+      setErrorMsg(String(e?.message ?? e));
+    }
+  }
+
+  return (
+    <SafeAreaView style={s.container}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView contentContainerStyle={s.centerPad}>
+        <Text style={s.completeTitle}>HR{'\n'}ZONES</Text>
+        <Text style={{ color: Colors.textSecondary, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 32 }}>
+          Select a screenshot showing your heart rate zone breakdown. Works with Whoop, Garmin Connect, Polar Flow, and any HR app.
+        </Text>
+        {status === 'loading' ? (
+          <>
+            <ActivityIndicator color={Colors.accent} size="large" />
+            <Text style={{ color: Colors.textSecondary, fontSize: 13, marginTop: 16 }}>Extracting zones...</Text>
+          </>
+        ) : (
+          <>
+            {status === 'error' && (
+              <Text style={{ color: '#ff4444', fontSize: 13, textAlign: 'center', marginBottom: 16 }}>
+                {errorMsg || 'Something went wrong. Try again.'}
+              </Text>
+            )}
+            <TouchableOpacity style={[s.primaryBtn, { marginBottom: 16 }]} onPress={pickAndUpload}>
+              <Text style={s.primaryBtnTxt}>CHOOSE SCREENSHOT</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onSkip}>
+              <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Skip</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 

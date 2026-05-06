@@ -55,6 +55,7 @@ type Profile = {
   manual_hrv_date: string | null;
   // Wearable direct connections
   whoop_connected?: boolean | null;
+  whoop_access_token?: string | null;
   whoop_refresh_token?: string | null;
   garmin_connected?: boolean | null;
   coros_connected?: boolean | null;
@@ -501,16 +502,16 @@ export default function ProfileScreen() {
   const load = useCallback(async () => {
     const myId = ++loadIdRef.current;
     setLoading(true);
-    const { data: authData } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current || myId !== loadIdRef.current) { setLoading(false); return; }
-    if (!authData.user) { setLoading(false); return; }
-    setEmail(authData.user.email ?? '');
+    if (!session?.user) { setLoading(false); return; }
+    setEmail(session.user.email ?? '');
 
-    const { data } = await supabase.from('profiles').select('*').eq('id', authData.user.id).single();
+    const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
     if (!mounted.current || myId !== loadIdRef.current) { setLoading(false); return; }
 
     if ((data?.whoop_access_token || data?.whoop_refresh_token) && !data?.whoop_connected) {
-      await supabase.from('profiles').update({ whoop_connected: true }).eq('id', authData.user.id);
+      await supabase.from('profiles').update({ whoop_connected: true }).eq('id', session.user.id);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (data) (data as any).whoop_connected = true;
       console.log('[whoop] auto-restored whoop_connected from saved tokens');
@@ -524,7 +525,7 @@ export default function ProfileScreen() {
     console.log('[profile] mount, appleHealthConnected:', appleHealthConnected, 'whoopConnected:', whoopConnected);
     console.log('[whoop] has refresh token:', !!data?.whoop_refresh_token);
     if (appleHealthConnected || whoopConnected) {
-      loadHealthData(authData.user.id, data);
+      loadHealthData(session.user.id, data);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -608,6 +609,34 @@ export default function ProfileScreen() {
     });
   }
 
+  function disconnectWhoop() {
+    if (!profile?.id) return;
+    Alert.alert(
+      'Disconnect Whoop',
+      'This will remove your Whoop connection. You can reconnect at any time.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            await supabase.from('profiles').update({
+              whoop_connected:     false,
+              whoop_access_token:  null,
+              whoop_refresh_token: null,
+              whoop_token_expiry:  null,
+            }).eq('id', profile!.id);
+            setProfile(prev => prev
+              ? { ...prev, whoop_connected: false, whoop_access_token: null, whoop_refresh_token: null }
+              : prev,
+            );
+            console.log('[whoop] disconnected — tokens cleared from Supabase');
+          },
+        },
+      ],
+    );
+  }
+
   // Deep link handler — handles peak65://auth/whoop/callback?code=XXX or #code=XXX
   useEffect(() => {
     const handleUrl = async ({ url }: { url: string }) => {
@@ -649,12 +678,12 @@ export default function ProfileScreen() {
           return;
         }
 
-        const { data: authData } = await supabase.auth.getUser();
-        if (!authData.user) return;
+        const { data: { session: authSession } } = await supabase.auth.getSession();
+        if (!authSession?.user) return;
         setWhoopConnecting(true);
 
         try {
-          await exchangeWhoopCode(code, authData.user.id);
+          await exchangeWhoopCode(code, authSession.user.id);
           console.log('[whoop] token exchange succeeded');
         } catch (error) {
           console.log('[whoop] token exchange error:', error);
@@ -662,8 +691,8 @@ export default function ProfileScreen() {
         }
 
         load();
-        const whoopData = await fetchAllWhoopData(authData.user.id);
-        await upsertWhoopWorkouts(authData.user.id, whoopData.workouts);
+        const whoopData = await fetchAllWhoopData(authSession.user.id);
+        await upsertWhoopWorkouts(authSession.user.id, whoopData.workouts);
         Alert.alert('Whoop Connected', 'Your Whoop data has been synced successfully.');
       } catch (e) {
         console.log('[whoop] deep link error:', e);
@@ -1127,29 +1156,32 @@ export default function ProfileScreen() {
           })()}
           {/* Whoop direct API row */}
           {(() => {
-            const isConnected = profile?.whoop_connected === true;
-            const needsReconnect = isConnected && !profile?.whoop_refresh_token;
+            const isConnected = !!(profile?.whoop_connected || profile?.whoop_access_token || profile?.whoop_refresh_token);
+            const needsReconnect = isConnected && !profile?.whoop_refresh_token && !profile?.whoop_access_token;
             return (
               <View>
-                <TouchableOpacity
-                  style={styles.settingRow}
-                  onPress={needsReconnect || !isConnected ? connectWhoop : undefined}
-                  disabled={(!needsReconnect && isConnected) || whoopConnecting}
-                >
+                <View style={styles.settingRow}>
                   <Text style={styles.settingLabel}>Whoop</Text>
-                  <View style={styles.settingRight}>
-                    <Text style={[
-                      styles.settingValue,
-                      isConnected && !needsReconnect && { color: '#a8ff78' },
-                      needsReconnect && { color: '#e8c44a' },
-                    ]}>
-                      {whoopConnecting ? 'Connecting...' : needsReconnect ? 'Reconnect needed' : isConnected ? 'Connected ✓' : 'Connect'}
-                    </Text>
-                    {(!isConnected || needsReconnect) && !whoopConnecting && (
-                      <Feather name="chevron-right" color={Colors.textSecondary} size={16} />
+                  <View style={[styles.settingRight, { flexShrink: 1 }]}>
+                    {whoopConnecting ? (
+                      <Text style={styles.settingValue} numberOfLines={1}>Connecting...</Text>
+                    ) : isConnected && !needsReconnect ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
+                        <Text style={[styles.settingValue, { color: '#a8ff78' }]} numberOfLines={1}>Connected ✓</Text>
+                        <TouchableOpacity onPress={disconnectWhoop} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                          <Text style={[styles.settingValue, { color: Colors.textSecondary }]} numberOfLines={1}>Disconnect</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity onPress={connectWhoop} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={[styles.settingValue, needsReconnect && { color: '#e8c44a' }]} numberOfLines={1}>
+                          {needsReconnect ? 'Reconnect' : 'Connect'}
+                        </Text>
+                        <Feather name="chevron-right" color={Colors.textSecondary} size={16} />
+                      </TouchableOpacity>
                     )}
                   </View>
-                </TouchableOpacity>
+                </View>
                 {needsReconnect && (
                   <Text style={[styles.healthSource, { paddingHorizontal: 16, paddingBottom: 10, color: '#e8c44a' }]}>
                     Tap to reconnect for uninterrupted access

@@ -280,13 +280,6 @@ async function resolveAppState(
     return { state: 'unauthenticated', isCoach: false };
   }
 
-  // Verify the user still exists in Supabase Auth (catches deleted-user cached sessions).
-  const { error: userError } = await supabase.auth.getUser();
-  if (userError) {
-    await supabase.auth.signOut();
-    return { state: 'unauthenticated', isCoach: false };
-  }
-
   if (!profile?.first_name) return { state: 'onboarding', isCoach: false };
 
   // Check program existence and coach status in parallel.
@@ -384,6 +377,8 @@ export default function RootLayout() {
   const [isCoach,    setIsCoach]    = useState(false);
   const [hasUnread,  setHasUnread]  = useState(false);
   const resolvingRef                = React.useRef(false);
+  const appStateValueRef            = React.useRef(appState);
+  appStateValueRef.current          = appState;
 
   const [fontsLoaded] = useFonts({
     BarlowCondensed_700Bold,
@@ -418,7 +413,12 @@ export default function RootLayout() {
           if (event !== 'INITIAL_SESSION') setAppState('loading');
 
           const resolveStart = Date.now();
-          const { state: newState, isCoach: newIsCoach } = await resolveAppState(session);
+          const { state: newState, isCoach: newIsCoach } = await Promise.race([
+            resolveAppState(session),
+            new Promise<{ state: AppState; isCoach: boolean }>(resolve =>
+              setTimeout(() => resolve({ state: session ? 'authenticated' : 'unauthenticated', isCoach: false }), 10_000)
+            ),
+          ]);
 
           // 300ms minimum prevents a white flash when the splash transitions
           // out before the JS bridge has finished painting the first frame.
@@ -445,7 +445,20 @@ export default function RootLayout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  if (appState === 'loading' || !fontsLoaded) return null;
+  // Watchdog: if loading is stuck for >20s (e.g. network totally unavailable),
+  // fall back to unauthenticated so the user sees the login screen instead of a dark screen.
+  useEffect(() => {
+    if (appState !== 'loading') return;
+    const t = setTimeout(() => {
+      if (appStateValueRef.current === 'loading') {
+        console.log('[layout] watchdog: loading stuck >20s, forcing unauthenticated');
+        setAppState('unauthenticated');
+      }
+    }, 20_000);
+    return () => clearTimeout(t);
+  }, [appState]);
+
+  if (appState === 'loading' || !fontsLoaded) return <View style={{ flex: 1, backgroundColor: '#080808' }} />;
 
   if (appState === 'unauthenticated') {
     return (

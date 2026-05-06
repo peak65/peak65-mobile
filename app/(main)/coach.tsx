@@ -49,9 +49,10 @@ export default function CoachScreen({ navigation }: Props) {
   }, []);
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current) return;
-    if (!user) return;
+    if (!session?.user) return;
+    const user = session.user;
 
     const { data: rows, error } = await supabase
       .from('coach_athletes')

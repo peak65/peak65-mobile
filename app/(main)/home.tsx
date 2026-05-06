@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   View, Text, ScrollView, TouchableOpacity, RefreshControl,
   StyleSheet, ActivityIndicator, Modal, AppState, Animated,
@@ -21,7 +22,7 @@ import {
   selectHRVSource, selectRHRSource,
   selectSleepSource, resolveAllSources,
 } from '../../lib/wearablePriority';
-import type { Program, ProgramDay, TabParamList } from '../_layout';
+import type { Program, ProgramDay, TabParamList, MainStackParamList } from '../_layout';
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
@@ -60,6 +61,8 @@ type HomeProfile = {
   chest_strap_tip_shown: boolean | null;
   coached_upsell_dismissed: boolean | null;
   whoop_connected: boolean | null;
+  whoop_access_token: string | null;
+  whoop_refresh_token: string | null;
   garmin_connected: boolean | null;
   coros_connected: boolean | null;
   manual_hrv: number | null;
@@ -295,6 +298,7 @@ export default function HomeScreen() {
   const [storedProfile, setStoredProfile]     = useState<HomeProfile | null>(null);
   const [pendingCandidates, setPendingCandidates] = useState<CandidateRow[]>([]);
   const [refreshing, setRefreshing]               = useState(false);
+  const [todayCompleted, setTodayCompleted]       = useState(false);
 
   // ── Week 2 generation ────────────────────────────────────────────────────────
 
@@ -340,10 +344,10 @@ export default function HomeScreen() {
   const loadData = useCallback(async () => {
     const myId = ++loadIdRef.current;
     setLoading(true);
-    const { data: authData } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current || myId !== loadIdRef.current) return;
-    if (!authData.user) { setLoading(false); return; }
-    const uid = authData.user.id;
+    if (!session?.user) { setLoading(false); return; }
+    const uid = session.user.id;
     setUserId(uid);
 
     const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
@@ -351,10 +355,10 @@ export default function HomeScreen() {
     const [progsRes, logsRes, profileRes, extStreakRes, cacheRes] = await Promise.all([
       supabase.from('programs').select('*').eq('user_id', uid)
         .order('week_number', { ascending: true }),
-      supabase.from('session_logs').select('completed_at')
+      supabase.from('session_logs').select('completed_at, completed')
         .eq('user_id', uid).order('completed_at', { ascending: false }),
       supabase.from('profiles')
-        .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, garmin_connected, coros_connected, manual_hrv, manual_hrv_date')
+        .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, whoop_access_token, whoop_refresh_token, garmin_connected, coros_connected, manual_hrv, manual_hrv_date')
         .eq('id', uid)
         .maybeSingle(),
       supabase.from('external_workouts')
@@ -392,6 +396,15 @@ export default function HomeScreen() {
     const logs = logsRes.data ?? [];
     setSessionCount(logs.length);
 
+    // Check if today's session was already completed (to show non-tappable "Session Complete")
+    const todayDateStr = new Date().toLocaleDateString('en-CA');
+    const hasCompletedToday = logs.some(l =>
+      l.completed_at &&
+      new Date(l.completed_at).toLocaleDateString('en-CA') === todayDateStr &&
+      (l as any).completed === true,
+    );
+    setTodayCompleted(hasCompletedToday);
+
     const sessionDates  = new Set(logs.map(l => new Date(l.completed_at).toLocaleDateString('en-CA')));
     const externalDates = new Set(
       (extStreakRes.data ?? []).map(w => new Date(w.start_time).toLocaleDateString('en-CA')),
@@ -407,6 +420,14 @@ export default function HomeScreen() {
     setProfileGoal(profileData?.goal ?? null);
     setPreferredUnits(profileData?.preferred_units ?? null);
 
+    // ── [DIAG] Profile token dump ──────────────────────────────────────────────
+    console.log('[DIAG] profileRes.error:', profileRes.error?.message ?? null);
+    console.log('[DIAG] profileData is null:', profileData === null);
+    console.log('[DIAG] whoop_connected:', profileData?.whoop_connected);
+    console.log('[DIAG] whoop_access_token present:', !!(profileData as any)?.whoop_access_token, '| length:', ((profileData as any)?.whoop_access_token as string | null)?.length ?? 0);
+    console.log('[DIAG] whoop_refresh_token present:', !!(profileData as any)?.whoop_refresh_token, '| length:', ((profileData as any)?.whoop_refresh_token as string | null)?.length ?? 0);
+    // ──────────────────────────────────────────────────────────────────────────
+
     const isElite = isEliteHyroxProfile(profileData?.goal ?? null, profileData?.goal_time ?? null);
     const newStreak = calculateStreakValue(sessionDates, externalDates, restDayNames, isElite);
     console.log('[streak] isEliteHyrox:', isElite, 'streak:', newStreak);
@@ -414,7 +435,12 @@ export default function HomeScreen() {
     const isHealthConnected =
       profileData?.wearable_connected === true &&
       profileData?.wearable_type === 'apple_health';
-    const isWhoopConnected = profileData?.whoop_connected === true;
+    const isWhoopConnected =
+      profileData?.whoop_connected === true ||
+      !!(profileData?.whoop_access_token || profileData?.whoop_refresh_token);
+
+    console.log('[DIAG] isHealthConnected:', isHealthConnected, '| isWhoopConnected:', isWhoopConnected);
+    console.log('[DIAG] fetch path will be:', isHealthConnected ? 'Apple Health (+ Whoop if connected)' : isWhoopConnected ? 'Whoop-only' : 'NONE — no wearable');
 
     console.log('[health] wearable state from profile:', {
       wearable_connected: profileData?.wearable_connected,
@@ -431,6 +457,7 @@ export default function HomeScreen() {
 
     // Apply cached health data immediately so metrics display before the background fetch.
     const cacheRow = cacheRes.data as Record<string, any> | null;
+    console.log('[cache] daily_health_readings query — error:', cacheRes.error?.message ?? null, '| row date:', cacheRow?.date ?? null);
     if (cacheRow && (isHealthConnected || isWhoopConnected)) {
       const cachedRd = cacheToReadiness(cacheRow);
       setReadinessData(cachedRd);
@@ -444,7 +471,9 @@ export default function HomeScreen() {
         exerciseMinutes:   null,
         lastActiveCalSync: null,
       });
-      console.log('[cache] applied daily_health_readings row from:', cacheRow.date);
+      console.log('[cache] applied — hrv:', cachedRd.hrv?.value, '| sleep:', cachedRd.sleepHours?.value, '| rhr:', cachedRd.restingHR?.value, '| steps:', cachedRd.steps?.value, '| active:', cachedRd.activeCalories?.value, '| total:', cachedRd.totalCalories?.value);
+    } else {
+      console.log('[cache] no cache row — will show shimmer until fresh data arrives');
     }
     // Show shimmer on metric cards while background fetch runs (only if no cache → no readinessData yet)
     if (isHealthConnected || isWhoopConnected) setFetchingFresh(true);
@@ -455,6 +484,7 @@ export default function HomeScreen() {
       .catch(e => console.log('[home] candidates error:', e));
 
     if (isHealthConnected) {
+      console.log('[DIAG] entering Apple Health path (isWhoopConnected also:', isWhoopConnected, ')');
       getTodayHealthData()
         .then(async (data) => {
           if (!mounted.current || myId !== loadIdRef.current) return;
@@ -525,20 +555,33 @@ export default function HomeScreen() {
 
       fetchTodayHealthData()
         .then(async rd => {
-          if (!mounted.current || myId !== loadIdRef.current) return;
+          console.log('[whoop-debug] fetchTodayHealthData .then — myId:', myId, 'current:', loadIdRef.current, 'mounted:', mounted.current);
+          if (!mounted.current || myId !== loadIdRef.current) {
+            console.log('[whoop-debug] BAILED after fetchTodayHealthData — not setting readinessData');
+            return;
+          }
           console.log('[health] fetchTodayHealthData result:', JSON.stringify(rd));
           if (isWhoopConnected) {
             console.log('[health] Whoop also connected — fetching Whoop API to merge over HealthKit...');
             try {
+              console.log('[whoop-debug] calling fetchAllWhoopData (Apple Health + Whoop path)...');
               const whoopData = await fetchAllWhoopData(uid);
-              if (!mounted.current || myId !== loadIdRef.current) return;
-              console.log('[health] Whoop API data:', JSON.stringify(whoopData));
+              console.log('[whoop-debug] fetchAllWhoopData returned — myId:', myId, 'current:', loadIdRef.current);
+              console.log('[whoop-debug] recovery:', JSON.stringify(whoopData.recovery));
+              console.log('[whoop-debug] sleep:', JSON.stringify(whoopData.sleep));
+              console.log('[whoop-debug] workouts count:', whoopData.workouts.length, JSON.stringify(whoopData.workouts));
+              console.log('[whoop-debug] cycle:', JSON.stringify(whoopData.cycle));
+              if (!mounted.current || myId !== loadIdRef.current) {
+                console.log('[whoop-debug] BAILED after fetchAllWhoopData (Apple Health path) — not setting readinessData');
+                return;
+              }
               rd = mergeWhoopIntoHealthData(rd, whoopData);
               console.log('[health] post-Whoop merge result:', JSON.stringify(rd));
             } catch (e) {
               console.log('[home] whoop merge error:', e);
             }
           }
+          console.log('[whoop-debug] calling setReadinessData (Apple Health path) — hrv:', rd.hrv?.value, '| sleep:', rd.sleepHours?.value, '| rhr:', rd.restingHR?.value, '| steps:', rd.steps?.value, '| active:', rd.activeCalories?.value, '| total:', rd.totalCalories?.value);
           setReadinessData(rd);
           setFetchingFresh(false);
           saveHealthCache(uid, rd, new Date().toLocaleDateString('en-CA')).catch(() => {});
@@ -561,19 +604,41 @@ export default function HomeScreen() {
         .catch(e => { console.log('[home] readiness fetch error:', e); setFetchingFresh(false); });
 
     } else if (isWhoopConnected) {
+      console.log('[DIAG] entering Whoop-only path — uid:', uid);
       console.log('[health] Apple Health not connected — running Whoop-only path');
       (async () => {
+        console.log('[DIAG] Whoop-only IIFE started — myId:', myId, 'current:', loadIdRef.current, 'mounted:', mounted.current);
+        console.log('[whoop-debug] IIFE started — myId:', myId, 'current:', loadIdRef.current, 'mounted:', mounted.current);
         try {
-          if (!mounted.current || myId !== loadIdRef.current) return;
+          if (!mounted.current || myId !== loadIdRef.current) {
+            console.log('[DIAG] BAILED before Whoop fetch — loadId mismatch or unmounted');
+            console.log('[whoop-debug] BAILED before fetch — myId:', myId, 'current:', loadIdRef.current);
+            return;
+          }
+          console.log('[DIAG] calling fetchAllWhoopData...');
+          console.log('[whoop-debug] calling fetchAllWhoopData (Whoop-only path)...');
           const whoopData = await fetchAllWhoopData(uid);
-          if (!mounted.current || myId !== loadIdRef.current) return;
-          console.log('[health] Whoop-only API data:', JSON.stringify(whoopData));
+          console.log('[DIAG] fetchAllWhoopData returned');
+          console.log('[DIAG] raw recovery:', JSON.stringify(whoopData.recovery));
+          console.log('[DIAG] raw sleep:', JSON.stringify(whoopData.sleep));
+          console.log('[DIAG] raw workouts (count:', whoopData.workouts.length, '):', JSON.stringify(whoopData.workouts).substring(0, 500));
+          console.log('[DIAG] raw cycle:', JSON.stringify(whoopData.cycle));
+          console.log('[whoop-debug] fetchAllWhoopData returned — myId:', myId, 'current:', loadIdRef.current, 'mounted:', mounted.current);
+          console.log('[whoop-debug] recovery:', JSON.stringify(whoopData.recovery));
+          console.log('[whoop-debug] sleep:', JSON.stringify(whoopData.sleep));
+          console.log('[whoop-debug] workouts count:', whoopData.workouts.length, JSON.stringify(whoopData.workouts));
+          console.log('[whoop-debug] cycle:', JSON.stringify(whoopData.cycle));
+          if (!mounted.current || myId !== loadIdRef.current) {
+            console.log('[whoop-debug] BAILED after fetch — myId:', myId, 'current:', loadIdRef.current);
+            return;
+          }
           const empty: WearableHealthData = {
             hrv: null, restingHR: null, sleepHours: null,
             steps: null, activeCalories: null, basalCalories: null, totalCalories: null,
           };
           const rd = mergeWhoopIntoHealthData(empty, whoopData);
-          console.log('[health] Whoop-only merged readiness:', JSON.stringify(rd));
+          console.log('[whoop-debug] merge complete — hrv:', rd.hrv?.value, '| sleep:', rd.sleepHours?.value, '| rhr:', rd.restingHR?.value, '| steps:', rd.steps?.value, '| active:', rd.activeCalories?.value, '| total:', rd.totalCalories?.value);
+          console.log('[whoop-debug] calling setReadinessData...');
           setReadinessData(rd);
           setFetchingFresh(false);
           saveHealthCache(uid, rd, new Date().toLocaleDateString('en-CA')).catch(() => {});
@@ -610,11 +675,13 @@ export default function HomeScreen() {
           const rhr   = rd.restingHR?.value  ?? null;
           console.log('[home] Whoop-only readiness row final values:', { hrv, sleep, rhr });
         } catch (e) {
-          console.log('[home] whoop-only fetch error:', e);
+          console.log('[DIAG] EXCEPTION in Whoop-only IIFE:', String(e));
+          console.log('[whoop-debug] EXCEPTION in Whoop-only IIFE:', String(e));
           setFetchingFresh(false);
         }
       })();
     } else {
+      console.log('[DIAG] NO wearable path taken — isHealthConnected:', isHealthConnected, '| isWhoopConnected:', isWhoopConnected, '— metrics will be blank');
       console.log('[health] no wearable connected — all metrics will show "--"');
     }
 
@@ -633,6 +700,14 @@ export default function HomeScreen() {
     console.log('[health] auto-refresh triggered by: focus');
     loadData();
   }, [loadData]));
+
+  useEffect(() => {
+    console.log('[whoop-debug] readinessData changed —', readinessData == null ? 'NULL' : `hrv:${readinessData.hrv?.value ?? 'null'} sleep:${readinessData.sleepHours?.value ?? 'null'} rhr:${readinessData.restingHR?.value ?? 'null'} steps:${readinessData.steps?.value ?? 'null'} active:${readinessData.activeCalories?.value ?? 'null'} total:${readinessData.totalCalories?.value ?? 'null'}`);
+  }, [readinessData]);
+
+  useEffect(() => {
+    console.log('[whoop-debug] fetchingFresh changed —', fetchingFresh);
+  }, [fetchingFresh]);
 
   const loadDataRef      = useRef(loadData);
   const appStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -677,7 +752,7 @@ export default function HomeScreen() {
     : sessions.map(s => s.name).filter(Boolean).join(' + ');
   const workoutSummary = todayDay ? buildWorkoutSummary(todayDay) : '';
 
-  const hasWearable = healthConnected || storedProfile?.whoop_connected === true;
+  const hasWearable = healthConnected || !!(storedProfile?.whoop_connected || storedProfile?.whoop_access_token || storedProfile?.whoop_refresh_token);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -776,7 +851,9 @@ export default function HomeScreen() {
               <ShimmerBox width={64} height={26} />
             ) : (
               <Text style={styles.statVal}>
-                {hasWearable && healthData?.steps != null ? healthData.steps.toLocaleString('en-US') : '--'}
+                {hasWearable && (readinessData?.steps?.value ?? healthData?.steps) != null
+                  ? (readinessData?.steps?.value ?? healthData!.steps!).toLocaleString('en-US')
+                  : '--'}
               </Text>
             )}
             <Text style={styles.statLabel}>Steps</Text>
@@ -789,7 +866,9 @@ export default function HomeScreen() {
               <ShimmerBox width={64} height={26} />
             ) : (
               <Text style={styles.statVal}>
-                {hasWearable && healthData?.activeCalories != null ? `${healthData.activeCalories}` : '--'}
+                {hasWearable && (readinessData?.activeCalories?.value ?? healthData?.activeCalories) != null
+                  ? `${readinessData?.activeCalories?.value ?? healthData?.activeCalories}`
+                  : '--'}
               </Text>
             )}
             <Text style={styles.statLabel}>Active</Text>
@@ -809,17 +888,31 @@ export default function HomeScreen() {
             const whoopTotal = readinessData?.totalCalories?.source?.includes('Whoop')
               ? readinessData.totalCalories.value : null;
             if (whoopTotal != null) {
-              console.log('[home] Total Cal display: Whoop cycle total:', whoopTotal);
+              const now = new Date();
+              // Use cycle start time for accurate extrapolation (avoids midnight-offset error).
+              // cycleStart is stored in readinessData via a custom field if available; fall back
+              // to hours-since-midnight capped at a minimum of 1h to avoid division by near-zero.
+              const cycleStartIso: string | null = (readinessData as any)?.cycleStart ?? null;
+              const hoursIntoCycle = cycleStartIso
+                ? Math.max(1, (now.getTime() - new Date(cycleStartIso).getTime()) / 3_600_000)
+                : Math.max(1, now.getHours() + now.getMinutes() / 60);
+              // Only project when at least 2h into the cycle and not near end-of-day.
+              const projectedTotal = hoursIntoCycle > 2 && hoursIntoCycle < 22
+                ? Math.round(whoopTotal * 24 / hoursIntoCycle)
+                : null;
+              console.log('[home] Total Cal display: Whoop cycle total:', whoopTotal, '| hoursIntoCycle:', hoursIntoCycle.toFixed(1), '| projected:', projectedTotal);
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
                   <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
-                  <Text style={styles.statVal}>{whoopTotal}</Text>
-                  <Text style={styles.statLabel}>Total</Text>
-                  <Text style={styles.statSub}>Whoop</Text>
+                  <Text style={styles.statVal}>{projectedTotal ?? whoopTotal}</Text>
+                  <Text style={styles.statLabel}>{projectedTotal != null ? 'Projected' : 'Total'}</Text>
+                  <Text style={styles.statSub}>{projectedTotal != null ? `${whoopTotal} so far` : 'Whoop'}</Text>
                 </View>
               );
             }
-            const activeSoFar = hasWearable && healthData?.activeCalories != null ? healthData.activeCalories : null;
+            const activeSoFar = hasWearable
+              ? (readinessData?.activeCalories?.value ?? healthData?.activeCalories ?? null)
+              : null;
             const now          = new Date();
             const hoursElapsed = now.getHours() + now.getMinutes() / 60;
             // Use raw BMR as base to avoid double-counting NEAT already in tdeeBase
@@ -833,13 +926,13 @@ export default function HomeScreen() {
             const syncTime     = healthData?.lastActiveCalSync
               ? new Date(healthData.lastActiveCalSync).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
               : null;
-            if (!healthConnected || projected == null) {
+            if (!hasWearable || projected == null) {
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
                   <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                   <Text style={styles.statVal}>--</Text>
                   <Text style={styles.statLabel}>Total</Text>
-                  {!healthConnected && <Text style={styles.statSub}>Connect Health</Text>}
+                  {!hasWearable && <Text style={styles.statSub}>Connect Health</Text>}
                 </View>
               );
             }
@@ -857,7 +950,7 @@ export default function HomeScreen() {
 
         {/* Morning Readiness row — HRV | Sleep | RHR — always rendered */}
         {(() => {
-          const hasWearableData = (healthConnected || storedProfile?.whoop_connected === true) && !!readinessData;
+          const hasWearableData = hasWearable && !!readinessData;
           const hrvR   = hasWearableData ? selectHRVSource(readinessData!, storedProfile ?? {}) : null;
           const sleepR = hasWearableData ? selectSleepSource(readinessData!) : null;
           const rhrR   = hasWearableData ? selectRHRSource(readinessData!) : null;
@@ -922,26 +1015,44 @@ export default function HomeScreen() {
           <View style={styles.emptyBlock}>
             <Text style={styles.emptyText}>Rest day — recover well.</Text>
           </View>
-        ) : (
-          <TouchableOpacity
-            style={styles.workoutCard}
-            activeOpacity={0.85}
-            onPress={() => navigation.navigate('Program')}
-          >
-            <View style={styles.workoutCardTop}>
-              <Text style={styles.workoutDayLabel}>
-                {dayLabel}{typeLabel ? ` — ${typeLabel}` : ''}
-              </Text>
-              <Text style={styles.workoutSessionTitle} numberOfLines={2}>{sessionTitle}</Text>
+        ) : (() => {
+          const firstSession = sessions[0] ?? null;
+          function startWorkout() {
+            if (!firstSession || !program) return;
+            (navigation as any).getParent<NativeStackNavigationProp<MainStackParamList>>()?.navigate('LiveWorkout', {
+              sessionJson: JSON.stringify(firstSession),
+              programId:   program.id,
+              weekNumber:  program.week_number,
+              dayName:     todayDay!.day,
+            });
+          }
+          return (
+            <View style={styles.workoutCard}>
+              <View style={styles.workoutCardTop}>
+                <Text style={styles.workoutDayLabel}>
+                  {dayLabel}{typeLabel ? ` — ${typeLabel}` : ''}
+                </Text>
+                <Text style={styles.workoutSessionTitle} numberOfLines={2}>{sessionTitle}</Text>
+              </View>
+              {!!workoutSummary && (
+                <Text style={styles.workoutSummary} numberOfLines={1}>{workoutSummary}</Text>
+              )}
+              {todayCompleted ? (
+                <View style={[styles.viewWorkoutBtn, { backgroundColor: '#1a2a1a' }]}>
+                  <Text style={[styles.viewWorkoutBtnText, { color: '#4aff78' }]}>SESSION COMPLETE ✓</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.viewWorkoutBtn}
+                  activeOpacity={0.85}
+                  onPress={startWorkout}
+                >
+                  <Text style={styles.viewWorkoutBtnText}>START WORKOUT →</Text>
+                </TouchableOpacity>
+              )}
             </View>
-            {!!workoutSummary && (
-              <Text style={styles.workoutSummary} numberOfLines={1}>{workoutSummary}</Text>
-            )}
-            <View style={styles.viewWorkoutBtn}>
-              <Text style={styles.viewWorkoutBtnText}>VIEW WORKOUT</Text>
-            </View>
-          </TouchableOpacity>
-        )}
+          );
+        })()}
 
         {/* Extra workouts from wearable (off-program) */}
         {externalWorkouts.map(w => {

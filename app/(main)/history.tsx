@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, Modal,
+  StyleSheet, ActivityIndicator, Modal, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -26,13 +26,18 @@ type SessionLog = {
   completed_at: string;
   day_index: number | null;
   rpe: number | null;
+  rpe_logged: number | null;
   duration: number | null;
   week_number: number | null;
   log_value: string | null;
   notes: string | null;
   session_type: string | null;
+  session_name: string | null;
   title: string | null;
   day_type: string | null;
+  day_name: string | null;
+  program_id: string | null;
+  hr_zones: string | null;
 };
 
 type ExternalWorkout = {
@@ -100,9 +105,11 @@ function rpeColor(rpe: number | null): string {
 function getSessionTitle(log: SessionLog): string {
   const clean = (v: string | null | undefined) =>
     v && v !== 'undefined' && v !== 'null' && v.trim().length > 0 ? v.trim() : null;
+  if (clean(log.session_name)) return clean(log.session_name)!;
   if (clean(log.session_type)) return clean(log.session_type)!;
   if (clean(log.title))        return clean(log.title)!;
   if (clean(log.day_type))     return clean(log.day_type)!;
+  if (clean(log.day_name))     return clean(log.day_name)!;
   if (log.day_index != null && log.day_index >= 0 && log.day_index <= 6) {
     return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][log.day_index] + ' Session';
   }
@@ -226,6 +233,38 @@ function SessionDetailModal({
                 <Text style={styles.detailNotes}>{log.notes}</Text>
               </>
             ) : null}
+
+            {log.hr_zones ? (() => {
+              try {
+                const zones = JSON.parse(log.hr_zones) as Record<string, number>;
+                const keys = ['z1', 'z2', 'z3', 'z4', 'z5'];
+                const colors: Record<string, string> = { z1: '#4a9eff', z2: '#4affb8', z3: '#e8ff47', z4: '#ff9944', z5: '#ff4444' };
+                return (
+                  <>
+                    <Text style={[styles.detailSectionLabel, { marginTop: 16 }]}>HR ZONES</Text>
+                    <View style={{ gap: 8 }}>
+                      {keys.map(z => {
+                        const mins = zones[z] ?? 0;
+                        if (mins === 0) return null;
+                        const total = keys.reduce((s, k) => s + (zones[k] ?? 0), 0);
+                        const pct = total > 0 ? Math.round((mins / total) * 100) : 0;
+                        return (
+                          <View key={z} style={{ gap: 4 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={{ color: colors[z], fontSize: 12, fontWeight: '700' }}>{z.toUpperCase()}</Text>
+                              <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>{mins}m · {pct}%</Text>
+                            </View>
+                            <View style={{ height: 4, backgroundColor: '#222', borderRadius: 2 }}>
+                              <View style={{ height: 4, width: `${pct}%` as any, backgroundColor: colors[z], borderRadius: 2 }} />
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </>
+                );
+              } catch { return null; }
+            })() : null}
           </ScrollView>
         </View>
       </View>
@@ -237,11 +276,87 @@ function WorkoutDetailModal({
   workout,
   imperial,
   onClose,
+  onAssigned,
 }: {
   workout: ExternalWorkout;
   imperial: boolean;
   onClose: () => void;
+  onAssigned: () => void;
 }) {
+  const [assignMode, setAssignMode] = useState(false);
+  const [programs, setPrograms]     = useState<{ id: string; week_number: number; program_data: { days: { day: string; sessions: { name: string }[] }[] } }[]>([]);
+  const [assigning, setAssigning]   = useState(false);
+
+  async function loadPrograms() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+    const { data } = await supabase
+      .from('programs')
+      .select('id, week_number, program_data')
+      .eq('user_id', session.user.id)
+      .order('week_number', { ascending: false });
+    setPrograms((data ?? []) as any[]);
+    setAssignMode(true);
+  }
+
+  async function assignTo(programId: string, weekNumber: number, dayName: string, sessionName: string) {
+    setAssigning(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) { setAssigning(false); return; }
+    await supabase.from('session_logs').insert({
+      user_id:      session.user.id,
+      program_id:   programId,
+      week_number:  weekNumber,
+      day_name:     dayName,
+      session_name: sessionName,
+      log_field:    'assigned_workout',
+      log_value:    `${workout.duration_minutes} min`,
+      completed:    true,
+      completed_at: workout.start_time,
+    });
+    setAssigning(false);
+    Alert.alert('Assigned', `Workout assigned to ${sessionName}.`);
+    onAssigned();
+    onClose();
+  }
+
+  if (assignMode) {
+    return (
+      <Modal transparent animationType="slide" visible onRequestClose={() => setAssignMode(false)}>
+        <View style={styles.detailBackdrop}>
+          <View style={styles.detailSheet}>
+            <View style={styles.detailHeader}>
+              <Text style={styles.detailTitle}>Assign to Day</Text>
+              <TouchableOpacity onPress={() => setAssignMode(false)} style={styles.detailCloseBtn}>
+                <Feather name="x" color={Colors.textSecondary} size={20} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {programs.map(prog => (
+                prog.program_data?.days?.flatMap(day =>
+                  (day.sessions ?? []).map(session => (
+                    <TouchableOpacity
+                      key={`${prog.id}-${day.day}-${session.name}`}
+                      style={[styles.detailCell, { width: '100%', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#222' }]}
+                      onPress={() => assignTo(prog.id, prog.week_number, day.day, session.name)}
+                      disabled={assigning}
+                    >
+                      <Text style={[styles.detailCellLabel, { marginBottom: 2 }]}>Week {prog.week_number} · {day.day}</Text>
+                      <Text style={[styles.detailCellVal, { fontSize: 14 }]}>{session.name}</Text>
+                    </TouchableOpacity>
+                  ))
+                )
+              ))}
+              {programs.length === 0 && (
+                <Text style={{ color: Colors.textSecondary, textAlign: 'center', marginTop: 24 }}>No programs found.</Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
   return (
     <Modal transparent animationType="slide" visible onRequestClose={onClose}>
       <View style={styles.detailBackdrop}>
@@ -308,6 +423,13 @@ function WorkoutDetailModal({
                 <Text style={styles.detailCellVal}>{workout.source}</Text>
               </View>
             </View>
+
+            <TouchableOpacity
+              style={[styles.saveBtn, { marginTop: 20 }]}
+              onPress={loadPrograms}
+            >
+              <Text style={styles.saveBtnText}>ASSIGN TO PROGRAM DAY</Text>
+            </TouchableOpacity>
           </ScrollView>
         </View>
       </View>
@@ -341,17 +463,17 @@ export default function HistoryScreen() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data: authData } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current) { setLoading(false); return; }
-    if (!authData.user) { setLoading(false); return; }
+    if (!session?.user) { setLoading(false); return; }
 
     const [profRes, logsRes, checkinsRes, extRes] = await Promise.all([
-      supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units').eq('id', authData.user.id).single(),
-      supabase.from('session_logs').select('*').eq('user_id', authData.user.id)
+      supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units').eq('id', session.user.id).single(),
+      supabase.from('session_logs').select('*').eq('user_id', session.user.id)
         .order('completed_at', { ascending: false }),
-      supabase.from('checkins').select('*').eq('user_id', authData.user.id)
+      supabase.from('checkins').select('*').eq('user_id', session.user.id)
         .order('created_at', { ascending: true }).limit(20),
-      supabase.from('external_workouts').select('*').eq('user_id', authData.user.id)
+      supabase.from('external_workouts').select('*').eq('user_id', session.user.id)
         .order('start_time', { ascending: false }),
     ]);
 
@@ -411,7 +533,12 @@ export default function HistoryScreen() {
       )}
       {/* External workout detail modal */}
       {selectedItem?.kind === 'workout' && (
-        <WorkoutDetailModal workout={selectedItem.data} imperial={imperial} onClose={() => setSelectedItem(null)} />
+        <WorkoutDetailModal
+          workout={selectedItem.data}
+          imperial={imperial}
+          onClose={() => setSelectedItem(null)}
+          onAssigned={load}
+        />
       )}
 
       {/* Check-in modal */}

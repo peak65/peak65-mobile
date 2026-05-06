@@ -38,6 +38,7 @@ export type WhoopCycle = {
   steps: number | null;
   strainKj: number | null;
   totalKcal: number | null;
+  cycleStart: string | null;
 };
 
 export type WhoopAllData = {
@@ -119,8 +120,9 @@ export async function exchangeWhoopCode(code: string, userId: string): Promise<v
     whoop_token_expiry:  expiry,
     whoop_connected:     true,
   }).eq('id', userId).select();
-  console.log('[whoop] supabase upsert error:', upsertError);
-  console.log('[whoop] supabase upsert success:', !upsertError);
+  console.log('[whoop] supabase update error:', upsertError?.message ?? null);
+  console.log('[whoop] supabase update rows affected:', upsertData?.length ?? 0);
+  if (upsertError) throw new Error(`Failed to save Whoop tokens to Supabase: ${upsertError.message}`);
 }
 
 // ─── Token refresh ────────────────────────────────────────────────────────────
@@ -224,7 +226,6 @@ async function whoopGet(endpoint: string, userId: string): Promise<any> {
         headers: { Authorization: `Bearer ${newToken}` },
       });
       if (res2.status === 401) {
-        await clearWhoopTokens(userId);
         throw new Error(`Whoop API ${endpoint} still 401 after refresh`);
       }
       if (!res2.ok) throw new Error(`Whoop API ${endpoint} failed after refresh: ${res2.status}`);
@@ -282,8 +283,10 @@ export async function fetchWhoopSleep(userId: string): Promise<WhoopSleep | null
 
 export async function fetchWhoopWorkouts(userId: string): Promise<WhoopWorkout[]> {
   try {
-    const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    const data  = await whoopGet(`/v2/activity/workout?limit=10&start=${since}`, userId);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const since = todayStart.toISOString();
+    const data  = await whoopGet(`/v2/activity/workout?limit=25&start=${since}`, userId);
     console.log('[whoop] v2 workout raw response:', JSON.stringify(data).substring(0, 500));
     const records: any[] = data?.records ?? [];
     return records.map(r => {
@@ -326,8 +329,9 @@ export async function fetchWhoopCycle(userId: string): Promise<WhoopCycle | null
     console.log('[whoop] cycle score.step_count:', steps, '| kilojoule:', record.score.kilojoule, '| totalKcal:', totalKcal);
     return {
       steps,
-      strainKj: record.score.kilojoule ?? null,
+      strainKj:   record.score.kilojoule ?? null,
       totalKcal,
+      cycleStart: record.start ?? null,
     };
   } catch (e) {
     console.log('[whoop] fetchWhoopCycle error:', e);
@@ -409,10 +413,8 @@ export function mergeWhoopIntoHealthData(
   // TDEE block will add its basal estimate on top to produce totalCalories.
   const strainKj   = whoopData.workouts.reduce((s, w) => s + (w.kilojoule ?? 0), 0);
   const strainKcal = Math.round(strainKj / 4.184);
-  if (strainKcal > 0) {
-    merged.activeCalories = { value: strainKcal, source: 'Whoop' };
-    console.log('[whoop] merge: activeCalories:', strainKcal, 'from kilojoules:', strainKj);
-  }
+  merged.activeCalories = { value: strainKcal, source: 'Whoop' };
+  console.log('[whoop] merge: activeCalories:', strainKcal, 'from kilojoules:', strainKj);
 
   const s = whoopData.sleep;
   if (s?.totalSleepMs != null && s.totalSleepMs > 0) {
@@ -425,7 +427,7 @@ export function mergeWhoopIntoHealthData(
 
   // Steps from the Whoop daily cycle endpoint (/v1/cycle)
   const cycle = whoopData.cycle;
-  if (cycle?.steps != null && cycle.steps > 0) {
+  if (cycle?.steps != null) {
     merged.steps = { value: cycle.steps, source: 'Whoop' };
     console.log('[whoop] merge: steps from cycle:', cycle.steps);
   }

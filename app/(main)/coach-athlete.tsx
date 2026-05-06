@@ -146,9 +146,10 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
   }, []);
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current) return;
-    if (!user) return;
+    if (!session?.user) return;
+    const user = session.user;
     setCoachId(user.id);
 
     // Fetch profile, coach_athletes row, and latest program in parallel

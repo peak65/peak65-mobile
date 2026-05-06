@@ -989,25 +989,25 @@ export default function ProgramScreen() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data: authData } = await supabase.auth.getUser();
-    if (!authData.user) { setLoading(false); return; }
-    setUserId(authData.user.id);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) { setLoading(false); return; }
+    setUserId(session.user.id);
 
     const [progsRes, logsRes, profileRes] = await Promise.all([
       supabase
         .from('programs')
         .select('*')
-        .eq('user_id', authData.user.id)
+        .eq('user_id', session.user.id)
         .order('week_number', { ascending: true }),
       supabase
         .from('session_logs')
         .select('week_number, day_name, log_field')
-        .eq('user_id', authData.user.id)
+        .eq('user_id', session.user.id)
         .not('day_name', 'is', null),
       supabase
         .from('profiles')
         .select('goal, age, preferred_units')
-        .eq('id', authData.user.id)
+        .eq('id', session.user.id)
         .maybeSingle(),
     ]);
 
@@ -1056,7 +1056,7 @@ export default function ProgramScreen() {
     // Check if we should generate next week on load
     if (active && !nextExists && !nextWeekTriggeredRef.current) {
       const activeCompletedCount = (cMap[active.week_number] ?? new Set()).size;
-      checkAndGenerateNextWeek(authData.user.id, active, activeCompletedCount);
+      checkAndGenerateNextWeek(session.user.id, active, activeCompletedCount);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
