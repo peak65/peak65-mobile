@@ -1043,6 +1043,13 @@ export default function OnboardingScreen({ navigation }: Props) {
       const p = t.split(':').map(Number);
       return p.length === 2 ? p[0] * 60 + p[1] : 0;
     };
+    const formatFinishTime = (mmss: string): string => {
+      const totalMins = parseMMSS(mmss) / 60;
+      if (totalMins < 60) return mmss;
+      const h = Math.floor(totalMins / 60);
+      const m = Math.round(totalMins % 60);
+      return `${h}:${String(m).padStart(2, '0')}`;
+    };
     const RUN_KEYS = ['run1','run2','run3','run4','run5','run6','run7','run8'];
     const totalRunSecs = data.run_splits
       ? RUN_KEYS.reduce((sum, k) => {
@@ -1072,7 +1079,7 @@ export default function OnboardingScreen({ navigation }: Props) {
           <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch' }}>
             <View style={{ flex: 1, backgroundColor: Colors.nested, borderRadius: 12, padding: 14, alignItems: 'center' }}>
               <Text style={{ color: Colors.textSecondary, fontSize: 10, fontWeight: '600', letterSpacing: 1.5, marginBottom: 4 }}>YOU NOW</Text>
-              <Text style={{ color: Colors.textSecondary, fontSize: 26, fontWeight: '700' }}>{data.previous_race_time}</Text>
+              <Text style={{ color: Colors.textSecondary, fontSize: 26, fontWeight: '700' }}>{formatFinishTime(data.previous_race_time)}</Text>
             </View>
             <View style={{ flex: 1, backgroundColor: Colors.card, borderRadius: 12, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(232,255,71,0.3)' }}>
               <Text style={{ color: Colors.accent, fontSize: 10, fontWeight: '600', letterSpacing: 1.5, marginBottom: 4 }}>WITH TRAINING</Text>
@@ -1094,10 +1101,28 @@ export default function OnboardingScreen({ navigation }: Props) {
           </View>
         )}
 
-        <RadarChart day1={day1} raceDay={raceDay} size={260} />
+        <View style={{ marginTop: -40 }}>
+          <RadarChart day1={day1} raceDay={raceDay} size={260} />
+        </View>
 
-        <View style={[styles.coachingCard, { alignSelf: 'stretch' }]}>
-          <Text style={styles.coachingText}>With targeted training across all 8 stations, every weakness becomes a strength.</Text>
+        <View style={[styles.coachingCard, { alignSelf: 'stretch', marginTop: -20 }]}>
+          <Text style={styles.coachingText}>{(() => {
+            const splits = data.station_splits;
+            if (!splits) return 'With targeted training across all 8 stations, every weakness becomes a strength.';
+            const STATION_NAMES: Record<string, string> = {
+              ski_erg: 'Ski Erg', sled_push: 'Sled Push', sled_pull: 'Sled Pull',
+              burpee_broad_jump: 'Burpee Broad Jumps', burpee_broad_jumps: 'Burpee Broad Jumps',
+              row_erg: 'Row Erg', farmers_carry: 'Farmers Carry',
+              sandbag_lunges: 'Sandbag Lunges', wall_balls: 'Wall Balls',
+            };
+            const weakest = Object.entries(splits).reduce<[string, number]>(
+              ([wk, wt], [k, v]) => { const s = parseMMSS(v); return s > wt ? [k, s] : [wk, wt]; },
+              ['', 0]
+            );
+            const name = STATION_NAMES[weakest[0]] ?? weakest[0];
+            const verb = ['Wall Balls','Sandbag Lunges','Burpee Broad Jumps'].includes(name) ? 'are' : 'is';
+            return `Your ${name} ${verb} your biggest opportunity. We're targeting it from day one.`;
+          })()}</Text>
         </View>
       </View>
     );

@@ -8,8 +8,8 @@ const STATIONS = [
 ] as const;
 
 const LABELS = [
-  'Ski Erg', 'Sled Push', 'Sled Pull', 'Burpees',
-  'Row Erg', 'Farmers Carry', 'Sandbag Lunges', 'Wall Balls',
+  'Ski Erg', 'Push', 'Pull', 'Burpees',
+  'Row Erg', 'F. Carry', 'Lunges', 'Wall Balls',
 ];
 
 export type StationKey = typeof STATIONS[number];
@@ -56,7 +56,7 @@ function toValues(sv: StationValues): number[] {
   return STATIONS.map(s => Math.max(0.05, Math.min(1, sv[s] ?? 0.5)));
 }
 
-export default function RadarChart({ size = 320, day1, raceDay, day1Color = '#ff8c00', raceDayColor = '#e8ff47' }: Props) {
+export default function RadarChart({ size = 260, day1, raceDay, day1Color = '#ff8c00', raceDayColor = '#e8ff47' }: Props) {
   const cx = size / 2;
   const cy = size / 2;
   const r = size * 0.238;
@@ -67,8 +67,8 @@ export default function RadarChart({ size = 320, day1, raceDay, day1Color = '#ff
   const gridLevels = [0.25, 0.5, 0.75, 1];
 
   return (
-    <View style={{ width: size, height: size }}>
-      <Svg width={size} height={size}>
+    <View style={{ width: size + 120, height: size + 120 }}>
+      <Svg width={size + 120} height={size + 120} viewBox={`-60 -60 ${size + 120} ${size + 120}`}>
         {/* Grid rings */}
         {gridLevels.map(level => (
           <Polygon
