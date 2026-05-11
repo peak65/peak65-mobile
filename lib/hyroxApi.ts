@@ -143,6 +143,11 @@ export function weeksFromToday(dateStr: string): number {
 export function parseTimeToSecs(t: string): number {
   const parts = t.split(':').map(Number);
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 2) {
+    // first number < 10 → H:MM goal time format (e.g. "1:15" = 1h 15m)
+    // first number >= 10 → MM:SS race result format (e.g. "97:26" = 97m 26s)
+    if (parts[0] < 10) return parts[0] * 3600 + parts[1] * 60;
+    return parts[0] * 60 + parts[1];
+  }
   return 0;
 }

@@ -65,6 +65,8 @@ type OnboardingData = {
   injury_notes: string;
   wearable: string[];
   referral_source: string;
+  run_splits?: Record<string, string>;
+  roxzone_time?: string;
 };
 
 type StepKey =
@@ -494,6 +496,8 @@ export default function OnboardingScreen({ navigation }: Props) {
       previous_race_name: athlete.location,
       previous_race_time: athlete.finish_time,
       station_splits: athlete.station_splits,
+      run_splits: athlete.run_splits,
+      roxzone_time: athlete.roxzone_time,
     }));
     fade(() => setStep(s => s + 1));
   }
