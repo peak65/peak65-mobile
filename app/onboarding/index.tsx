@@ -1038,11 +1038,22 @@ export default function OnboardingScreen({ navigation }: Props) {
     const readiness = prevTimeSecs > 0 ? Math.min(99, Math.round((goalTimeMins / prevTimeMins) * 100)) : 0;
     const improvementMins = prevTimeSecs > 0 ? Math.round(prevTimeMins - goalTimeMins) : 0;
 
+    // Run splits are always MM:SS — bypass parseTimeToSecs H:MM ambiguity logic
+    const parseMMSS = (t: string): number => {
+      const p = t.split(':').map(Number);
+      return p.length === 2 ? p[0] * 60 + p[1] : 0;
+    };
     const RUN_KEYS = ['run1','run2','run3','run4','run5','run6','run7','run8'];
     const totalRunSecs = data.run_splits
-      ? RUN_KEYS.reduce((sum, k) => sum + (data.run_splits![k] ? parseTimeToSecs(data.run_splits![k]) : 0), 0)
+      ? RUN_KEYS.reduce((sum, k) => {
+          const raw = data.run_splits![k];
+          const secs = raw ? parseMMSS(raw) : 0;
+          console.log(`[runSplit] ${k}: "${raw}" → ${secs}s`);
+          return sum + secs;
+        }, 0)
       : 0;
-    const roxzoneSecs = data.roxzone_time ? parseTimeToSecs(data.roxzone_time) : 0;
+    const roxzoneSecs = data.roxzone_time ? parseMMSS(data.roxzone_time) : 0;
+    console.log(`[runSplit] roxzone: "${data.roxzone_time}" → ${roxzoneSecs}s | total: ${totalRunSecs + roxzoneSecs}s`);
     const totalRunningTimeSecs = totalRunSecs + roxzoneSecs;
 
     return (
@@ -1076,10 +1087,10 @@ export default function OnboardingScreen({ navigation }: Props) {
           </Text>
         )}
 
-        {totalRunningTimeSecs > 0 && (
+        {data.run_splits && totalRunningTimeSecs > 0 && (
           <View style={{ alignItems: 'center', gap: 2 }}>
-            <Text style={{ color: Colors.textSecondary, fontSize: 20, fontWeight: '700' }}>{secsToMMSS(totalRunningTimeSecs)}</Text>
-            <Text style={{ color: Colors.textSecondary, fontSize: 10, letterSpacing: 1.5, fontWeight: '600' }}>TOTAL RUN TIME</Text>
+            <Text style={{ color: Colors.textSecondary, fontSize: 20, fontWeight: '700' }}>{secsToMMSS(Math.round(totalRunningTimeSecs / 8.7))}</Text>
+            <Text style={{ color: Colors.textSecondary, fontSize: 10, letterSpacing: 1.5, fontWeight: '600' }}>AVG 1K PACE</Text>
           </View>
         )}
 
