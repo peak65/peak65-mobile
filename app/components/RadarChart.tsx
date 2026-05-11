@@ -40,7 +40,7 @@ function polygonPoints(cx: number, cy: number, r: number, values: number[]): str
 
 function labelPosition(cx: number, cy: number, r: number, i: number): { x: number; y: number } {
   const angle = getAngle(i);
-  const dist = r + 52;
+  const dist = r + 64;
   return { x: cx + dist * Math.cos(angle), y: cy + dist * Math.sin(angle) };
 }
 
@@ -59,7 +59,7 @@ function toValues(sv: StationValues): number[] {
 export default function RadarChart({ size = 320, day1, raceDay, day1Color = '#ff8c00', raceDayColor = '#e8ff47' }: Props) {
   const cx = size / 2;
   const cy = size / 2;
-  const r = size * 0.28;
+  const r = size * 0.238;
 
   const day1Values = toValues(day1);
   const raceDayValues = raceDay ? toValues(raceDay) : null;

@@ -202,6 +202,12 @@ function deriveWhatMattersMost(goals: string[]): string {
   return 'performance';
 }
 
+function secsToMMSS(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
 function weaknessesToRadarValues(weaknesses: string[]): StationValues {
   const result: StationValues = {};
   if (weaknesses.length === 0) {
@@ -1032,6 +1038,13 @@ export default function OnboardingScreen({ navigation }: Props) {
     const readiness = prevTimeSecs > 0 ? Math.min(99, Math.round((goalTimeMins / prevTimeMins) * 100)) : 0;
     const improvementMins = prevTimeSecs > 0 ? Math.round(prevTimeMins - goalTimeMins) : 0;
 
+    const RUN_KEYS = ['run1','run2','run3','run4','run5','run6','run7','run8'];
+    const totalRunSecs = data.run_splits
+      ? RUN_KEYS.reduce((sum, k) => sum + (data.run_splits![k] ? parseTimeToSecs(data.run_splits![k]) : 0), 0)
+      : 0;
+    const roxzoneSecs = data.roxzone_time ? parseTimeToSecs(data.roxzone_time) : 0;
+    const totalRunningTimeSecs = totalRunSecs + roxzoneSecs;
+
     return (
       <View style={[styles.stepContent, { alignItems: 'center' }]}>
         <Text style={[styles.label, { textAlign: 'center' }]}>Race Day</Text>
@@ -1061,6 +1074,13 @@ export default function OnboardingScreen({ navigation }: Props) {
           <Text style={{ color: Colors.textSecondary, fontSize: 13, textAlign: 'center' }}>
             {improvementMins} minute{improvementMins !== 1 ? 's' : ''} to find through training
           </Text>
+        )}
+
+        {totalRunningTimeSecs > 0 && (
+          <View style={{ alignItems: 'center', gap: 2 }}>
+            <Text style={{ color: Colors.textSecondary, fontSize: 20, fontWeight: '700' }}>{secsToMMSS(totalRunningTimeSecs)}</Text>
+            <Text style={{ color: Colors.textSecondary, fontSize: 10, letterSpacing: 1.5, fontWeight: '600' }}>TOTAL RUN TIME</Text>
+          </View>
         )}
 
         <RadarChart day1={day1} raceDay={raceDay} size={260} />
@@ -1591,7 +1611,7 @@ export default function OnboardingScreen({ navigation }: Props) {
               {data.race_event_city ? `You're training for ${data.race_event_city}.` : 'Your program is ready to build.'}
             </Text>
             {data.weeks_to_race != null && (
-              <Text style={styles.summaryHighlight}>That's <Text style={styles.accentText}>{data.weeks_to_race} weeks</Text> away.</Text>
+              <Text style={styles.summaryHighlight}><Text style={{ color: '#e8ff47' }}>{data.weeks_to_race} weeks</Text>. Your program starts now.</Text>
             )}
           </>
         ) : (
