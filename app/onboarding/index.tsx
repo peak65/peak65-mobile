@@ -1529,7 +1529,7 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   function renderWearable() {
     const opts = [
-      { label: 'Whoop', sub: 'Via Apple Health or Google Fit', value: 'whoop', icon: 'activity' as const },
+      { label: 'Whoop', sub: 'Direct API connection', value: 'whoop', icon: 'activity' as const },
       { label: 'Apple Watch', sub: 'Via Apple Health', value: 'apple-watch', icon: 'watch' as const },
       { label: 'Amazfit / Zepp', sub: 'Via Apple Health or Google Fit', value: 'amazfit', icon: 'watch' as const },
       { label: 'Polar', sub: 'Via Apple Health or Google Fit', value: 'polar', icon: 'activity' as const },
