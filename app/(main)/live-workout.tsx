@@ -915,6 +915,51 @@ export default function LiveWorkoutScreen() {
     } catch (e) {
       console.log('[live-workout] save error:', e);
     }
+
+    // Hard 3 detection — triggers next week program generation
+    if (full) {
+      try {
+        const { data: currentProgram } = await supabase
+          .from('programs')
+          .select('program_data, week_number')
+          .eq('user_id', userId)
+          .order('week_number', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (currentProgram) {
+          const programDays = (currentProgram.program_data as { days?: { day: string; type: string }[] })?.days || [];
+          const hardDays = programDays.filter((d: { type: string }) => d.type === 'hard');
+          const hard3DayName = hardDays[2]?.day;
+
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('timezone, tier')
+            .eq('id', userId)
+            .single();
+
+          const athleteTimezone = (profile?.timezone as string) || 'America/New_York';
+          const todayDayName = new Date().toLocaleDateString('en-US', {
+            weekday: 'long',
+            timeZone: athleteTimezone,
+          });
+
+          const athleteTier = (profile?.tier as string) || 'ai_coached';
+          if (hard3DayName && todayDayName === hard3DayName && athleteTier !== 'elite') {
+            const scheduledFor = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+            await supabase
+              .from('generation_queue')
+              .update({ scheduled_for: scheduledFor, status: 'pending' })
+              .eq('user_id', userId)
+              .eq('week_number', (currentProgram.week_number as number) + 1)
+              .eq('status', 'pending');
+          }
+        }
+      } catch (err) {
+        console.error('[saveSession] Hard 3 detection error:', err);
+      }
+    }
+
     setSaving(false);
     return insertedId;
   }
