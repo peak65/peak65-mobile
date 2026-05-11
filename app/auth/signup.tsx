@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { supabase } from '../../lib/supabase';
@@ -58,17 +59,19 @@ export default function SignupScreen({ navigation }: Props) {
 
   if (success) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.logo}>Peak 65</Text>
-        <Text style={styles.successTitle}>Check your email</Text>
-        <Text style={styles.successBody}>
-          We sent a confirmation link to {email}. Click it to activate your account,
-          then come back and log in.
-        </Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-          <Text style={styles.link}>Back to Log In</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.inner}>
+          <Text style={styles.logo}>Peak 65</Text>
+          <Text style={styles.successTitle}>Check your email</Text>
+          <Text style={styles.successBody}>
+            We sent a confirmation link to {email}. Click it to activate your account,
+            then come back and log in.
+          </Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+            <Text style={styles.link}>Back to Log In</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 

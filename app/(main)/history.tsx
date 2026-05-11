@@ -3,10 +3,15 @@ import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, Modal, Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { Colors, Fonts } from '../../lib/theme';
+import Tooltip from '../components/Tooltip';
+import type { TabParamList } from '../_layout';
 
 const ORANGE    = '#ff9944';
 const BAR_MAX_H = 80;
@@ -54,6 +59,8 @@ type ExternalWorkout = {
   max_hr: number | null;
   pace_per_km: number | null;
   effort_zone: string | null;
+  hr_zones: string | null;
+  activity_type: string | null;
 };
 
 type HistoryItem =
@@ -181,12 +188,73 @@ function BarChart({ values, labels, unit }: { values: number[]; labels: string[]
 // ─── Detail modal ─────────────────────────────────────────────────────────────
 
 function SessionDetailModal({
-  log,
+  log: logProp,
   onClose,
 }: {
   log: SessionLog;
   onClose: () => void;
 }) {
+  const [log, setLog] = useState(logProp);
+  const [uploadStatus, setUploadStatus] = useState<'idle' | 'loading'>('idle');
+
+  async function handleUploadHR() {
+    let ImagePicker: any;
+    try {
+      ImagePicker = require('expo-image-picker');
+    } catch {
+      Alert.alert('Not available', 'expo-image-picker is not installed.');
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission required', 'Please allow access to your photo library.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      base64: true,
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.base64) return;
+
+    setUploadStatus('loading');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('tier')
+        .eq('id', userId)
+        .maybeSingle();
+      const tier = (profileData as any)?.tier ?? 'ai_coached';
+
+      const base64Image = result.assets[0].base64 as string;
+      const res = await fetch('https://peak65.vercel.app/api/extract-hr-zones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64Image, sessionLogId: log.id, tier, userId }),
+      });
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const responseData = await res.json();
+      const zones = responseData.zones ?? responseData;
+
+      await supabase
+        .from('session_logs')
+        .update({ hr_zones: JSON.stringify(zones) })
+        .eq('id', log.id);
+
+      setLog(prev => ({ ...prev, hr_zones: JSON.stringify(zones) }));
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Something went wrong. Please try again.');
+    } finally {
+      setUploadStatus('idle');
+    }
+  }
+
   return (
     <Modal transparent animationType="slide" visible onRequestClose={onClose}>
       <View style={styles.detailBackdrop}>
@@ -265,12 +333,35 @@ function SessionDetailModal({
                 );
               } catch { return null; }
             })() : null}
+
+            {uploadStatus === 'loading' ? (
+              <View style={{ alignItems: 'center', marginTop: 20, gap: 8 }}>
+                <ActivityIndicator color={Colors.accent} />
+                <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Reading your HR data...</Text>
+              </View>
+            ) : (
+              <Tooltip id="hr_upload" text="Upload your HR screenshot here after any session. Your coach uses this to track your training zones." arrowDirection="down">
+              <TouchableOpacity
+                style={styles.saveBtn}
+                onPress={handleUploadHR}
+              >
+                <Text style={styles.saveBtnText}>
+                  {log.hr_zones ? 'UPDATE HR DATA' : 'UPLOAD HR DATA'}
+                </Text>
+              </TouchableOpacity>
+              </Tooltip>
+            )}
           </ScrollView>
         </View>
       </View>
     </Modal>
   );
 }
+
+const ACTIVITY_TYPES = [
+  'Zone 2 Cardio', 'Threshold Run', 'Tempo Run', 'Strength Session',
+  'Hyrox Builder', 'Recovery Walk', 'Sport', 'Other',
+];
 
 function WorkoutDetailModal({
   workout,
@@ -283,9 +374,89 @@ function WorkoutDetailModal({
   onClose: () => void;
   onAssigned: () => void;
 }) {
-  const [assignMode, setAssignMode] = useState(false);
-  const [programs, setPrograms]     = useState<{ id: string; week_number: number; program_data: { days: { day: string; sessions: { name: string }[] }[] } }[]>([]);
-  const [assigning, setAssigning]   = useState(false);
+  const [localWorkout, setLocalWorkout] = useState(workout);
+  const [assignMode, setAssignMode]     = useState(false);
+  const [programs, setPrograms]         = useState<{ id: string; week_number: number; program_data: { days: { day: string; sessions: { name: string }[] }[] } }[]>([]);
+  const [assigning, setAssigning]       = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<'idle' | 'loading'>('idle');
+  const [activityType, setActivityType] = useState<string | null>(workout.activity_type ?? null);
+
+  async function handleUploadHR() {
+    let ImagePicker: any;
+    try {
+      ImagePicker = require('expo-image-picker');
+    } catch {
+      Alert.alert('Not available', 'expo-image-picker is not installed.');
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission required', 'Please allow access to your photo library.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      base64: true,
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.base64) return;
+
+    setUploadStatus('loading');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('tier')
+        .eq('id', userId)
+        .maybeSingle();
+      const tier = (profileData as any)?.tier ?? 'ai_coached';
+
+      const base64Image = result.assets[0].base64 as string;
+      const res = await fetch('https://peak65.vercel.app/api/extract-hr-zones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64Image, sessionLogId: localWorkout.id, tier, userId }),
+      });
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const responseData = await res.json();
+      const zones = responseData.zones ?? responseData;
+
+      await supabase
+        .from('external_workouts')
+        .update({ hr_zones: JSON.stringify(zones) })
+        .eq('id', localWorkout.id);
+
+      setLocalWorkout(prev => ({ ...prev, hr_zones: JSON.stringify(zones) }));
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Something went wrong. Please try again.');
+    } finally {
+      setUploadStatus('idle');
+    }
+  }
+
+  async function handleActivityType(type: string) {
+    const newType = activityType === type ? null : type;
+    setActivityType(newType);
+
+    await supabase
+      .from('external_workouts')
+      .update({ activity_type: newType })
+      .eq('id', localWorkout.id);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      fetch('https://peak65.vercel.app/api/update-athlete-intelligence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: session.user.id }),
+      }).catch(() => {});
+    }
+  }
 
   async function loadPrograms() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -310,9 +481,9 @@ function WorkoutDetailModal({
       day_name:     dayName,
       session_name: sessionName,
       log_field:    'assigned_workout',
-      log_value:    `${workout.duration_minutes} min`,
+      log_value:    `${localWorkout.duration_minutes} min`,
       completed:    true,
-      completed_at: workout.start_time,
+      completed_at: localWorkout.start_time,
     });
     setAssigning(false);
     Alert.alert('Assigned', `Workout assigned to ${sessionName}.`);
@@ -365,7 +536,7 @@ function WorkoutDetailModal({
             <View>
               <Text style={styles.detailOffBadge}>OFF-PROGRAM</Text>
               <Text style={styles.detailTitle}>
-                {WORKOUT_TYPE_LABELS[workout.workout_type] ?? workout.workout_type}
+                {WORKOUT_TYPE_LABELS[localWorkout.workout_type] ?? localWorkout.workout_type}
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.detailCloseBtn}>
@@ -374,58 +545,129 @@ function WorkoutDetailModal({
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={styles.detailDate}>
-              {fmtDate(workout.start_time)} · {fmtTime(workout.start_time)}
+              {fmtDate(localWorkout.start_time)} · {fmtTime(localWorkout.start_time)}
             </Text>
 
             <View style={styles.detailGrid}>
               <View style={styles.detailCell}>
                 <Text style={styles.detailCellLabel}>Duration</Text>
-                <Text style={styles.detailCellVal}>{workout.duration_minutes}m</Text>
+                <Text style={styles.detailCellVal}>{localWorkout.duration_minutes}m</Text>
               </View>
-              {workout.distance_km != null && workout.distance_km > 0 && (
+              {localWorkout.distance_km != null && localWorkout.distance_km > 0 && (
                 <View style={styles.detailCell}>
                   <Text style={styles.detailCellLabel}>Distance</Text>
-                  <Text style={styles.detailCellVal}>{formatDistance(workout.distance_km, imperial)}</Text>
+                  <Text style={styles.detailCellVal}>{formatDistance(localWorkout.distance_km, imperial)}</Text>
                 </View>
               )}
-              {workout.calories != null && (
+              {localWorkout.calories != null && (
                 <View style={styles.detailCell}>
                   <Text style={styles.detailCellLabel}>Calories</Text>
-                  <Text style={styles.detailCellVal}>{workout.calories} kcal</Text>
+                  <Text style={styles.detailCellVal}>{localWorkout.calories} kcal</Text>
                 </View>
               )}
-              {workout.avg_hr != null && (
+              {localWorkout.avg_hr != null && (
                 <View style={styles.detailCell}>
                   <Text style={styles.detailCellLabel}>Avg HR</Text>
-                  <Text style={styles.detailCellVal}>{workout.avg_hr} bpm</Text>
+                  <Text style={styles.detailCellVal}>{localWorkout.avg_hr} bpm</Text>
                 </View>
               )}
-              {workout.max_hr != null && (
+              {localWorkout.max_hr != null && (
                 <View style={styles.detailCell}>
                   <Text style={styles.detailCellLabel}>Max HR</Text>
-                  <Text style={styles.detailCellVal}>{workout.max_hr} bpm</Text>
+                  <Text style={styles.detailCellVal}>{localWorkout.max_hr} bpm</Text>
                 </View>
               )}
-              {workout.pace_per_km != null && (
+              {localWorkout.pace_per_km != null && (
                 <View style={styles.detailCell}>
                   <Text style={styles.detailCellLabel}>Pace</Text>
-                  <Text style={styles.detailCellVal}>{formatPace(workout.pace_per_km, imperial)}</Text>
+                  <Text style={styles.detailCellVal}>{formatPace(localWorkout.pace_per_km, imperial)}</Text>
                 </View>
               )}
-              {workout.effort_zone && workout.effort_zone !== 'unknown' && (
+              {localWorkout.effort_zone && localWorkout.effort_zone !== 'unknown' && (
                 <View style={styles.detailCell}>
                   <Text style={styles.detailCellLabel}>Effort Zone</Text>
-                  <Text style={[styles.detailCellVal, { color: Colors.accent }]}>{workout.effort_zone.toUpperCase()}</Text>
+                  <Text style={[styles.detailCellVal, { color: Colors.accent }]}>{localWorkout.effort_zone.toUpperCase()}</Text>
                 </View>
               )}
               <View style={styles.detailCell}>
                 <Text style={styles.detailCellLabel}>Source</Text>
-                <Text style={styles.detailCellVal}>{workout.source}</Text>
+                <Text style={styles.detailCellVal}>{localWorkout.source}</Text>
               </View>
             </View>
 
+            {/* Activity type classification */}
+            <Text style={[styles.detailSectionLabel, { marginTop: 8 }]}>WHAT WAS THIS SESSION?</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
+              <View style={{ flexDirection: 'row', gap: 8, paddingBottom: 4 }}>
+                {ACTIVITY_TYPES.map(type => {
+                  const selected = activityType === type;
+                  return (
+                    <TouchableOpacity
+                      key={type}
+                      onPress={() => handleActivityType(type)}
+                      style={[styles.activityChip, selected && styles.activityChipSelected]}
+                    >
+                      <Text style={[styles.activityChipText, selected && styles.activityChipTextSelected]}>
+                        {type}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            {/* HR Zones */}
+            {localWorkout.hr_zones ? (() => {
+              try {
+                const zones = JSON.parse(localWorkout.hr_zones) as Record<string, number>;
+                const keys = ['z1', 'z2', 'z3', 'z4', 'z5'];
+                const colors: Record<string, string> = { z1: '#4a9eff', z2: '#4affb8', z3: '#e8ff47', z4: '#ff9944', z5: '#ff4444' };
+                return (
+                  <>
+                    <Text style={[styles.detailSectionLabel, { marginTop: 4 }]}>HR ZONES</Text>
+                    <View style={{ gap: 8, marginBottom: 20 }}>
+                      {keys.map(z => {
+                        const mins = zones[z] ?? 0;
+                        if (mins === 0) return null;
+                        const total = keys.reduce((s, k) => s + (zones[k] ?? 0), 0);
+                        const pct = total > 0 ? Math.round((mins / total) * 100) : 0;
+                        return (
+                          <View key={z} style={{ gap: 4 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={{ color: colors[z], fontSize: 12, fontWeight: '700' }}>{z.toUpperCase()}</Text>
+                              <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>{mins}m · {pct}%</Text>
+                            </View>
+                            <View style={{ height: 4, backgroundColor: '#222', borderRadius: 2 }}>
+                              <View style={{ height: 4, width: `${pct}%` as any, backgroundColor: colors[z], borderRadius: 2 }} />
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </>
+                );
+              } catch { return null; }
+            })() : null}
+
+            {/* HR upload */}
+            {uploadStatus === 'loading' ? (
+              <View style={{ alignItems: 'center', marginTop: 8, gap: 8, marginBottom: 12 }}>
+                <ActivityIndicator color={Colors.accent} />
+                <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Reading your HR data...</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.saveBtn, { marginBottom: 12 }]}
+                onPress={handleUploadHR}
+              >
+                <Text style={styles.saveBtnText}>
+                  {localWorkout.hr_zones ? 'UPDATE HR DATA' : 'UPLOAD HR DATA'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity
-              style={[styles.saveBtn, { marginTop: 20 }]}
+              style={styles.saveBtn}
               onPress={loadPrograms}
             >
               <Text style={styles.saveBtnText}>ASSIGN TO PROGRAM DAY</Text>
@@ -440,6 +682,7 @@ function WorkoutDetailModal({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function HistoryScreen() {
+  const navigation = useNavigation<BottomTabNavigationProp<TabParamList>>();
   const [logs, setLogs]                   = useState<SessionLog[]>([]);
   const [externalWorkouts, setExternalWorkouts] = useState<ExternalWorkout[]>([]);
   const [checkins, setCheckins]           = useState<Checkin[]>([]);
@@ -462,7 +705,25 @@ export default function HistoryScreen() {
   }, []);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    // Apply history_cache immediately for instant render
+    let cacheApplied = false;
+    try {
+      const raw = await AsyncStorage.getItem('history_cache');
+      if (raw && mounted.current) {
+        const c = JSON.parse(raw);
+        if (Date.now() - (c.timestamp ?? 0) < 4 * 60 * 60 * 1000) {
+          if (c.profile) setProfile(c.profile);
+          setLogs(c.logs ?? []);
+          setExternalWorkouts(c.externalWorkouts ?? []);
+          setCheckins(c.checkins ?? []);
+          if (c.profile?.weight_unit) setWeightUnit(c.profile.weight_unit as 'lbs' | 'kg');
+          setLoading(false);
+          cacheApplied = true;
+        }
+      }
+    } catch {}
+    if (!cacheApplied) setLoading(true);
+
     const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current) { setLoading(false); return; }
     if (!session?.user) { setLoading(false); return; }
@@ -647,9 +908,14 @@ export default function HistoryScreen() {
         {/* Sessions + External Workouts — interleaved by date */}
         <Text style={styles.sectionHeading}>SESSIONS</Text>
         {logs.length === 0 && externalWorkouts.length === 0 ? (
-          <Text style={styles.emptyText}>
-            No sessions logged yet. Complete your first workout to start tracking.
-          </Text>
+          <View style={styles.emptyState}>
+            <Feather name="activity" color={Colors.textSecondary} size={32} />
+            <Text style={styles.emptyStateTitle}>No sessions yet</Text>
+            <Text style={styles.emptyStateText}>Complete your first workout to start tracking progress.</Text>
+            <TouchableOpacity style={styles.emptyStateBtn} onPress={() => navigation.navigate('Program' as any)}>
+              <Text style={styles.emptyStateBtnText}>View Program</Text>
+            </TouchableOpacity>
+          </View>
         ) : (() => {
           const items: HistoryItem[] = [
             ...logs.map(l => ({ kind: 'session' as const, data: l })),
@@ -842,4 +1108,22 @@ const styles = StyleSheet.create({
   },
   saveBtnText: { color: Colors.background, fontSize: 16, fontWeight: '700' },
   cancelText: { color: Colors.textSecondary, fontSize: 15, textAlign: 'center' },
+
+  // Empty state
+  emptyState:        { alignItems: 'center', paddingVertical: 40, gap: 8 },
+  emptyStateTitle:   { color: Colors.textPrimary, fontSize: 16, fontWeight: '600', marginTop: 4 },
+  emptyStateText:    { color: Colors.textSecondary, fontSize: 13, textAlign: 'center', paddingHorizontal: 20 },
+  emptyStateBtn:     { marginTop: 8, backgroundColor: Colors.accent, borderRadius: 8, paddingHorizontal: 20, paddingVertical: 10 },
+  emptyStateBtnText: { color: '#080808', fontWeight: '700', fontSize: 14 },
+
+  // Activity type chips
+  activityChip: {
+    borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: Colors.nested, borderWidth: 1, borderColor: Colors.border,
+  },
+  activityChipSelected: {
+    backgroundColor: Colors.accent, borderColor: Colors.accent,
+  },
+  activityChipText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  activityChipTextSelected: { color: Colors.background },
 });

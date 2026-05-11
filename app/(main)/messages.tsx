@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, Platform, StyleSheet, ActivityIndicator, SafeAreaView,
+  KeyboardAvoidingView, Platform, StyleSheet, ActivityIndicator, SafeAreaView, Keyboard,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
 import { MessageSquare } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
+import Tooltip from '../components/Tooltip';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../lib/theme';
 import { UnreadContext } from '../_layout';
@@ -66,6 +68,28 @@ export default function MessagesScreen() {
   const [sending,   setSending]   = useState(false);
   const listRef     = useRef<FlatList<ListItem>>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sendingRef  = useRef(false);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight]   = useState(0);
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+      setKeyboardVisible(true);
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+      setKeyboardVisible(false);
+    });
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+
+  function handleLongPress(msgId: string, body: string) {
+    Clipboard.setStringAsync(body).catch(() => {});
+    setCopiedMsgId(msgId);
+    setTimeout(() => setCopiedMsgId(null), 500);
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -84,6 +108,7 @@ export default function MessagesScreen() {
       .from('coach_athletes')
       .select('coach_id')
       .eq('athlete_id', uid)
+      .eq('status', 'active')
       .maybeSingle();
     if (!ca?.coach_id) { setCoachName('Peak 65 AI'); return; }
     const { data: p } = await supabase
@@ -126,7 +151,7 @@ export default function MessagesScreen() {
         setHasUnread(false);
       }
       intervalRef.current = setInterval(() => {
-        if (userId) fetchMessages(userId, false);
+        if (userId && !sendingRef.current) fetchMessages(userId, false);
       }, 10000);
       return () => {
         if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
@@ -137,14 +162,17 @@ export default function MessagesScreen() {
   async function handleSend() {
     const body = input.trim();
     if (!body || !userId || sending) return;
+    console.log('[messages] handleSend fired, userId:', userId, 'body length:', body.length);
     const tempId = `temp-${Date.now()}`;
     const tempMsg: Msg = { id: tempId, sender_id: userId, body, created_at: new Date().toISOString(), read_at: null };
     setMsgs(prev => [...prev, tempMsg]);
     setInput('');
     setSending(true);
+    sendingRef.current = true;
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
     try {
       const token = await getAccessToken();
+      console.log('[messages] about to fetch send-message, token present:', !!token);
       const res = await fetch(`${API_BASE}/api/coach/send-message`, {
         method: 'POST',
         headers: {
@@ -153,13 +181,34 @@ export default function MessagesScreen() {
         },
         body: JSON.stringify({ athleteId: userId, body }),
       });
+      console.log('[messages] send-message response status:', res.status, 'ok:', res.ok);
       if (!res.ok) throw new Error('send failed');
-      await fetchMessages(userId, false);
-    } catch {
+      if (coachName === 'Peak 65 AI') {
+        fetch(`${API_BASE}/api/ai-reply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, messageBody: body }),
+        }).catch(() => {});
+      }
+      await new Promise<void>(resolve => setTimeout(resolve, 2000));
+      try {
+        const token2 = await getAccessToken();
+        const res2 = await fetch(`${API_BASE}/api/coach/messages?athleteId=${userId}`, {
+          headers: token2 ? { Authorization: `Bearer ${token2}` } : {},
+        });
+        if (res2.ok) {
+          const json2 = await res2.json();
+          const freshList: Msg[] = Array.isArray(json2) ? json2 : (json2.messages ?? []);
+          const found = freshList.some(m => m.body === body && m.sender_id === userId);
+          if (found) setMsgs(freshList);
+        }
+      } catch {}
+    } catch (err) {
       setMsgs(prev => prev.filter(m => m.id !== tempId));
       setInput(body);
     } finally {
       setSending(false);
+      sendingRef.current = false;
     }
   }
 
@@ -193,10 +242,10 @@ export default function MessagesScreen() {
             <View style={s.empty}>
               <MessageSquare color={Colors.textSecondary} size={36} strokeWidth={1.5} />
               <Text style={s.emptyText}>No messages yet</Text>
-              <Text style={s.emptySubText}>Your coach will reach out soon.</Text>
+              <Text style={s.emptySubText}>Your AI coach will send you a message after your first session.</Text>
             </View>
           }
-          renderItem={({ item }) => {
+          renderItem={({ item, index }) => {
             if ('kind' in item) {
               return (
                 <View style={s.dateSep}>
@@ -204,21 +253,35 @@ export default function MessagesScreen() {
                 </View>
               );
             }
-            const mine = item.sender_id === userId;
+            const mine = userId != null && item.sender_id.toString().trim() === userId.toString().trim();
+            const copied = copiedMsgId === item.id;
+            const prevItem = index > 0 ? items[index - 1] : null;
+            const prevMsg = prevItem && !('kind' in prevItem) ? prevItem as Msg : null;
+            const isLast = index === items.length - 1;
+            const showTime = isLast || !prevMsg ||
+              (new Date(item.created_at).getTime() - new Date(prevMsg.created_at).getTime()) > 5 * 60 * 1000;
             return (
               <View style={[s.bubbleRow, mine ? s.bubbleRowRight : s.bubbleRowLeft]}>
-                <View style={[s.bubble, mine ? s.bubbleMine : s.bubbleTheirs]}>
+                <TouchableOpacity
+                  onLongPress={() => handleLongPress(item.id, item.body)}
+                  delayLongPress={300}
+                  activeOpacity={0.85}
+                  style={[s.bubble, mine ? s.bubbleMine : s.bubbleTheirs, copied && s.bubbleCopied]}
+                >
                   <Text style={[s.bubbleText, mine ? s.bubbleTextMine : s.bubbleTextTheirs]}>
                     {item.body}
                   </Text>
-                </View>
-                <Text style={[s.timeText, mine ? s.timeRight : s.timeLeft]}>
-                  {formatTime(item.created_at)}
-                </Text>
+                </TouchableOpacity>
+                {showTime && (
+                  <Text style={[s.timeText, mine ? s.timeRight : s.timeLeft]}>
+                    {formatTime(item.created_at)}
+                  </Text>
+                )}
               </View>
             );
           }}
         />
+        <Tooltip id="messages_coach" text="Ask your AI coach anything about your program, your progress, or what is coming up." arrowDirection="down">
         <View style={s.compose}>
           <TextInput
             style={s.textInput}
@@ -236,6 +299,15 @@ export default function MessagesScreen() {
             <Feather name="send" size={18} color="#080808" />
           </TouchableOpacity>
         </View>
+        </Tooltip>
+        {keyboardVisible && (
+          <TouchableOpacity
+            onPress={() => Keyboard.dismiss()}
+            style={{ position: 'absolute', bottom: keyboardHeight + 8, right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: '#1a1a1a', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Feather name="chevron-down" size={20} color="#8a877f" />
+          </TouchableOpacity>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -256,6 +328,7 @@ const s = StyleSheet.create({
   bubble:            { maxWidth: '75%', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
   bubbleMine:        { backgroundColor: Colors.accent, borderBottomRightRadius: 4 },
   bubbleTheirs:      { backgroundColor: Colors.nested, borderBottomLeftRadius: 4 },
+  bubbleCopied:      { opacity: 0.5 },
   bubbleText:        { fontSize: 13, lineHeight: 18 },
   bubbleTextMine:    { color: '#080808' },
   bubbleTextTheirs:  { color: Colors.textPrimary },

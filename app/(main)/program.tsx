@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
@@ -20,12 +21,25 @@ type TimeTrialProfile = {
   goal: string | null;
   age: number | null;
   preferred_units: string | null;
+  current_training_days: string | null;
+  rest_days: number | null;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function exerciseSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function isSwappableRun(name: string): boolean {
+  if (!/run/i.test(name)) return false;
+  const lower = name.toLowerCase();
+  return !['sled', 'farmers carry', 'sandbag', 'wall ball', 'burpee broad jump'].some(h => lower.includes(h));
+}
+
+function applySwapName(name: string, swap: 'ski' | 'row'): string {
+  const to = swap === 'ski' ? 'Ski Erg' : 'Row Erg';
+  return name.replace(/\brunning\b/gi, to).replace(/\brun\b/gi, to);
 }
 
 function isStrengthBlock(blockName: string): boolean {
@@ -197,7 +211,46 @@ function ExerciseSection({
   session: ProgramSession;
   onStart?: () => void;
 }) {
+  const [swapOverrides,   setSwapOverrides]   = useState<Record<string, 'ski' | 'row'>>({});
+  const [swapSheetVisible, setSwapSheetVisible] = useState(false);
+  const [swapTarget, setSwapTarget] = useState<{ key: string; ex: ExerciseItem } | null>(null);
+  const [preferredSwap, setPreferredSwap] = useState<'ski' | 'row' | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem('preferred_run_swap').then(val => {
+      if (val === 'ski' || val === 'row') setPreferredSwap(val as 'ski' | 'row');
+    });
+    supabase.auth.getSession().then(({ data: { session: s } }) => setUserId(s?.user?.id ?? null));
+  }, []);
+
+  async function applySwap(choice: 'run' | 'ski' | 'row') {
+    if (!swapTarget) return;
+    setSwapSheetVisible(false);
+    if (choice === 'run') {
+      setSwapOverrides(prev => { const n = { ...prev }; delete n[swapTarget.key]; return n; });
+      return;
+    }
+    setPreferredSwap(choice);
+    AsyncStorage.setItem('preferred_run_swap', choice).catch(() => {});
+    setSwapOverrides(prev => ({ ...prev, [swapTarget!.key]: choice }));
+    if (userId) {
+      fetch('https://peak65.vercel.app/api/recalculate-run-swap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          originalExercise: { name: swapTarget.ex.name, reps: swapTarget.ex.reps, sets: swapTarget.ex.sets, coaching_cue: swapTarget.ex.notes || (swapTarget.ex as any).note },
+          swapTo: choice,
+        }),
+      }).catch(() => {});
+    }
+  }
+
+  const currentSwapChoice = swapTarget ? (swapOverrides[swapTarget.key] ?? 'run') : 'run';
+
   return (
+    <>
     <View style={styles.sessionBlock}>
       <View style={styles.sessionHeaderRow}>
         <Text style={styles.sessionName}>{session.name}</Text>
@@ -270,13 +323,27 @@ function ExerciseSection({
               );
             }
             const { ex, origIdx } = group;
+            const exKey = `${bi}-${gi}`;
+            const swapOverride = swapOverrides[exKey];
+            const displayName = swapOverride ? applySwapName(ex.name, swapOverride) : ex.name;
             let detail = '';
             if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
             else if (ex.reps) detail = ex.reps;
             const note = ex.notes || ex.note;
+            const canSwap = isSwappableRun(ex.name);
             return (
               <View key={origIdx} style={styles.exRow}>
-                <Text style={styles.exName}>{ex.name}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={styles.exName}>{displayName}</Text>
+                  {canSwap && (
+                    <TouchableOpacity
+                      style={styles.swapBtn}
+                      onPress={() => { setSwapTarget({ key: exKey, ex }); setSwapSheetVisible(true); }}
+                    >
+                      <Text style={styles.swapBtnTxt}>Swap</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
                 {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
                 {!!note   && <Text style={styles.exDetail}>{note}</Text>}
               </View>
@@ -290,6 +357,42 @@ function ExerciseSection({
         </TouchableOpacity>
       )}
     </View>
+
+    <Modal
+      visible={swapSheetVisible}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setSwapSheetVisible(false)}
+    >
+      <TouchableOpacity
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }}
+        activeOpacity={1}
+        onPress={() => setSwapSheetVisible(false)}
+      />
+      <View style={styles.swapSheet}>
+        <Text style={styles.swapSheetTitle}>SWAP EXERCISE</Text>
+        {(['run', 'ski', 'row'] as const).map(option => {
+          const label = option === 'run' ? 'Run' : option === 'ski' ? 'Ski Erg' : 'Row Erg';
+          const isSelected = option === currentSwapChoice;
+          const isPref = option !== 'run' && option === preferredSwap && !swapTarget?.key;
+          return (
+            <TouchableOpacity
+              key={option}
+              style={[styles.swapOption, isSelected && styles.swapOptionSelected]}
+              onPress={() => applySwap(option)}
+            >
+              <Text style={[styles.swapOptionText, isSelected && styles.swapOptionTextSelected]}>
+                {label}{isPref ? '  ·  preferred' : ''}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+        <TouchableOpacity style={styles.swapCancelBtn} onPress={() => setSwapSheetVisible(false)}>
+          <Text style={styles.swapCancelText}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+    </>
   );
 }
 
@@ -955,16 +1058,23 @@ export default function ProgramScreen() {
   const [activeProgram, setActiveProgram]       = useState<Program | null>(null);
   const [generatingNextWeek, setGeneratingNextWeek] = useState(false);
   const [nextWeekReady, setNextWeekReady]       = useState(false);
+  const [nextWeekBannerDismissed, setNextWeekBannerDismissed] = useState(false);
   const nextWeekTriggeredRef = useRef(false);
 
-  async function checkAndGenerateNextWeek(uid: string, prog: Program, completedDayCount: number) {
+  useEffect(() => {
+    AsyncStorage.getItem('dismissed_next_week_banner').then(val => {
+      if (val === 'true') setNextWeekBannerDismissed(true);
+    });
+  }, []);
+
+  async function checkAndGenerateNextWeek(uid: string, prog: Program, completedDayCount: number, trainingDaysCount: number) {
     if (nextWeekTriggeredRef.current) return;
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
     const days  = prog.program_data?.days ?? [];
     const trainingDays = days.filter(d => d.type !== 'rest' && (d.sessions ?? []).length > 0);
     const isLastDay    = trainingDays.length > 0 && trainingDays[trainingDays.length - 1].day === today;
 
-    if (completedDayCount < 5 && !isLastDay) return;
+    if (completedDayCount < trainingDaysCount && !isLastDay) return;
 
     const nextNum = prog.week_number + 1;
     const { data: existing } = await supabase
@@ -988,7 +1098,57 @@ export default function ProgramScreen() {
   }
 
   const load = useCallback(async () => {
-    setLoading(true);
+    // Apply program_cache immediately for instant render
+    let cacheApplied = false;
+    try {
+      const raw = await AsyncStorage.getItem('program_cache');
+      if (raw) {
+        const c = JSON.parse(raw);
+        if (Date.now() - (c.timestamp ?? 0) < 4 * 60 * 60 * 1000) {
+          const progs = (c.programs ?? []) as Program[];
+          setAllPrograms(progs);
+          if (progs.length > 0) setWeekIdx(progs.length - 1);
+          setTodayName(new Date().toLocaleDateString('en-US', { weekday: 'long' }));
+          let active: Program | null = null;
+          for (const p of progs) {
+            const start = new Date(p.week_start_date + 'T00:00:00');
+            const end   = new Date(start.getTime() + 7 * 86_400_000);
+            if (new Date() >= start && new Date() < end) { active = p; break; }
+          }
+          if (!active && progs.length > 0) active = progs[progs.length - 1];
+          setActiveProgram(active);
+          const nextNum = active?.week_number ? active.week_number + 1 : null;
+          const nextExists = nextNum ? progs.some(p => p.week_number === nextNum) : false;
+          if (nextExists) setNextWeekReady(true);
+          if (c.profile) {
+            setTtProfile({
+              goal:                  c.profile.goal ?? null,
+              age:                   c.profile.age ?? null,
+              preferred_units:       c.profile.preferred_units ?? null,
+              current_training_days: c.profile.current_training_days ?? null,
+              rest_days:             c.profile.rest_days ?? null,
+            });
+          }
+          const cMap: Record<number, Set<string>> = {};
+          const tMap: Record<number, Set<string>> = {};
+          for (const log of c.sessionLogs ?? []) {
+            if (!log.week_number || !log.day_name) continue;
+            if (!cMap[log.week_number]) cMap[log.week_number] = new Set();
+            cMap[log.week_number].add(log.day_name);
+            if (log.log_field) {
+              if (!tMap[log.week_number]) tMap[log.week_number] = new Set();
+              tMap[log.week_number].add(`${log.day_name}:${log.log_field}`);
+            }
+          }
+          setCompletedMap(cMap);
+          setSavedTrialMap(tMap);
+          setLoading(false);
+          cacheApplied = true;
+        }
+      }
+    } catch {}
+    if (!cacheApplied) setLoading(true);
+
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) { setLoading(false); return; }
     setUserId(session.user.id);
@@ -1006,7 +1166,7 @@ export default function ProgramScreen() {
         .not('day_name', 'is', null),
       supabase
         .from('profiles')
-        .select('goal, age, preferred_units')
+        .select('goal, age, preferred_units, current_training_days, rest_days')
         .eq('id', session.user.id)
         .maybeSingle(),
     ]);
@@ -1032,9 +1192,11 @@ export default function ProgramScreen() {
 
     if (profileRes.data) {
       setTtProfile({
-        goal:            (profileRes.data as any).goal ?? null,
-        age:             (profileRes.data as any).age ?? null,
-        preferred_units: (profileRes.data as any).preferred_units ?? null,
+        goal:                  (profileRes.data as any).goal ?? null,
+        age:                   (profileRes.data as any).age ?? null,
+        preferred_units:       (profileRes.data as any).preferred_units ?? null,
+        current_training_days: (profileRes.data as any).current_training_days ?? null,
+        rest_days:             (profileRes.data as any).rest_days ?? null,
       });
     }
 
@@ -1056,7 +1218,11 @@ export default function ProgramScreen() {
     // Check if we should generate next week on load
     if (active && !nextExists && !nextWeekTriggeredRef.current) {
       const activeCompletedCount = (cMap[active.week_number] ?? new Set()).size;
-      checkAndGenerateNextWeek(session.user.id, active, activeCompletedCount);
+      const pd = profileRes.data as any;
+      const trainingDaysCount = pd?.current_training_days != null
+        ? (parseInt(pd.current_training_days, 10) || 5)
+        : pd?.rest_days != null ? Math.max(1, 7 - pd.rest_days) : 5;
+      checkAndGenerateNextWeek(session.user.id, active, activeCompletedCount, trainingDaysCount);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1126,16 +1292,24 @@ export default function ProgramScreen() {
               </View>
             </View>
           )}
-          {nextWeekReady && !generatingNextWeek && activeProgram && allPrograms.some(p => p.week_number === activeProgram.week_number + 1) && (
-            <View style={[styles.nextWeekBanner, styles.nextWeekBannerReady]}>
+          {nextWeekReady && !generatingNextWeek && !nextWeekBannerDismissed && activeProgram && allPrograms.some(p => p.week_number === activeProgram.week_number + 1) && (
+            <TouchableOpacity
+              style={[styles.nextWeekBanner, styles.nextWeekBannerReady]}
+              onPress={() => {
+                AsyncStorage.setItem('dismissed_next_week_banner', 'true');
+                setNextWeekBannerDismissed(true);
+              }}
+              activeOpacity={0.8}
+            >
               <Feather name="calendar" color={Colors.green} size={22} style={{ marginRight: 12 }} />
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={[styles.nextWeekTitle, { color: Colors.green }]}>
                   Week {activeProgram.week_number + 1} is ready.
                 </Text>
                 <Text style={styles.nextWeekSub}>Tap the arrows above to view it.</Text>
               </View>
-            </View>
+              <Feather name="x" color="#8a877f" size={16} />
+            </TouchableOpacity>
           )}
 
           <View style={styles.weekRow}>
@@ -1268,6 +1442,20 @@ const styles = StyleSheet.create({
   exRow:    { borderWidth: 2, borderColor: 'rgba(255,255,255,0.08)', padding: 10, gap: 2 },
   exName:   { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
   exDetail: { color: Colors.textSecondary, fontSize: 13 },
+
+  // Run swap button
+  swapBtn:    { borderWidth: 1, borderColor: '#333', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  swapBtnTxt: { color: '#8a877f', fontSize: 12 },
+
+  // Run swap sheet
+  swapSheet:            { backgroundColor: Colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, gap: 12 },
+  swapSheetTitle:       { color: Colors.textPrimary, fontSize: 13, fontWeight: '700', letterSpacing: 2, marginBottom: 4 },
+  swapOption:           { borderWidth: 1, borderColor: '#333', borderRadius: 12, paddingVertical: 16, paddingHorizontal: 20, alignItems: 'center' as const },
+  swapOptionSelected:   { borderColor: Colors.accent },
+  swapOptionText:       { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  swapOptionTextSelected: { color: Colors.accent },
+  swapCancelBtn:        { alignItems: 'center' as const, paddingVertical: 12, marginTop: 4 },
+  swapCancelText:       { color: Colors.textSecondary, fontSize: 14 },
 
   // Superset grouping — 3px accent at 50% opacity
   supersetGroup: {

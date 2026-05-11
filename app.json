@@ -9,13 +9,22 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#080808"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.peak65-mobile"
+      "bundleIdentifier": "com.anonymous.peak65-mobile",
+      "infoPlist": {
+        "NSSupportsLiveActivities": true,
+        "NSSupportsLiveActivitiesFrequentUpdates": true
+      },
+      "splash": {
+        "image": "./assets/splash.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#080808"
+      }
     },
     "android": {
       "adaptiveIcon": {

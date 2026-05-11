@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -8,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { Footprints, Zap, Target } from 'lucide-react-native';
+import { Zap, Target } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import {
   getTodayHealthData, fetchTodayHealthData, fetchTodayWorkouts,
@@ -26,6 +27,7 @@ import type { Program, ProgramDay, TabParamList, MainStackParamList } from '../_
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
+import Tooltip from '../components/Tooltip';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -206,6 +208,51 @@ function scoreStatusText(score: number): string {
   return 'Rest Zone';
 }
 
+// ─── Tab cache prefetch ───────────────────────────────────────────────────────
+
+async function prefetchTabCaches(uid: string, programs: Program[], profileData: any) {
+  try {
+    const programLogsRes = await supabase
+      .from('session_logs')
+      .select('week_number, day_name, log_field')
+      .eq('user_id', uid)
+      .not('day_name', 'is', null);
+    const profileSubset = profileData ? {
+      goal:                  profileData.goal ?? null,
+      age:                   profileData.age ?? null,
+      preferred_units:       profileData.preferred_units ?? null,
+      current_training_days: profileData.current_training_days ?? null,
+      rest_days:             profileData.rest_days ?? null,
+    } : null;
+    await AsyncStorage.setItem('program_cache', JSON.stringify({
+      timestamp:   Date.now(),
+      programs,
+      sessionLogs: programLogsRes.data ?? [],
+      profile:     profileSubset,
+    }));
+  } catch {}
+
+  try {
+    const [logsRes, extRes, checkinsRes, histProfRes] = await Promise.all([
+      supabase.from('session_logs').select('*').eq('user_id', uid)
+        .order('completed_at', { ascending: false }).limit(200),
+      supabase.from('external_workouts').select('*').eq('user_id', uid)
+        .order('start_time', { ascending: false }).limit(100),
+      supabase.from('checkins').select('*').eq('user_id', uid)
+        .order('created_at', { ascending: true }).limit(20),
+      supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units')
+        .eq('id', uid).maybeSingle(),
+    ]);
+    await AsyncStorage.setItem('history_cache', JSON.stringify({
+      timestamp:        Date.now(),
+      logs:             logsRes.data ?? [],
+      externalWorkouts: extRes.data ?? [],
+      checkins:         checkinsRes.data ?? [],
+      profile:          histProfRes.data ?? null,
+    }));
+  } catch {}
+}
+
 // ─── Daily health cache ───────────────────────────────────────────────────────
 
 async function saveHealthCache(uid: string, rd: WearableHealthData, date: string): Promise<void> {
@@ -299,6 +346,8 @@ export default function HomeScreen() {
   const [pendingCandidates, setPendingCandidates] = useState<CandidateRow[]>([]);
   const [refreshing, setRefreshing]               = useState(false);
   const [todayCompleted, setTodayCompleted]       = useState(false);
+  const [scoreModalVisible, setScoreModalVisible] = useState(false);
+  const [cacheStale, setCacheStale]               = useState(false);
 
   // ── Week 2 generation ────────────────────────────────────────────────────────
 
@@ -343,7 +392,31 @@ export default function HomeScreen() {
 
   const loadData = useCallback(async () => {
     const myId = ++loadIdRef.current;
-    setLoading(true);
+
+    // Apply cached home data immediately so screen renders without a spinner
+    let cacheApplied = false;
+    try {
+      const raw = await AsyncStorage.getItem('home_cache');
+      if (raw && mounted.current && myId === loadIdRef.current) {
+        const c = JSON.parse(raw);
+        const ageMs = Date.now() - (c.timestamp ?? 0);
+        if (ageMs < 4 * 60 * 60 * 1000) {
+          const prog = c.program as Program | null;
+          setProgram(prog);
+          const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+          setTodayDay(prog?.program_data?.days?.find((d: any) => d.day === todayStr) ?? null);
+          setStreak(c.streak ?? 0);
+          setSessionCount(c.sessionCount ?? 0);
+          setTodayCompleted(c.todayCompleted ?? false);
+          setWeek2Exists(c.week2Exists ?? false);
+          setLoading(false);
+          cacheApplied = true;
+        }
+        setCacheStale(ageMs > 4 * 60 * 60 * 1000);
+      }
+    } catch {}
+    if (!cacheApplied) setLoading(true);
+
     const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current || myId !== loadIdRef.current) return;
     if (!session?.user) { setLoading(false); return; }
@@ -356,7 +429,7 @@ export default function HomeScreen() {
       supabase.from('programs').select('*').eq('user_id', uid)
         .order('week_number', { ascending: true }),
       supabase.from('session_logs').select('completed_at, completed')
-        .eq('user_id', uid).order('completed_at', { ascending: false }),
+        .eq('user_id', uid).eq('completed', true).order('completed_at', { ascending: false }),
       supabase.from('profiles')
         .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, whoop_access_token, whoop_refresh_token, garmin_connected, coros_connected, manual_hrv, manual_hrv_date')
         .eq('id', uid)
@@ -421,11 +494,6 @@ export default function HomeScreen() {
     setPreferredUnits(profileData?.preferred_units ?? null);
 
     // ── [DIAG] Profile token dump ──────────────────────────────────────────────
-    console.log('[DIAG] profileRes.error:', profileRes.error?.message ?? null);
-    console.log('[DIAG] profileData is null:', profileData === null);
-    console.log('[DIAG] whoop_connected:', profileData?.whoop_connected);
-    console.log('[DIAG] whoop_access_token present:', !!(profileData as any)?.whoop_access_token, '| length:', ((profileData as any)?.whoop_access_token as string | null)?.length ?? 0);
-    console.log('[DIAG] whoop_refresh_token present:', !!(profileData as any)?.whoop_refresh_token, '| length:', ((profileData as any)?.whoop_refresh_token as string | null)?.length ?? 0);
     // ──────────────────────────────────────────────────────────────────────────
 
     const isElite = isEliteHyroxProfile(profileData?.goal ?? null, profileData?.goal_time ?? null);
@@ -439,9 +507,6 @@ export default function HomeScreen() {
       profileData?.whoop_connected === true ||
       !!(profileData?.whoop_access_token || profileData?.whoop_refresh_token);
 
-    console.log('[DIAG] isHealthConnected:', isHealthConnected, '| isWhoopConnected:', isWhoopConnected);
-    console.log('[DIAG] fetch path will be:', isHealthConnected ? 'Apple Health (+ Whoop if connected)' : isWhoopConnected ? 'Whoop-only' : 'NONE — no wearable');
-
     console.log('[health] wearable state from profile:', {
       wearable_connected: profileData?.wearable_connected,
       wearable_type:      profileData?.wearable_type,
@@ -454,6 +519,20 @@ export default function HomeScreen() {
     setHealthConnected(isHealthConnected);
 
     setLoading(false);
+    setCacheStale(false);
+
+    // Persist home data to AsyncStorage for instant render on next open
+    AsyncStorage.setItem('home_cache', JSON.stringify({
+      timestamp:      Date.now(),
+      program:        prog,
+      streak:         newStreak,
+      sessionCount:   logs.length,
+      todayCompleted: hasCompletedToday,
+      week2Exists:    progs.some(p => p.week_number === 2),
+    })).catch(() => {});
+
+    // Background prefetch data for Program and History tabs
+    prefetchTabCaches(uid, progs, profileRes.data).catch(() => {});
 
     // Apply cached health data immediately so metrics display before the background fetch.
     const cacheRow = cacheRes.data as Record<string, any> | null;
@@ -484,7 +563,6 @@ export default function HomeScreen() {
       .catch(e => console.log('[home] candidates error:', e));
 
     if (isHealthConnected) {
-      console.log('[DIAG] entering Apple Health path (isWhoopConnected also:', isWhoopConnected, ')');
       getTodayHealthData()
         .then(async (data) => {
           if (!mounted.current || myId !== loadIdRef.current) return;
@@ -604,25 +682,16 @@ export default function HomeScreen() {
         .catch(e => { console.log('[home] readiness fetch error:', e); setFetchingFresh(false); });
 
     } else if (isWhoopConnected) {
-      console.log('[DIAG] entering Whoop-only path — uid:', uid);
       console.log('[health] Apple Health not connected — running Whoop-only path');
       (async () => {
-        console.log('[DIAG] Whoop-only IIFE started — myId:', myId, 'current:', loadIdRef.current, 'mounted:', mounted.current);
         console.log('[whoop-debug] IIFE started — myId:', myId, 'current:', loadIdRef.current, 'mounted:', mounted.current);
         try {
           if (!mounted.current || myId !== loadIdRef.current) {
-            console.log('[DIAG] BAILED before Whoop fetch — loadId mismatch or unmounted');
             console.log('[whoop-debug] BAILED before fetch — myId:', myId, 'current:', loadIdRef.current);
             return;
           }
-          console.log('[DIAG] calling fetchAllWhoopData...');
           console.log('[whoop-debug] calling fetchAllWhoopData (Whoop-only path)...');
           const whoopData = await fetchAllWhoopData(uid);
-          console.log('[DIAG] fetchAllWhoopData returned');
-          console.log('[DIAG] raw recovery:', JSON.stringify(whoopData.recovery));
-          console.log('[DIAG] raw sleep:', JSON.stringify(whoopData.sleep));
-          console.log('[DIAG] raw workouts (count:', whoopData.workouts.length, '):', JSON.stringify(whoopData.workouts).substring(0, 500));
-          console.log('[DIAG] raw cycle:', JSON.stringify(whoopData.cycle));
           console.log('[whoop-debug] fetchAllWhoopData returned — myId:', myId, 'current:', loadIdRef.current, 'mounted:', mounted.current);
           console.log('[whoop-debug] recovery:', JSON.stringify(whoopData.recovery));
           console.log('[whoop-debug] sleep:', JSON.stringify(whoopData.sleep));
@@ -675,18 +744,47 @@ export default function HomeScreen() {
           const rhr   = rd.restingHR?.value  ?? null;
           console.log('[home] Whoop-only readiness row final values:', { hrv, sleep, rhr });
         } catch (e) {
-          console.log('[DIAG] EXCEPTION in Whoop-only IIFE:', String(e));
           console.log('[whoop-debug] EXCEPTION in Whoop-only IIFE:', String(e));
           setFetchingFresh(false);
         }
       })();
     } else {
-      console.log('[DIAG] NO wearable path taken — isHealthConnected:', isHealthConnected, '| isWhoopConnected:', isWhoopConnected, '— metrics will be blank');
       console.log('[health] no wearable connected — all metrics will show "--"');
     }
 
     if (prog?.week_number === 1 && !week2Exists && !week2TriggeredRef.current) {
       checkAndTriggerWeek2(uid, prog);
+    }
+
+    // ── Missed session check (once per day) ──────────────────────────────────
+    const todayDateKey = new Date().toLocaleDateString('en-CA');
+    const lastMissedCheck = await AsyncStorage.getItem('last_missed_check');
+    if (lastMissedCheck !== todayDateKey && prog) {
+      await AsyncStorage.setItem('last_missed_check', todayDateKey);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayName = yesterday.toLocaleDateString('en-US', { weekday: 'long' });
+      const yesterdayStr  = yesterday.toLocaleDateString('en-CA');
+      const yesterdayDay  = prog.program_data?.days?.find(d => d.day === yesterdayName);
+      const isYesterdayWorkout =
+        yesterdayDay &&
+        yesterdayDay.type !== 'rest' &&
+        (yesterdayDay.sessions ?? []).length > 0;
+      if (isYesterdayWorkout) {
+        const { count: yesterdayCount } = await supabase
+          .from('session_logs')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', uid)
+          .gte('completed_at', `${yesterdayStr}T00:00:00`)
+          .lt('completed_at', `${todayDateKey}T00:00:00`);
+        if ((yesterdayCount ?? 0) === 0) {
+          fetch('https://peak65.vercel.app/api/ai-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: uid, triggerType: 'missed_session' }),
+          }).catch(() => {});
+        }
+      }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -781,16 +879,40 @@ export default function HomeScreen() {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerLogo}>Peak 65</Text>
-          <Text style={styles.headerDate}>{todayLabel()}</Text>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={styles.headerDate}>{todayLabel()}</Text>
+            {cacheStale && <Text style={{ color: Colors.textSecondary, fontSize: 10, marginTop: 1 }}>Refreshing...</Text>}
+          </View>
         </View>
 
         {/* Peak Score card */}
+        <Modal visible={scoreModalVisible} transparent animationType="fade">
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}
+            activeOpacity={1}
+            onPress={() => setScoreModalVisible(false)}
+          >
+            <View style={{ backgroundColor: Colors.card, borderRadius: 16, padding: 24 }}>
+              <Text style={{ color: Colors.accent, fontSize: 20, fontWeight: '700', marginBottom: 12 }}>Your Peak Score</Text>
+              <Text style={{ color: Colors.textSecondary, fontSize: 14, lineHeight: 22 }}>
+                Your Peak Score is a daily readiness number from 0–100 that blends your HRV, resting heart rate, and sleep quality into a single signal.{'\n\n'}A score above 75 means your body is primed — go hard today. Between 50 and 75, train as planned. Below 50, prioritize recovery: reduce intensity, keep it easy.{'\n\n'}The score becomes more accurate over 14 days as it calibrates to your personal baseline.
+              </Text>
+              <TouchableOpacity
+                onPress={() => setScoreModalVisible(false)}
+                style={{ backgroundColor: Colors.accent, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 20 }}
+              >
+                <Text style={{ color: '#080808', fontWeight: '700', fontSize: 15 }}>Got it</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
         {(() => {
           const borderColor = healthConnected && peakScore
             ? scoreColor(peakScore.score)
             : Colors.card;
           return (
-            <View style={[styles.scoreCard, { borderColor }]}>
+            <Tooltip id="peak_score" text="Your Peak Score updates every morning. Tap it to learn what it means." arrowDirection="up">
+            <TouchableOpacity activeOpacity={0.8} onPress={() => setScoreModalVisible(true)} style={[styles.scoreCard, { borderColor }]}>
               <Text style={styles.scoreCardLabel}>PEAK SCORE</Text>
               {healthConnected && peakScore ? (
                 <>
@@ -821,7 +943,8 @@ export default function HomeScreen() {
                   <Text style={styles.scoreWearable}>Connect your wearable for live scores</Text>
                 </>
               )}
-            </View>
+            </TouchableOpacity>
+            </Tooltip>
           );
         })()}
 
@@ -842,23 +965,8 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Stats row — Steps | Active | Total */}
+        {/* Stats row — Active | Total */}
         <View style={styles.row}>
-          {/* Steps */}
-          <View style={[styles.statCard, { flex: 1 }]}>
-            <Footprints color={Colors.textSecondary} size={20} strokeWidth={1.5} />
-            {fetchingFresh && !readinessData && hasWearable ? (
-              <ShimmerBox width={64} height={26} />
-            ) : (
-              <Text style={styles.statVal}>
-                {hasWearable && (readinessData?.steps?.value ?? healthData?.steps) != null
-                  ? (readinessData?.steps?.value ?? healthData!.steps!).toLocaleString('en-US')
-                  : '--'}
-              </Text>
-            )}
-            <Text style={styles.statLabel}>Steps</Text>
-            {!hasWearable && <Text style={styles.statSub}>Connect Health</Text>}
-          </View>
           {/* Active Calories */}
           <View style={[styles.statCard, { flex: 1 }]}>
             <Zap color={Colors.textSecondary} size={20} strokeWidth={1.5} />

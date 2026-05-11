@@ -9,17 +9,22 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Modal, Vibration, Alert, KeyboardAvoidingView,
-  Platform, StatusBar, ActivityIndicator,
+  Platform, StatusBar, ActivityIndicator, AppState, Animated,
 } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import * as Haptics from 'expo-haptics';
+import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainStackParamList, ProgramSession, SessionBlock, ExerciseItem } from '../_layout';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../lib/supabase';
 import { Feather } from '@expo/vector-icons';
 import { Colors, Fonts } from '../../lib/theme';
+import Tooltip from '../components/Tooltip';
+import { startLiveActivity as laStart, updateLiveActivity as laUpdate, endLiveActivity as laEnd } from '../../modules/live-activity';
 
 // Optional keep-awake — requires: npx expo install expo-keep-awake
 function useKeepAwake() {
@@ -122,6 +127,35 @@ async function playBeep(freqHz: number, durationMs: number): Promise<void> {
   } catch {}
 }
 
+function announceSpeech(text: string): void {
+  try {
+    Speech.stop();
+    Speech.speak(text, { rate: 0.9 });
+  } catch {}
+}
+
+function buildSpeechAnnouncement(step: Step): string | null {
+  switch (step.kind) {
+    case 'run_interval': {
+      const pace = extractPaceTarget(step.exercise);
+      let text = `Interval ${step.intervalNum} of ${step.totalIntervals}. ${step.exercise.reps ?? ''}`;
+      if (pace) text += `. Target pace: ${pace}`;
+      return text;
+    }
+    case 'metcon':
+      return `${step.format.toUpperCase()}. ${step.block.block_name}`;
+    case 'z2_cardio':
+      return `Zone 2 cardio. ${step.session.name}`;
+    case 'generic': {
+      const dur = parseDurationSecs(String(step.exercise.reps ?? ''));
+      if (!dur) return null;
+      return `${step.exercise.name}. ${step.exercise.reps}`;
+    }
+    default:
+      return null;
+  }
+}
+
 const BODYWEIGHT_NAMES = [
   'burpee', 'push-up', 'push up', 'pushup', 'pull-up', 'pull up', 'pullup',
   'chin-up', 'chin up', 'chinup', 'lunge', 'squat', 'sit-up', 'sit up', 'situp',
@@ -139,8 +173,11 @@ function isBodyweightExercise(name: string): boolean {
 function parseDurationSecs(reps: string | undefined): number | null {
   if (!reps) return null;
   const s = reps.toLowerCase().trim();
+  if (/^\d+\.?\d*$/.test(s)) return parseFloat(s);
   const colon = s.match(/^(\d+):(\d+)$/);
   if (colon) return parseInt(colon[1]) * 60 + parseInt(colon[2]);
+  const rangeMins = s.match(/^(\d+)\s*[-–]\s*\d+\s*min/);
+  if (rangeMins) return parseInt(rangeMins[1]) * 60;
   const mins = s.match(/(\d+)\s*min/);
   const secs = s.match(/(\d+)\s*s(?:ec)?/);
   if (!mins && !secs) return null;
@@ -204,6 +241,22 @@ function extractPaceTarget(exercise: ExerciseItem): string | null {
   return m ? m[1] ?? m[0] ?? null : null;
 }
 
+function isDistanceBasedExercise(name: string): boolean {
+  const lower = name.toLowerCase();
+  return ['sled push', 'sled pull', 'burpee broad jump', 'farmers carry', 'sandbag lunge', 'ski erg', 'row erg', 'wall ball']
+    .some(term => lower.includes(term));
+}
+
+function isWarmupStep(step: Step): boolean {
+  if (step.kind === 'generic') return /warm/i.test(step.blockName);
+  return false;
+}
+
+function isCooldownStep(step: Step): boolean {
+  if (step.kind === 'generic') return /cool/i.test(step.blockName);
+  return false;
+}
+
 function buildSteps(session: ProgramSession): Step[] {
   const steps: Step[] = [];
 
@@ -242,25 +295,56 @@ function buildSteps(session: ProgramSession): Step[] {
     let blockHadStrength = false;
 
     const strengthExes = exercises.filter(e => isStrengthExercise(e, block.block_name));
-    const isCircuit = /circuit|superset|complex/i.test(block.block_name) && strengthExes.length > 1;
+    const hasCircuitId = exercises.some(e => e.circuit_id != null);
+    const hasSupersetId = exercises.some(e => e.superset_id != null);
+    const isCircuit = hasCircuitId || hasSupersetId || (/circuit|superset|complex/i.test(block.block_name) && strengthExes.length > 1);
 
     if (isCircuit) {
-      // Circuit: interleave all exercises per round before repeating
       if (blockHadRun || prevKind === 'run') {
         steps.push({ kind: 'transition', from: 'Run', to: 'Strength', seconds: 90 });
       }
-      const rounds = Math.max(...strengthExes.map(e => e.sets ?? 1));
-      const circuitRestSecs = parseRestSeconds(strengthExes[0]?.circuit_rest ?? strengthExes[0]?.rest, 60);
-      for (let round = 0; round < rounds; round++) {
-        for (const ex of strengthExes) {
-          if (round < (ex.sets ?? 1)) {
-            steps.push({ kind: 'strength', exercise: ex, setNum: round + 1, totalSets: ex.sets ?? 1, blockName: block.block_name });
+
+      // Group exercises by circuit_id or superset_id
+      // Exercises sharing the same id go together and interleave rounds
+      // Exercises with no id are solo — treated as their own group
+      const groups: ExerciseItem[][] = [];
+      const seen = new Map<string, ExerciseItem[]>();
+
+      for (const ex of exercises) {
+        const groupKey = ex.circuit_id ?? ex.superset_id ?? null;
+        if (groupKey) {
+          if (!seen.has(groupKey)) {
+            const g: ExerciseItem[] = [];
+            seen.set(groupKey, g);
+            groups.push(g);
           }
-        }
-        if (round < rounds - 1) {
-          steps.push({ kind: 'rest', seconds: circuitRestSecs, label: 'Circuit rest' });
+          seen.get(groupKey)!.push(ex);
+        } else {
+          groups.push([ex]);
         }
       }
+
+      // For each group, run rounds interleaved — all exercises in the group
+      // complete before rest fires. Solo exercises rest after each set.
+      for (const group of groups) {
+        const rounds = Math.max(...group.map(e => e.sets ?? 1));
+        const restLabel = group.length > 1 ? 'Circuit rest' : (group[0]?.rest ?? 'Rest');
+        const restSecs = parseRestSeconds(
+          group[0]?.circuit_rest ?? group[0]?.rest,
+          group.length > 1 ? 60 : 90
+        );
+        for (let round = 0; round < rounds; round++) {
+          for (const ex of group) {
+            if (round < (ex.sets ?? 1)) {
+              steps.push({ kind: 'strength', exercise: ex, setNum: round + 1, totalSets: ex.sets ?? 1, blockName: block.block_name });
+            }
+          }
+          if (round < rounds - 1) {
+            steps.push({ kind: 'rest', seconds: restSecs, label: restLabel });
+          }
+        }
+      }
+
       blockHadStrength = true;
     } else {
       for (const ex of exercises) {
@@ -408,6 +492,32 @@ const sw = StyleSheet.create({
   cancelText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '700', letterSpacing: 1 },
 });
 
+// ─── Live Activity helpers ────────────────────────────────────────────────────
+
+function laGetExerciseName(step: Step): string {
+  if ('exercise' in step) return (step as any).exercise.name;
+  if (step.kind === 'rest') return 'REST';
+  if (step.kind === 'transition') return `${step.from} → ${step.to}`;
+  if (step.kind === 'metcon') return step.block.block_name;
+  if (step.kind === 'z2_cardio') return step.session.name;
+  return '';
+}
+
+function laGetTargetDisplay(step: Step): string {
+  if ('exercise' in step) return String((step as any).exercise.reps ?? '');
+  if (step.kind === 'rest') {
+    const m = Math.floor(step.seconds / 60);
+    const s = step.seconds % 60;
+    return m > 0 ? `${m}:${String(s).padStart(2, '0')} rest` : `${s}s rest`;
+  }
+  return '';
+}
+
+function laGetPace(step: Step): string {
+  if ('exercise' in step) return extractPaceTarget((step as any).exercise) ?? '';
+  return '';
+}
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function LiveWorkoutScreen() {
@@ -442,10 +552,11 @@ export default function LiveWorkoutScreen() {
   const [hrZoneStep,  setHrZoneStep]  = useState<'none' | 'prompt' | 'uploading' | 'done'>('none');
 
   // Metcon state
-  const [metconRounds,   setMetconRounds]   = useState(0);
-  const [metconElapsed,  setMetconElapsed]  = useState(0);
-  const [metconRunning,  setMetconRunning]  = useState(false);
-  const [metconComplete, setMetconComplete] = useState(false);
+  const [metconRounds,      setMetconRounds]      = useState(0);
+  const [metconElapsed,     setMetconElapsed]     = useState(0);
+  const [metconRunning,     setMetconRunning]     = useState(false);
+  const [metconComplete,    setMetconComplete]    = useState(false);
+  const [metconFinalRounds, setMetconFinalRounds] = useState(0);
   const metconTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Z2 cardio state
@@ -454,38 +565,161 @@ export default function LiveWorkoutScreen() {
 
   const afterRest = useRef<() => void>(() => {});
 
+  // Background timer tracking (FIX 3)
+  const startTimeRef          = useRef(0);
+  const currentTimerDuration  = useRef(0);
+  const nextExerciseNameRef   = useRef('');
+  const phaseRef              = useRef<'active' | 'rest' | 'transition' | 'complete'>('active');
+  const onRestDoneRef         = useRef<() => void>(() => {});
+
+  // Live Activity per-second refs
+  const elapsedRef            = useRef(0);
+  const stepStartElapsed      = useRef(0);
+  const currentStepDuration   = useRef(0);
+  const laStepNameRef         = useRef('');
+  const laStepTargetRef       = useRef('');
+  const laNextNameRef         = useRef('');
+  const laNextTargetRef       = useRef('');
+  const laStepIndexRef        = useRef(0);
+
+  // Per-step elapsed timer for Hyrox tap zone (FIX 5)
+  const [stepElapsed, setStepElapsed] = useState(0);
+
+  // Exit modal (FIX 6)
+  const [exitModalVisible, setExitModalVisible] = useState(false);
+
+  // Live Activity
+  const liveActivityStarted = useRef(false);
+
+  async function startLiveActivity() {
+    if (liveActivityStarted.current) return;
+    const cur = steps[0];
+    const nxt = steps[1];
+    const curDur = cur && 'exercise' in cur ? (parseDurationSecs(String((cur as any).exercise?.reps ?? '')) ?? 0) : 0;
+    laStepNameRef.current    = cur ? laGetExerciseName(cur) : '';
+    laStepTargetRef.current  = cur ? laGetTargetDisplay(cur) : '';
+    laNextNameRef.current    = nxt ? laGetExerciseName(nxt) : '';
+    laNextTargetRef.current  = nxt ? laGetTargetDisplay(nxt) : '';
+    laStepIndexRef.current   = 1;
+    currentStepDuration.current = curDur;
+    stepStartElapsed.current = 0;
+    await laStart(session.name, {
+      exerciseName: laStepNameRef.current,
+      targetDisplay: laStepTargetRef.current,
+      remainingSecs: curDur,
+      nextExerciseName: laNextNameRef.current,
+      nextTargetDisplay: laNextTargetRef.current,
+      elapsedSecs: 0,
+      stationIndex: 1,
+      totalStations: totalSteps,
+      currentPace: cur ? laGetPace(cur) : '',
+      isRest: false,
+      timerEndDate: curDur > 0 ? Date.now() + curDur * 1000 : undefined,
+    });
+    liveActivityStarted.current = true;
+  }
+
+  function pushLiveActivityUpdate(state: {
+    exerciseName: string; targetDisplay: string; remainingSecs: number;
+    nextExerciseName: string; nextTargetDisplay: string; elapsedSecs: number;
+    stationIndex: number; totalStations: number; currentPace: string; isRest: boolean;
+    timerEndDate?: number;
+  }) {
+    if (!liveActivityStarted.current) return;
+    laUpdate(state).catch(() => {});
+  }
+
+  function endLiveActivity() {
+    if (!liveActivityStarted.current) return;
+    laEnd().catch(() => {});
+    liveActivityStarted.current = false;
+  }
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setUserId(session?.user?.id ?? null));
   }, []);
 
+  // Start Live Activity once userId resolves; end it when workout completes
+  useEffect(() => { if (userId) startLiveActivity(); }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (phase === 'complete') endLiveActivity(); }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep phaseRef and onRestDoneRef current for use inside AppState listener
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { onRestDoneRef.current = onRestDone; }, [onRestDone]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Per-step elapsed counter (resets on each new step)
+  useEffect(() => {
+    setStepElapsed(0);
+    const id = setInterval(() => setStepElapsed(e => e + 1), 1000);
+    return () => clearInterval(id);
+  }, [stepIdx]);
+
+  // AppState background/foreground handler for timer notifications (FIX 3)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        if (startTimeRef.current > 0 && currentTimerDuration.current > 0) {
+          const elapsed = (Date.now() - startTimeRef.current) / 1000;
+          const remaining = currentTimerDuration.current - elapsed;
+          if (remaining > 0) {
+            try {
+              await Notifications.scheduleNotificationAsync({
+                content: {
+                  title: 'Peak 65',
+                  body: `Time's up — ${nextExerciseNameRef.current}. Go.`,
+                },
+                trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: Math.ceil(remaining), repeats: false },
+              });
+            } catch {}
+          }
+        }
+      } else if (nextAppState === 'active') {
+        try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch {}
+        if (startTimeRef.current > 0 && currentTimerDuration.current > 0) {
+          const elapsed = (Date.now() - startTimeRef.current) / 1000;
+          if (elapsed >= currentTimerDuration.current) {
+            if (phaseRef.current === 'rest' || phaseRef.current === 'transition') {
+              onRestDoneRef.current();
+            }
+          } else {
+            const remaining = Math.max(1, Math.ceil(currentTimerDuration.current - elapsed));
+            if (phaseRef.current === 'rest') setRestSecs(remaining);
+            else if (phaseRef.current === 'transition') setTransSecs(remaining);
+          }
+        }
+      }
+    });
+    return () => sub.remove();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Global elapsed timer
   useEffect(() => {
-    const id = setInterval(() => setElapsed(e => e + 1), 1000);
+    const id = setInterval(() => setElapsed(e => { elapsedRef.current = e + 1; return e + 1; }), 1000);
     return () => clearInterval(id);
   }, []);
 
-  // Back-button confirmation
+  // Per-second Live Activity update for countdown
   useEffect(() => {
-    const unsub = navigation.addListener('beforeRemove', e => {
-      if (phase === 'complete') return;
-      e.preventDefault();
-      Alert.alert(
-        'Exit workout?',
-        'Your logged sets will be saved.',
-        [
-          { text: 'Stay', style: 'cancel' },
-          {
-            text: 'Exit & Save',
-            onPress: async () => {
-              await saveSession(false);
-              navigation.dispatch(e.data.action);
-            },
-          },
-        ],
-      );
-    });
-    return unsub;
-  }, [navigation, phase, loggedSets, elapsed, rpe]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!liveActivityStarted.current) return;
+    if (phaseRef.current !== 'active') return;
+    const dur = currentStepDuration.current;
+    if (dur <= 0) return;
+    const stepElapsedSecs = elapsedRef.current - stepStartElapsed.current;
+    const remaining = Math.max(0, dur - stepElapsedSecs);
+    laUpdate({
+      exerciseName: laStepNameRef.current,
+      targetDisplay: laStepTargetRef.current,
+      remainingSecs: remaining,
+      nextExerciseName: laNextNameRef.current,
+      nextTargetDisplay: laNextTargetRef.current,
+      elapsedSecs: elapsedRef.current,
+      stationIndex: laStepIndexRef.current,
+      totalStations: totalSteps,
+      currentPace: '',
+      isRest: false,
+      timerEndDate: remaining > 0 ? Date.now() + remaining * 1000 : undefined,
+    }).catch(() => {});
+  }, [elapsed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Start metcon timer when metcon step is reached
   useEffect(() => {
@@ -517,7 +751,7 @@ export default function LiveWorkoutScreen() {
     return () => { if (z2TimerRef.current) clearInterval(z2TimerRef.current); };
   }, [stepIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function advance() {
+  const advance = useCallback(() => {
     const next = stepIdx + 1;
     if (next >= totalSteps) { setPhase('complete'); }
     else {
@@ -530,38 +764,115 @@ export default function LiveWorkoutScreen() {
         setRestSecs(s.seconds);
         setRestLabel(s.label);
         setPhase('rest');
+        startTimeRef.current = Date.now();
+        currentTimerDuration.current = s.seconds;
+        const afterStep = steps[next + 1];
+        nextExerciseNameRef.current = afterStep && 'exercise' in afterStep ? (afterStep as any).exercise.name : 'Next exercise';
+        const mins = Math.floor(s.seconds / 60);
+        const secs = s.seconds % 60;
+        const durText = mins > 0 ? `${mins} minute${mins > 1 ? 's' : ''}` : `${secs} seconds`;
+        announceSpeech(`Rest. ${durText}.`);
         afterRest.current = () => {
           const afterIdx = next + 1;
           if (afterIdx >= totalSteps) { setPhase('complete'); }
-          else { setStepIdx(afterIdx); setPhase('active'); }
+          else {
+            const afterStep = steps[afterIdx];
+            setStepIdx(afterIdx);
+            setPhase('active');
+            const speech = buildSpeechAnnouncement(afterStep);
+            if (speech) announceSpeech(speech);
+          }
         };
+        pushLiveActivityUpdate({
+          exerciseName: 'REST', targetDisplay: '',
+          remainingSecs: s.seconds,
+          nextExerciseName: afterStep ? laGetExerciseName(afterStep) : 'Complete',
+          nextTargetDisplay: afterStep ? laGetTargetDisplay(afterStep) : '',
+          elapsedSecs: elapsed, stationIndex: next + 1, totalStations: totalSteps,
+          currentPace: '', isRest: true,
+        });
       } else if (nextStep?.kind === 'transition') {
         const s = nextStep as Extract<Step, { kind: 'transition' }>;
         setTransFrom(s.from); setTransTo(s.to); setTransSecs(s.seconds);
         setPhase('transition');
+        startTimeRef.current = Date.now();
+        currentTimerDuration.current = s.seconds;
+        const afterTransStep = steps[next + 1];
+        nextExerciseNameRef.current = afterTransStep && 'exercise' in afterTransStep ? (afterTransStep as any).exercise.name : s.to;
         afterRest.current = () => {
           const afterIdx = next + 1;
           if (afterIdx >= totalSteps) { setPhase('complete'); }
-          else { setStepIdx(afterIdx); setPhase('active'); }
+          else {
+            const afterStep = steps[afterIdx];
+            setStepIdx(afterIdx);
+            setPhase('active');
+            const speech = buildSpeechAnnouncement(afterStep);
+            if (speech) announceSpeech(speech);
+          }
         };
+        pushLiveActivityUpdate({
+          exerciseName: `${s.from} → ${s.to}`, targetDisplay: '',
+          remainingSecs: s.seconds,
+          nextExerciseName: afterTransStep ? laGetExerciseName(afterTransStep) : 'Complete',
+          nextTargetDisplay: afterTransStep ? laGetTargetDisplay(afterTransStep) : '',
+          elapsedSecs: elapsed, stationIndex: next + 1, totalStations: totalSteps,
+          currentPace: '', isRest: true,
+        });
       } else {
         setPhase('active');
+        const speech = buildSpeechAnnouncement(nextStep);
+        if (speech) announceSpeech(speech);
+        const laNext = steps[next + 1];
+        const nextDur = 'exercise' in nextStep ? (parseDurationSecs(String((nextStep as any).exercise?.reps ?? '')) ?? 0) : 0;
+        laStepNameRef.current    = laGetExerciseName(nextStep);
+        laStepTargetRef.current  = laGetTargetDisplay(nextStep);
+        laNextNameRef.current    = laNext ? laGetExerciseName(laNext) : 'Complete';
+        laNextTargetRef.current  = laNext ? laGetTargetDisplay(laNext) : '';
+        laStepIndexRef.current   = next + 1;
+        currentStepDuration.current = nextDur;
+        stepStartElapsed.current = elapsedRef.current;
+        pushLiveActivityUpdate({
+          exerciseName: laStepNameRef.current, targetDisplay: laStepTargetRef.current,
+          remainingSecs: nextDur,
+          nextExerciseName: laNextNameRef.current,
+          nextTargetDisplay: laNextTargetRef.current,
+          elapsedSecs: elapsedRef.current, stationIndex: next + 1, totalStations: totalSteps,
+          currentPace: laGetPace(nextStep), isRest: false,
+          timerEndDate: nextDur > 0 ? Date.now() + nextDur * 1000 : undefined,
+        });
       }
     }
-  }
+  }, [steps, stepIdx, totalSteps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function triggerRest(secs: number, label: string) {
     setRestSecs(secs);
     setRestLabel(label);
     setPhase('rest');
+    startTimeRef.current = Date.now();
+    currentTimerDuration.current = secs;
+    const nextStep = steps[stepIdx + 1];
+    nextExerciseNameRef.current = nextStep && 'exercise' in nextStep ? (nextStep as any).exercise.name : 'Next exercise';
     afterRest.current = () => {
+      startTimeRef.current = 0;
+      Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
       const next = stepIdx + 1;
       if (next >= totalSteps) { setPhase('complete'); }
       else { setStepIdx(next); setPhase('active'); setWeightInput(''); setRepsInput(''); }
     };
+    const trNext = steps[stepIdx + 1];
+    pushLiveActivityUpdate({
+      exerciseName: 'REST', targetDisplay: '',
+      remainingSecs: secs,
+      nextExerciseName: trNext ? laGetExerciseName(trNext) : 'Complete',
+      nextTargetDisplay: trNext ? laGetTargetDisplay(trNext) : '',
+      elapsedSecs: elapsed, stationIndex: stepIdx + 1, totalStations: totalSteps,
+      currentPace: '', isRest: true,
+    });
   }
 
   const onRestDone = useCallback(() => {
+    startTimeRef.current = 0;
+    Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
     afterRest.current();
   }, []);
 
@@ -589,7 +900,9 @@ export default function LiveWorkoutScreen() {
         week_number:  weekNumber,
         session_name: session.name,
         log_field:    'live_workout',
-        log_value:    `${Math.round(elapsed / 60)} min`,
+        log_value:    metconFinalRounds > 0
+          ? `${Math.round(elapsed / 60)} min · ${metconFinalRounds} rds`
+          : `${Math.round(elapsed / 60)} min`,
         duration:     elapsed,
         weights_used: loggedSets.length > 0 ? JSON.stringify(loggedSets) : null,
         rpe:          full ? rpe : null,
@@ -617,8 +930,78 @@ export default function LiveWorkoutScreen() {
     );
   }
 
+  async function skipWarmup() {
+    const firstNonWarmup = steps.findIndex(s => !isWarmupStep(s));
+    if (firstNonWarmup <= 0) return;
+    setStepIdx(firstNonWarmup);
+    setPhase('active');
+    AsyncStorage.setItem(`skip_warmup_${programId}_${dayName}`, '1').catch(() => {});
+    if (userId) {
+      Promise.resolve(supabase.from('session_logs').insert({
+        user_id: userId, program_id: programId, day_name: dayName, week_number: weekNumber,
+        session_name: session.name, log_field: 'warmup_skipped', log_value: '1',
+        completed: false, completed_at: new Date().toISOString(),
+      })).catch(() => {});
+      fetch('https://peak65.vercel.app/api/ai-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, triggerType: 'warmup_skipped', sessionData: { sessionName: session.name } }),
+      }).catch(() => {});
+    }
+  }
+
+  async function skipCooldown() {
+    setPhase('complete');
+    if (userId) {
+      Promise.resolve(supabase.from('session_logs').insert({
+        user_id: userId, program_id: programId, day_name: dayName, week_number: weekNumber,
+        session_name: session.name, log_field: 'cooldown_skipped', log_value: '1',
+        completed: false, completed_at: new Date().toISOString(),
+      })).catch(() => {});
+      fetch('https://peak65.vercel.app/api/ai-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, triggerType: 'cooldown_skipped', sessionData: { sessionName: session.name } }),
+      }).catch(() => {});
+    }
+  }
+
+  function firePostSessionCalls() {
+    if (!userId) return;
+    fetch('https://peak65.vercel.app/api/update-athlete-intelligence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    }).catch(() => {});
+    fetch('https://peak65.vercel.app/api/ai-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        triggerType: 'session_complete',
+        sessionData: { sessionName: session.name, duration: elapsed },
+      }),
+    }).catch(() => {});
+  }
+
   async function saveAndExit() {
     const logId = await saveSession(true);
+    if (logId && userId) {
+      fetch('https://peak65.vercel.app/api/update-athlete-intelligence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      }).catch(() => {});
+      fetch('https://peak65.vercel.app/api/ai-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          triggerType: 'session_complete',
+          sessionData: { sessionName: session.name, duration: elapsed },
+        }),
+      }).catch(() => {});
+    }
     if (logId) {
       setHrZoneStep('prompt');
     } else {
@@ -647,7 +1030,7 @@ export default function LiveWorkoutScreen() {
             >
               <Text style={s.primaryBtnTxt}>UPLOAD SCREENSHOT</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.goBack()}>
+            <TouchableOpacity onPress={() => { firePostSessionCalls(); navigation.goBack(); }}>
               <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Skip for now</Text>
             </TouchableOpacity>
           </ScrollView>
@@ -660,7 +1043,7 @@ export default function LiveWorkoutScreen() {
         <HRZoneUploader
           sessionLogId={savedLogId}
           userId={userId}
-          onDone={() => navigation.goBack()}
+          onDone={() => { firePostSessionCalls(); navigation.goBack(); }}
           onSkip={() => navigation.goBack()}
         />
       );
@@ -734,15 +1117,76 @@ export default function LiveWorkoutScreen() {
   // ── ACTIVE ────────────────────────────────────────────────────────────────────
 
   const currentStep = steps[stepIdx];
-  if (!currentStep) return null;
+  if (!currentStep) {
+    // phase is narrowed by guards above; cast avoids false TS2367 error
+    if ((phase as string) !== 'complete') setPhase('complete');
+    return null;
+  }
+
+  const isHyroxStation = 'exercise' in currentStep && isDistanceBasedExercise((currentStep as any).exercise.name) && !isWarmupStep(currentStep) && !isCooldownStep(currentStep);
+
+  const exitModalEl = (
+    <Modal
+      visible={exitModalVisible}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setExitModalVisible(false)}
+    >
+      <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} activeOpacity={1} onPress={() => setExitModalVisible(false)} />
+      <View style={{ backgroundColor: '#111111', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}>
+        <View style={{ width: 40, height: 4, backgroundColor: '#333333', borderRadius: 2, alignSelf: 'center', marginBottom: 24 }} />
+        <Text style={{ color: '#f0ede8', fontSize: 20, fontWeight: '800', marginBottom: 24 }}>End workout?</Text>
+        <TouchableOpacity
+          style={{ backgroundColor: Colors.accent, borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 16 }}
+          onPress={() => { setExitModalVisible(false); setPhase('complete'); }}
+        >
+          <Text style={{ color: '#080808', fontSize: 15, fontWeight: '800' }}>End Session</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={{ alignItems: 'center', padding: 8 }}
+          onPress={() => {
+            setExitModalVisible(false);
+            Alert.alert('Abandon workout?', 'All progress will be lost.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Abandon', style: 'destructive', onPress: () => { endLiveActivity(); navigation.goBack(); } },
+            ]);
+          }}
+        >
+          <Text style={{ color: '#8a877f', fontSize: 14 }}>Abandon Workout</Text>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+
+  if (isHyroxStation) {
+    return (
+      <SafeAreaView style={s.container}>
+        <StatusBar barStyle="light-content" />
+        <ProgressBar done={stepIdx} total={totalSteps} />
+        <TouchableOpacity
+          style={{ position: 'absolute', top: 8, left: 16, zIndex: 10, padding: 8 }}
+          onPress={() => setExitModalVisible(true)}
+        >
+          <Feather name="x" color={Colors.textSecondary} size={22} />
+        </TouchableOpacity>
+        <HyroxTapZone
+          exerciseName={(currentStep as any).exercise.name}
+          target={String((currentStep as any).exercise.reps ?? '')}
+          elapsed={stepElapsed}
+          onDone={advance}
+        />
+        {exitModalEl}
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={s.container}>
       <StatusBar barStyle="light-content" />
       <ProgressBar done={stepIdx} total={totalSteps} />
       <TouchableOpacity
-        style={{ position: 'absolute', top: insets.top + 8, left: 16, zIndex: 10, padding: 8 }}
-        onPress={confirmDiscard}
+        style={{ position: 'absolute', top: 8, left: 16, zIndex: 10, padding: 8 }}
+        onPress={() => setExitModalVisible(true)}
       >
         <Feather name="x" color={Colors.textSecondary} size={22} />
       </TouchableOpacity>
@@ -762,23 +1206,25 @@ export default function LiveWorkoutScreen() {
           rounds={metconRounds}
           running={metconRunning}
           onAddRound={() => setMetconRounds(r => r + 1)}
-          onFinish={() => { setMetconRunning(false); setMetconComplete(true); advance(); }}
+          onFinish={() => { setMetconFinalRounds(metconRounds); setMetconRunning(false); setMetconComplete(true); advance(); }}
         />
       )}
 
       {(currentStep.kind === 'generic') && (
         <GenericPhase
+          key={stepIdx}
           step={currentStep}
-          elapsed={elapsed}
           isLast={stepIdx === totalSteps - 1}
           onDone={advance}
+          onSkipWarmup={isWarmupStep(currentStep) ? skipWarmup : undefined}
+          onSkipCooldown={isCooldownStep(currentStep) ? skipCooldown : undefined}
         />
       )}
 
       {currentStep.kind === 'run_interval' && (
         <RunIntervalPhase
+          key={stepIdx}
           step={currentStep}
-          elapsed={elapsed}
           swapLabel={swapLabel}
           isLast={stepIdx === totalSteps - 1}
           onDone={advance}
@@ -804,6 +1250,7 @@ export default function LiveWorkoutScreen() {
         onClose={() => setSwapVisible(false)}
         onSelect={setSwapLabel}
       />
+      {exitModalEl}
     </SafeAreaView>
   );
 }
@@ -888,15 +1335,29 @@ function MetconPhase({
   const timeLeft = Math.max(0, step.timeCap - elapsed);
   const isAMRAP  = step.format === 'amrap';
   const isEMOM   = step.format === 'emom';
+  const isTimed  = isAMRAP || isEMOM;
+
+  const completedRef = useRef(false);
+  useEffect(() => {
+    if (isTimed && timeLeft <= 0 && running && !completedRef.current) {
+      completedRef.current = true;
+      onFinish();
+    }
+  }, [timeLeft, running, isTimed, onFinish]);
 
   return (
     <ScrollView contentContainerStyle={mc.container}>
-      <Text style={mc.format}>{format}</Text>
-      <Text style={mc.timer}>{isAMRAP ? formatTime(elapsed) : isEMOM ? formatTime(timeLeft) : `${rounds} RDS`}</Text>
-      {(isAMRAP || isEMOM) && (
-        <Text style={mc.timeCap}>
-          {isAMRAP ? `Cap: ${Math.round(step.timeCap / 60)} min` : `${Math.round(timeLeft / 60)} min left`}
-        </Text>
+      <Text style={mc.format}>
+        {format}{isTimed ? ` · ${Math.round(step.timeCap / 60)} MIN` : ''}
+      </Text>
+
+      {isTimed ? (
+        <>
+          <Text style={mc.timer}>{formatTime(timeLeft)}</Text>
+          <Text style={mc.roundsLarge}>{rounds} RDS</Text>
+        </>
+      ) : (
+        <Text style={mc.timer}>{rounds} RDS</Text>
       )}
 
       <View style={mc.movList}>
@@ -910,7 +1371,7 @@ function MetconPhase({
       </View>
 
       <TouchableOpacity style={mc.roundBtn} onPress={onAddRound}>
-        <Text style={mc.roundBtnTxt}>+ ROUND  {rounds}</Text>
+        <Text style={mc.roundBtnTxt}>+ ROUND</Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={[s.primaryBtn, { marginTop: 20 }]} onPress={onFinish}>
@@ -920,24 +1381,30 @@ function MetconPhase({
   );
 }
 const mc = StyleSheet.create({
-  container: { padding: 24, paddingBottom: 60 },
-  format:    { color: Colors.textSecondary, fontSize: 13, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
-  timer:     { color: Colors.accent, fontSize: 72, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const] },
-  timeCap:   { color: Colors.textSecondary, fontSize: 14, marginBottom: 24 },
-  movList:   { gap: 12, marginBottom: 28, marginTop: 12 },
-  movRow:    { borderLeftWidth: 3, borderLeftColor: Colors.accent, paddingLeft: 12, gap: 2 },
-  movName:   { color: Colors.textPrimary, fontSize: 16, fontWeight: '600' },
-  movReps:   { color: Colors.accent, fontSize: 14, fontWeight: '700' },
-  movNote:   { color: Colors.textSecondary, fontSize: 13 },
-  roundBtn:  { backgroundColor: Colors.card, borderRadius: 14, padding: 20, alignItems: 'center', borderWidth: 2, borderColor: Colors.accent },
+  container:   { padding: 24, paddingTop: 56, paddingBottom: 60 },
+  format:      { color: Colors.textSecondary, fontSize: 13, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
+  timer:       { color: Colors.accent, fontSize: 72, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const] },
+  roundsLarge: { color: Colors.accent, fontSize: 48, fontWeight: '800', marginTop: 4, marginBottom: 4 },
+  movList:     { gap: 12, marginBottom: 28, marginTop: 16 },
+  movRow:      { borderLeftWidth: 3, borderLeftColor: Colors.accent, paddingLeft: 12, gap: 2 },
+  movName:     { color: Colors.textPrimary, fontSize: 16, fontWeight: '600' },
+  movReps:     { color: Colors.accent, fontSize: 14, fontWeight: '700' },
+  movNote:     { color: Colors.textSecondary, fontSize: 13 },
+  roundBtn:    { backgroundColor: Colors.card, borderRadius: 14, padding: 20, alignItems: 'center', borderWidth: 2, borderColor: Colors.accent },
   roundBtnTxt: { color: Colors.accent, fontSize: 18, fontWeight: '800', letterSpacing: 1 },
 });
 
 // ─── Generic Phase (warm-up / cool-down) ─────────────────────────────────────
 
-function IntervalCountdown({ seconds, onDone }: { seconds: number; onDone: () => void }) {
+function IntervalCountdown({ seconds, onDone, exerciseName, announceWarnings }: {
+  seconds: number;
+  onDone: () => void;
+  exerciseName?: string;
+  announceWarnings?: boolean;
+}) {
   const [rem, setRem] = useState(seconds);
-  useEffect(() => { setRem(seconds); }, [seconds]);
+  const announcedWarnings = useRef(new Set<string>());
+  useEffect(() => { setRem(seconds); announcedWarnings.current = new Set(); }, [seconds]);
   useEffect(() => {
     if (rem <= 0) {
       try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); } catch {}
@@ -946,13 +1413,22 @@ function IntervalCountdown({ seconds, onDone }: { seconds: number; onDone: () =>
       onDone();
       return;
     }
+    if (announceWarnings) {
+      if (rem === 30 && !announcedWarnings.current.has('30')) {
+        announcedWarnings.current.add('30');
+        announceSpeech(`${exerciseName ? exerciseName + '. ' : ''}30 seconds. Push.`);
+      } else if (rem === 10 && !announcedWarnings.current.has('10')) {
+        announcedWarnings.current.add('10');
+        announceSpeech('10 seconds. Finish strong.');
+      }
+    }
     if (rem === 3) {
       try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); } catch {}
       playBeep(440, 150);
     }
     const id = setTimeout(() => setRem(r => r - 1), 1000);
     return () => clearTimeout(id);
-  }, [rem, onDone]);
+  }, [rem, onDone, announceWarnings, exerciseName]);
   const pct = seconds > 0 ? Math.min((seconds - rem) / seconds, 1) : 1;
   return (
     <View style={{ alignItems: 'center', marginTop: 16 }}>
@@ -967,12 +1443,13 @@ function IntervalCountdown({ seconds, onDone }: { seconds: number; onDone: () =>
 }
 
 function GenericPhase({
-  step, elapsed, isLast, onDone,
+  step, isLast, onDone, onSkipWarmup, onSkipCooldown,
 }: {
   step: Extract<Step, { kind: 'generic' }>;
-  elapsed: number;
   isLast: boolean;
   onDone: () => void;
+  onSkipWarmup?: () => void;
+  onSkipCooldown?: () => void;
 }) {
   const ex = step.exercise;
   const durationSecs = parseDurationSecs(String(ex.reps ?? ''));
@@ -981,7 +1458,16 @@ function GenericPhase({
     <View style={gp.container}>
       <View style={gp.header}>
         <Text style={gp.blockLabel}>{step.blockName.toUpperCase()}</Text>
-        <Text style={gp.elapsed}>{formatTime(elapsed)}</Text>
+        {onSkipWarmup && (
+          <TouchableOpacity onPress={onSkipWarmup}>
+            <Text style={gp.skipBtn}>SKIP WARMUP</Text>
+          </TouchableOpacity>
+        )}
+        {onSkipCooldown && (
+          <TouchableOpacity onPress={onSkipCooldown}>
+            <Text style={gp.skipBtn}>SKIP COOLDOWN</Text>
+          </TouchableOpacity>
+        )}
       </View>
       <Text style={gp.name}>{ex.name}</Text>
       {!!detail && !durationSecs && <Text style={gp.detail}>{detail}</Text>}
@@ -998,22 +1484,22 @@ function GenericPhase({
 }
 const gp = StyleSheet.create({
   container:  { flex: 1, padding: 28, justifyContent: 'center' },
-  header:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 28 },
+  header:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 28, alignItems: 'center' },
   blockLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 2 },
   elapsed:    { color: Colors.textSecondary, fontSize: 13, fontVariant: ['tabular-nums' as const] },
   name:       { color: Colors.textPrimary, fontSize: 34, fontWeight: '800', lineHeight: 40, marginBottom: 10 },
   detail:     { color: Colors.textSecondary, fontSize: 16, marginBottom: 8 },
   note:       { color: Colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 24 },
   btn:        { marginTop: 40 },
+  skipBtn:    { color: Colors.textSecondary, fontSize: 11, fontWeight: '600', letterSpacing: 1, textDecorationLine: 'underline' },
 });
 
 // ─── Run Interval Phase ───────────────────────────────────────────────────────
 
 function RunIntervalPhase({
-  step, elapsed, swapLabel, isLast, onDone, onOpenSwap,
+  step, swapLabel, isLast, onDone, onOpenSwap,
 }: {
   step: Extract<Step, { kind: 'run_interval' }>;
-  elapsed: number;
   swapLabel: string | null;
   isLast: boolean;
   onDone: () => void;
@@ -1021,16 +1507,19 @@ function RunIntervalPhase({
 }) {
   const ex         = step.exercise;
   const paceTarget = extractPaceTarget(ex);
-  const displayName = swapLabel
-    ? ex.name.replace(/run|running/gi, swapLabel)
-    : ex.name;
+  function applySwapLabel(original: string, swap: string): string {
+    const s = swap.toLowerCase();
+    if (s.includes('ski')) return original.replace(/\b(run|running)\b/gi, 'Ski Erg') || 'Ski Erg';
+    if (s.includes('row')) return original.replace(/\b(run|running)\b/gi, 'Row Erg') || 'Row Erg';
+    return original.replace(/\b(run|running)\b/gi, swap) || swap;
+  }
+  const displayName = swapLabel ? applySwapLabel(ex.name, swapLabel) : ex.name;
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={rp.container}>
         <View style={rp.header}>
           <Text style={rp.blockLabel}>{step.blockName.toUpperCase()} · INTERVAL {step.intervalNum} OF {step.totalIntervals}</Text>
-          <Text style={rp.elapsed}>{formatTime(elapsed)}</Text>
         </View>
 
         <Text style={rp.name}>{displayName}</Text>
@@ -1051,7 +1540,7 @@ function RunIntervalPhase({
         {(() => {
           const durationSecs = parseDurationSecs(String(ex.reps ?? ''));
           if (durationSecs) {
-            return <IntervalCountdown seconds={durationSecs} onDone={onDone} />;
+            return <IntervalCountdown seconds={durationSecs} onDone={onDone} exerciseName={ex.name} announceWarnings={true} />;
           }
           return (
             <TouchableOpacity style={[s.primaryBtn, { marginTop: 32 }]} onPress={onDone}>
@@ -1176,6 +1665,64 @@ const sp = StyleSheet.create({
   prevRow:  { color: '#444', fontSize: 13 },
 });
 
+// ─── Hyrox Tap Zone ───────────────────────────────────────────────────────────
+
+function HyroxTapZone({
+  exerciseName, target, elapsed, onDone,
+}: {
+  exerciseName: string;
+  target: string;
+  elapsed: number;
+  onDone: () => void;
+}) {
+  const pulseAnim = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.8, duration: 1500, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 0.3, duration: 1500, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulseAnim]);
+
+  function handleTap() {
+    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {}); } catch {}
+    onDone();
+  }
+
+  return (
+    <TouchableOpacity
+      style={{ flex: 1, backgroundColor: '#080808', alignItems: 'center', justifyContent: 'center' }}
+      activeOpacity={1}
+      onPress={handleTap}
+    >
+      <Animated.View
+        style={{
+          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          borderWidth: 3, borderColor: Colors.accent, opacity: pulseAnim,
+        }}
+      />
+      <Text style={{ position: 'absolute', top: 16, right: 20, color: '#8a877f', fontSize: 16, fontVariant: ['tabular-nums' as const] }}>
+        {formatTime(elapsed)}
+      </Text>
+      <Text style={{ color: '#f0ede8', fontSize: 32, fontWeight: '800', textAlign: 'center', marginBottom: 12, paddingHorizontal: 24 }}>
+        {exerciseName}
+      </Text>
+      <Text style={{ color: '#8a877f', fontSize: 20, marginBottom: 48, textAlign: 'center' }}>
+        {target}
+      </Text>
+      <Tooltip id="tap_zone" text="Tap anywhere on screen when you finish this station. Your time is recorded automatically." arrowDirection="down">
+        <Text style={{ color: Colors.accent, fontSize: 16, fontWeight: '700', letterSpacing: 2, textAlign: 'center' }}>
+          TAP ANYWHERE WHEN DONE
+        </Text>
+      </Tooltip>
+    </TouchableOpacity>
+  );
+}
+
 // ─── HR Zone Uploader ─────────────────────────────────────────────────────────
 
 function HRZoneUploader({
@@ -1218,10 +1765,11 @@ function HRZoneUploader({
       const res = await fetch('https://peak65.vercel.app/api/extract-hr-zones', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64Image }),
+        body: JSON.stringify({ imageBase64: base64Image, sessionLogId, userId }),
       });
       if (!res.ok) throw new Error(`API error ${res.status}`);
-      const zones = await res.json() as Record<string, number>;
+      const responseData = await res.json();
+      const zones = (responseData.zones ?? responseData) as Record<string, number>;
 
       if (sessionLogId && userId) {
         await supabase

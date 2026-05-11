@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import type { WearableHealthData } from './healthKit';
 
@@ -50,15 +51,13 @@ export type WhoopAllData = {
 
 // ─── Auth URL ─────────────────────────────────────────────────────────────────
 
-let pendingOAuthState = '';
-
-export function getPendingOAuthState(): string {
-  return pendingOAuthState;
+export async function getPendingOAuthState(): Promise<string> {
+  return (await AsyncStorage.getItem('whoop_oauth_state')) ?? '';
 }
 
-export function getWhoopAuthUrl(): string {
+export async function getWhoopAuthUrl(): Promise<string> {
   const state = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
-  pendingOAuthState = state;
+  await AsyncStorage.setItem('whoop_oauth_state', state);
   const params = new URLSearchParams({
     response_type: 'code',
     client_id:     WHOOP_CLIENT_ID,
@@ -316,10 +315,15 @@ export async function fetchWhoopWorkouts(userId: string): Promise<WhoopWorkout[]
 export async function fetchWhoopCycle(userId: string): Promise<WhoopCycle | null> {
   try {
     const data = await whoopGet('/v1/cycle?limit=1', userId);
-    console.log('[whoop] v1 cycle full raw response:', JSON.stringify(data).substring(0, 800));
+    console.log('[whoop] v1 cycle full raw response:', JSON.stringify(data));
     // v1 cycle API returns { data: [...] }, not { records: [...] }
-    const record = data?.data?.[0] ?? data?.records?.[0];
+    let record = data?.data?.[0] ?? data?.records?.[0];
     console.log('[whoop] v1 cycle data[0]?.score?.step_count:', data?.data?.[0]?.score?.step_count);
+    if (record && !record.score) {
+      const data2 = await whoopGet('/v1/cycle?limit=2', userId);
+      const fallback = data2?.data?.[1] ?? data2?.records?.[1] ?? null;
+      if (fallback?.score) record = fallback;
+    }
     if (!record?.score) {
       console.log('[whoop] cycle: no score in record:', JSON.stringify(record ?? {}).substring(0, 200));
       return null;

@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
@@ -67,6 +69,7 @@ type Profile = {
   goal_time?: string | null;
   run_confidence?: number | null;
   primary_goal?: string | null;
+  date_of_birth?: string | null;
 };
 
 // Postgres text[] can arrive as a JS array, a "{a,b}" string, or null.
@@ -230,6 +233,8 @@ function MultiSelectModal({
 
 // ─── Weakness + goal options ──────────────────────────────────────────────────
 
+const REGEN_TRIGGER_FIELDS = new Set(['rest_days', 'session_length', 'availability', 'equipment_access']);
+
 const WEAKNESS_OPTIONS = [
   'SkiErg', 'Sled Push', 'Sled Pull', 'Burpee Broad Jump',
   'Rowing', 'Farmers Carry', 'Sandbag Lunges', 'Wall Balls', 'Running',
@@ -309,7 +314,8 @@ export default function ProfileScreen() {
   const [healthData, setHealthData]       = useState<WearableHealthData | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [tdeeMissingFields, setTdeeMissingFields] = useState<string[]>([]);
-  const [metricsPicker, setMetricsPicker] = useState<'gender' | 'units' | 'height' | 'weight' | null>(null);
+  const [metricsPicker, setMetricsPicker] = useState<'gender' | 'units' | 'height' | 'weight' | 'dob' | null>(null);
+  const [dobPickerDate, setDobPickerDate] = useState<Date>(new Date());
   const [manualHRVOpen, setManualHRVOpen]   = useState(false);
   const [manualHRVInput, setManualHRVInput] = useState('');
   const [manualHRVError, setManualHRVError] = useState('');
@@ -326,6 +332,7 @@ export default function ProfileScreen() {
   const [gsPrimaryGoal, setGsPrimaryGoal]       = useState('');
   const [showCoachedUpsell, setShowCoachedUpsell] = useState(false);
   const [whoopConnecting, setWhoopConnecting]     = useState(false);
+  const [programRegenStatus, setProgramRegenStatus] = useState<'idle' | 'regenerating' | 'done'>('idle');
 
   const mounted      = useRef(true);
   const loadIdRef    = useRef(0);
@@ -559,6 +566,23 @@ export default function ProfileScreen() {
     const updated = { ...profile, ...patch };
     setProfile(updated);
     await supabase.from('profiles').update(patch).eq('id', profile.id);
+
+    if (Object.keys(patch).some(k => REGEN_TRIGGER_FIELDS.has(k))) {
+      setProgramRegenStatus('regenerating');
+      try {
+        await supabase.from('programs').update({ status: 'archived' }).eq('user_id', profile.id);
+        await fetch('https://peak65.vercel.app/api/generate-assessment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: profile.id }),
+        });
+        setProgramRegenStatus('done');
+        setTimeout(() => setProgramRegenStatus('idle'), 3000);
+      } catch (e) {
+        console.log('[profile] regen error:', e);
+        setProgramRegenStatus('idle');
+      }
+    }
   }
 
   async function handleSignOut() {
@@ -600,9 +624,10 @@ export default function ProfileScreen() {
     });
   }
 
-  function connectWhoop() {
+  async function connectWhoop() {
     setWhoopConnecting(true);
-    Linking.openURL(getWhoopAuthUrl()).catch(e => {
+    const url = await getWhoopAuthUrl();
+    Linking.openURL(url).catch(e => {
       console.log('[whoop] openURL error:', e);
       Alert.alert('Error', 'Could not open Whoop authorization page.');
       setWhoopConnecting(false);
@@ -670,13 +695,14 @@ export default function ProfileScreen() {
         if (!callbackState && hashIdx !== -1) {
           callbackState = new URLSearchParams(url.slice(hashIdx + 1)).get('state');
         }
-        const expectedState = getPendingOAuthState();
+        const expectedState = await getPendingOAuthState();
         console.log('[whoop] state validation:', callbackState === expectedState ? 'passed' : 'FAILED');
         if (callbackState !== expectedState) {
           console.log('[whoop] state mismatch — aborting. got:', callbackState, 'expected:', expectedState);
           Alert.alert('Error', 'OAuth state mismatch. Please try connecting again.');
           return;
         }
+        await AsyncStorage.removeItem('whoop_oauth_state');
 
         const { data: { session: authSession } } = await supabase.auth.getSession();
         if (!authSession?.user) return;
@@ -846,6 +872,48 @@ export default function ProfileScreen() {
             onConfirm={v => updateProfile({ weight_kg: imp ? Math.round(v * 0.453592 * 10) / 10 : v })}
             onClose={() => setMetricsPicker(null)}
           />
+        );
+      })()}
+
+      {metricsPicker === 'dob' && (() => {
+        const maxDob = new Date();
+        maxDob.setFullYear(maxDob.getFullYear() - 13);
+        const minDob = new Date();
+        minDob.setFullYear(minDob.getFullYear() - 99);
+        return (
+          <Modal transparent animationType="slide" visible>
+            <View style={styles.pickerBackdrop}>
+              <View style={[styles.pickerSheet, { paddingBottom: 40 }]}>
+                <Text style={styles.pickerTitle}>Date of Birth</Text>
+                <DateTimePicker
+                  value={dobPickerDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  themeVariant="dark"
+                  maximumDate={maxDob}
+                  minimumDate={minDob}
+                  onChange={(_event, date) => {
+                    if (date) setDobPickerDate(date);
+                  }}
+                  style={{ width: '100%' }}
+                />
+                <TouchableOpacity
+                  style={styles.saveBtn}
+                  onPress={() => {
+                    const dobStr = dobPickerDate.toISOString().split('T')[0];
+                    const age = Math.floor((Date.now() - dobPickerDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+                    updateProfile({ date_of_birth: dobStr, age });
+                    setMetricsPicker(null);
+                  }}
+                >
+                  <Text style={styles.saveBtnText}>SAVE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setMetricsPicker(null)} style={{ marginTop: 12, alignItems: 'center' }}>
+                  <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
         );
       })()}
 
@@ -1087,6 +1155,20 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {/* Program regen status banner */}
+        {programRegenStatus !== 'idle' && (
+          <View style={styles.regenBanner}>
+            {programRegenStatus === 'regenerating' ? (
+              <>
+                <ActivityIndicator size="small" color={Colors.accent} style={{ marginRight: 8 }} />
+                <Text style={styles.regenBannerText}>Updating your program...</Text>
+              </>
+            ) : (
+              <Text style={styles.regenBannerText}>Your program has been updated ✓</Text>
+            )}
+          </View>
+        )}
+
         {/* Training section */}
         <Text style={styles.sectionHeading}>Training</Text>
         <View style={styles.section}>
@@ -1288,6 +1370,19 @@ export default function ProfileScreen() {
             value={profile?.preferred_units === 'metric' ? 'Metric (kg, cm)' : 'Imperial (lb, ft/in)'}
             onPress={() => setMetricsPicker('units')}
           />
+          <SettingRow
+            label="Date of Birth"
+            value={profile?.date_of_birth
+              ? new Date(profile.date_of_birth + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+              : ''}
+            onPress={() => {
+              const seed = profile?.date_of_birth
+                ? new Date(profile.date_of_birth + 'T12:00:00')
+                : (() => { const d = new Date(); d.setFullYear(d.getFullYear() - 25); return d; })();
+              setDobPickerDate(seed);
+              setMetricsPicker('dob');
+            }}
+          />
         </View>
 
         {/* Body section */}
@@ -1446,6 +1541,14 @@ const styles = StyleSheet.create({
   coachedLearnText:   { color: Colors.background, fontSize: 13, fontWeight: '700' },
   coachedNoBtn:       { flex: 1, backgroundColor: '#1a1a1a', borderRadius: 10, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
   coachedNoText:      { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
+
+  // Program regen banner
+  regenBanner: {
+    marginHorizontal: 16, marginTop: 8, backgroundColor: '#111',
+    borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center',
+    borderLeftWidth: 3, borderLeftColor: Colors.accent,
+  },
+  regenBannerText: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
 
   // Wearable connection banner
   wearableBanner: {

@@ -19,30 +19,48 @@ type StepKey =
   | 'goal'
   | 'raceDate'
   | 'division'
+  | 'hyroxGoalTime'
+  | 'stationWeaknesses'
+  | 'fitnessGoal'
   | 'trainingDays'
+  | 'restDayPreferences'
   | 'sessionLength'
   | 'availability'
-  | 'restDays'
+  | 'doubleDays'
   | 'equipment'
-  | 'runConfidence'
   | 'review';
 
 type FormData = {
   goal: string;
   raceDate: string;
   division: string;
+  hyroxGoalTime: string;
+  stationWeaknesses: string[];
+  fitnessGoal: string;
   trainingDays: string;
+  restDayPreferences: string[];
+  doubleDays: string[];
   sessionLength: string;
   availability: string;
-  restDays: string;
   equipment: string[];
-  runConfidence: number;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DIVISION_OPTIONS = [
   'Men Open', 'Men Pro', 'Women Open', 'Women Pro', 'Mixed Doubles',
+];
+
+const HYROX_GOAL_TIMES = [
+  'Sub 1:05 (Elite)',
+  'Sub 1:15 (Competitive)',
+  'Sub 1:30 (Strong Finisher)',
+  'Just finish strong',
+];
+
+const STATION_OPTIONS = [
+  'Ski Erg', 'Row Erg', 'Sled Push', 'Sled Pull',
+  'Burpee Broad Jumps', 'Farmers Carry', 'Sandbag Lunges', 'Wall Balls', 'Unsure',
 ];
 
 const HYROX_EQUIPMENT = [
@@ -55,6 +73,8 @@ const GF_EQUIPMENT = [
   'Ski Erg', 'Row Erg', 'Assault Bike', 'Full Gym Access', 'No Equipment',
 ];
 
+const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
 const GEN_MESSAGES = [
   'Analyzing your profile...',
   'Rebuilding your training plan...',
@@ -65,11 +85,22 @@ const GEN_MESSAGES = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getSteps(goal: string): StepKey[] {
+function getRequiredRestDays(trainingDays: string): number {
+  if (trainingDays === '6') return 1;
+  if (trainingDays === '5') return 2;
+  if (trainingDays === '4') return 3;
+  return 2;
+}
+
+function getSteps(goal: string, availability: string): StepKey[] {
+  const endSteps: StepKey[] = ['trainingDays', 'restDayPreferences', 'sessionLength', 'availability'];
+  if (availability === 'both') endSteps.push('doubleDays');
+  endSteps.push('equipment', 'review');
+
   if (goal === 'hyrox') {
-    return ['goal', 'raceDate', 'division', 'trainingDays', 'sessionLength', 'availability', 'restDays', 'equipment', 'runConfidence', 'review'];
+    return ['goal', 'raceDate', 'division', 'hyroxGoalTime', 'stationWeaknesses', ...endSteps];
   }
-  return ['goal', 'trainingDays', 'sessionLength', 'availability', 'restDays', 'equipment', 'review'];
+  return ['goal', 'fitnessGoal', ...endSteps];
 }
 
 function parseArr(val: string[] | string | null | undefined): string[] {
@@ -89,9 +120,6 @@ function fmtLen(v: string): string {
 function fmtAvail(v: string): string {
   return v === 'once' ? 'Once a day' : v === 'both' ? 'Twice a day (AM + PM)' : v || '—';
 }
-function fmtRestDays(v: string): string {
-  return v === '1' ? '1 day' : v ? `${v} days` : '—';
-}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -100,8 +128,9 @@ export default function UpdateProgramScreen({ navigation }: Props) {
   const [loading, setLoading]       = useState(true);
   const [step, setStep]             = useState(0);
   const [form, setForm]             = useState<FormData>({
-    goal: '', raceDate: '', division: '', trainingDays: '',
-    sessionLength: '', availability: '', restDays: '', equipment: [], runConfidence: 3,
+    goal: '', raceDate: '', division: '', hyroxGoalTime: '', stationWeaknesses: [],
+    fitnessGoal: '', trainingDays: '', restDayPreferences: [], doubleDays: [],
+    sessionLength: '', availability: '', equipment: [],
   });
   const [original, setOriginal]     = useState<FormData | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -117,6 +146,7 @@ export default function UpdateProgramScreen({ navigation }: Props) {
   const alive        = useRef(true);
   const backup       = useRef<any[]>([]);
   const didDeletePrograms = useRef(false);
+  const hasLoadedRef = useRef(false);
 
   // ── Load profile ──────────────────────────────────────────────────────────
 
@@ -131,20 +161,37 @@ export default function UpdateProgramScreen({ navigation }: Props) {
         .eq('id', auth.user.id).maybeSingle();
       if (!p) { setLoading(false); return; }
 
+      // Map old current_training_days formats to exact number strings
+      let trainingDays = '';
+      const raw = p.current_training_days;
+      if (['4', '5', '6'].includes(raw)) {
+        trainingDays = raw;
+      } else if (raw === '1-2 days' || raw === '3-4 days') {
+        trainingDays = '4';
+      } else if (raw === '5+ days') {
+        trainingDays = '5';
+      } else {
+        trainingDays = '5';
+      }
+
       const init: FormData = {
-        goal:          p.goal ?? '',
-        raceDate:      p.race_date ?? '',
-        division:      p.hyrox_division ?? '',
-        trainingDays:  ['3','4','5','6'].includes(p.current_training_days) ? p.current_training_days : '',
-        sessionLength: p.session_length ?? '',
-        availability:  p.availability ?? '',
-        restDays:      p.rest_days != null ? String(p.rest_days) : '',
-        equipment:     parseArr(p.equipment_access),
-        runConfidence: typeof p.run_confidence === 'number' ? p.run_confidence : 3,
+        goal:               p.goal ?? '',
+        raceDate:           p.race_date ?? '',
+        division:           p.hyrox_division ?? '',
+        hyroxGoalTime:      p.hyrox_goal_time ?? '',
+        stationWeaknesses:  parseArr(p.station_weaknesses),
+        fitnessGoal:        p.fitness_goal ?? '',
+        trainingDays,
+        restDayPreferences: parseArr(p.rest_day_preferences),
+        doubleDays:         parseArr(p.double_day_preferences),
+        sessionLength:      p.session_length ?? '',
+        availability:       p.availability ?? '',
+        equipment:          parseArr(p.equipment_access),
       };
       setForm(init);
       setOriginal({ ...init });
       setLoading(false);
+      setTimeout(() => { hasLoadedRef.current = true; }, 0);
     })();
 
     return () => {
@@ -154,25 +201,39 @@ export default function UpdateProgramScreen({ navigation }: Props) {
     };
   }, []);
 
+  // Clear rest/double day selections when training days count changes (skip on initial load)
+  useEffect(() => {
+    if (!hasLoadedRef.current) return;
+    if (form.trainingDays !== '') {
+      setForm(prev => ({ ...prev, restDayPreferences: [], doubleDays: [] }));
+    }
+  }, [form.trainingDays]);
+
   // ── Step sequence ─────────────────────────────────────────────────────────
 
-  const steps = getSteps(form.goal || 'hyrox');
+  const steps = getSteps(form.goal || 'hyrox', form.availability);
   const currentKey: StepKey = steps[step] ?? 'review';
   const progress = steps.length > 1 ? step / (steps.length - 1) : 1;
 
   function canContinue(): boolean {
     switch (currentKey) {
-      case 'goal':          return form.goal !== '';
-      case 'raceDate':      return true;
-      case 'division':      return form.division !== '';
-      case 'trainingDays':  return form.trainingDays !== '';
-      case 'sessionLength': return form.sessionLength !== '';
-      case 'availability':  return form.availability !== '';
-      case 'restDays':      return form.restDays !== '';
-      case 'equipment':     return form.equipment.length > 0;
-      case 'runConfidence': return true;
-      case 'review':        return true;
-      default:              return true;
+      case 'goal':              return form.goal !== '';
+      case 'raceDate':          return true;
+      case 'division':          return form.division !== '';
+      case 'hyroxGoalTime':     return form.hyroxGoalTime !== '';
+      case 'stationWeaknesses': return form.stationWeaknesses.length > 0;
+      case 'fitnessGoal':       return form.fitnessGoal !== '';
+      case 'trainingDays':      return form.trainingDays !== '';
+      case 'restDayPreferences': {
+        const required = getRequiredRestDays(form.trainingDays);
+        return form.restDayPreferences.length === required;
+      }
+      case 'sessionLength':     return form.sessionLength !== '';
+      case 'availability':      return form.availability !== '';
+      case 'doubleDays':        return form.doubleDays.length > 0;
+      case 'equipment':         return form.equipment.length > 0;
+      case 'review':            return true;
+      default:                  return true;
     }
   }
 
@@ -184,16 +245,54 @@ export default function UpdateProgramScreen({ navigation }: Props) {
 
   function handleNext() {
     if (!canContinue()) return;
-    const seq = getSteps(form.goal);
+    const seq = getSteps(form.goal, form.availability);
     if (step < seq.length - 1) setStep(s => s + 1);
   }
 
   function toggleEquipment(item: string) {
+    setForm(prev => {
+      const arr = prev.equipment;
+      const allOpts = prev.goal === 'hyrox' ? HYROX_EQUIPMENT : GF_EQUIPMENT;
+
+      if (item === 'No Equipment') {
+        return { ...prev, equipment: arr.includes('No Equipment') ? [] : ['No Equipment'] };
+      }
+      if (item === 'Full Gym Access') {
+        const fullSet = allOpts.filter(o => o !== 'No Equipment');
+        return { ...prev, equipment: arr.includes('Full Gym Access') ? [] : fullSet };
+      }
+      if (arr.includes(item)) {
+        return { ...prev, equipment: arr.filter(e => e !== item && e !== 'Full Gym Access') };
+      }
+      return { ...prev, equipment: [...arr.filter(e => e !== 'No Equipment'), item] };
+    });
+  }
+
+  function toggleWeakness(item: string) {
     setForm(prev => ({
       ...prev,
-      equipment: prev.equipment.includes(item)
-        ? prev.equipment.filter(e => e !== item)
-        : [...prev.equipment, item],
+      stationWeaknesses: prev.stationWeaknesses.includes(item)
+        ? prev.stationWeaknesses.filter(s => s !== item)
+        : [...prev.stationWeaknesses, item],
+    }));
+  }
+
+  function toggleRestDayPref(day: string) {
+    const max = getRequiredRestDays(form.trainingDays);
+    setForm(prev => {
+      const arr = prev.restDayPreferences;
+      if (arr.includes(day)) return { ...prev, restDayPreferences: arr.filter(d => d !== day) };
+      if (arr.length >= max) return prev;
+      return { ...prev, restDayPreferences: [...arr, day] };
+    });
+  }
+
+  function toggleDoubleDay(day: string) {
+    setForm(prev => ({
+      ...prev,
+      doubleDays: prev.doubleDays.includes(day)
+        ? prev.doubleDays.filter(d => d !== day)
+        : [...prev.doubleDays, day],
     }));
   }
 
@@ -247,20 +346,32 @@ export default function UpdateProgramScreen({ navigation }: Props) {
       didDeletePrograms.current = true;
 
       // 2. Update profile
+      const restDaysCount = getRequiredRestDays(form.trainingDays);
+      const validDoubleDays = form.doubleDays.filter(d => !form.restDayPreferences.includes(d));
+
       const patch: Record<string, any> = {
-        goal:                  form.goal,
-        current_training_days: form.trainingDays || null,
-        session_length:        form.sessionLength || null,
-        availability:          form.availability || null,
-        rest_days:             form.restDays ? parseInt(form.restDays, 10) : null,
-        equipment_access:      form.equipment.length > 0 ? form.equipment : null,
+        goal:                   form.goal,
+        current_training_days:  form.trainingDays || null,
+        rest_day_preferences:   form.restDayPreferences.length > 0 ? form.restDayPreferences : null,
+        rest_days:              form.trainingDays ? restDaysCount : null,
+        double_day_preferences: validDoubleDays.length > 0 ? validDoubleDays : null,
+        session_length:         form.sessionLength || null,
+        availability:           form.availability || null,
+        equipment_access:       form.equipment.length > 0 ? form.equipment : null,
       };
+
       if (form.goal === 'hyrox') {
-        patch.hyrox_division = form.division || null;
-        patch.race_date      = form.raceDate  || null;
-        patch.run_confidence = form.runConfidence;
+        patch.hyrox_division      = form.division       || null;
+        patch.race_date           = form.raceDate        || null;
+        patch.hyrox_goal_time     = form.hyroxGoalTime   || null;
+        patch.station_weaknesses  = form.stationWeaknesses.length > 0 ? form.stationWeaknesses : null;
       }
+      if (form.goal === 'general_fitness') {
+        patch.fitness_goal = form.fitnessGoal || null;
+      }
+
       await supabase.from('profiles').update(patch).eq('id', userId);
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // 3. Generate new program
       const controller = new AbortController();
@@ -282,7 +393,6 @@ export default function UpdateProgramScreen({ navigation }: Props) {
       stopAnimation();
       setGenError(true);
 
-      // Restore backed-up programs on failure
       if (didDeletePrograms.current && backup.current.length > 0) {
         try {
           await supabase.from('programs').upsert(backup.current, { onConflict: 'id' });
@@ -395,15 +505,77 @@ export default function UpdateProgramScreen({ navigation }: Props) {
           </View>
         );
 
+      case 'hyroxGoalTime':
+        return (
+          <View style={s.stepContent}>
+            <Text style={s.label}>What's your goal finish time?</Text>
+            {HYROX_GOAL_TIMES.map(t =>
+              renderOpt(t, form.hyroxGoalTime === t, () => setForm(p => ({ ...p, hyroxGoalTime: t })))
+            )}
+          </View>
+        );
+
+      case 'stationWeaknesses':
+        return (
+          <View style={[s.stepContent, { flex: 1 }]}>
+            <Text style={s.label}>Which Hyrox stations are your biggest weakness?</Text>
+            <Text style={s.sublabel}>Select all that apply</Text>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
+              {STATION_OPTIONS.map(opt => (
+                <TouchableOpacity
+                  key={opt}
+                  style={[s.option, form.stationWeaknesses.includes(opt) && s.optionSelected]}
+                  onPress={() => toggleWeakness(opt)}
+                >
+                  <Text style={[s.optionText, form.stationWeaknesses.includes(opt) && s.optionTextSelected]}>{opt}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        );
+
+      case 'fitnessGoal':
+        return (
+          <View style={s.stepContent}>
+            <Text style={s.label}>What is your primary goal?</Text>
+            {renderOpt('Look better',         form.fitnessGoal === 'look_better',         () => setForm(p => ({ ...p, fitnessGoal: 'look_better' })))}
+            {renderOpt('Get stronger',        form.fitnessGoal === 'get_stronger',        () => setForm(p => ({ ...p, fitnessGoal: 'get_stronger' })))}
+            {renderOpt('Improve performance', form.fitnessGoal === 'improve_performance', () => setForm(p => ({ ...p, fitnessGoal: 'improve_performance' })))}
+            {renderOpt('All-around fitness',  form.fitnessGoal === 'all_around',          () => setForm(p => ({ ...p, fitnessGoal: 'all_around' })))}
+          </View>
+        );
+
       case 'trainingDays':
         return (
           <View style={s.stepContent}>
             <Text style={s.label}>How many days per week will you train?</Text>
-            {(['3','4','5','6'] as const).map(d =>
+            {(['4', '5', '6'] as const).map(d =>
               renderOpt(`${d} days`, form.trainingDays === d, () => setForm(p => ({ ...p, trainingDays: d })))
             )}
           </View>
         );
+
+      case 'restDayPreferences': {
+        const required = getRequiredRestDays(form.trainingDays);
+        const nLabel = required === 1 ? '1 rest day' : `${required} rest days`;
+        return (
+          <View style={s.stepContent}>
+            <Text style={s.label}>Which days would you like to rest?</Text>
+            <Text style={s.sublabel}>
+              {`Select ${nLabel} — ${form.restDayPreferences.length} of ${required} selected`}
+            </Text>
+            {ALL_DAYS.map(day => (
+              <TouchableOpacity
+                key={day}
+                style={[s.option, form.restDayPreferences.includes(day) && s.optionSelected]}
+                onPress={() => toggleRestDayPref(day)}
+              >
+                <Text style={[s.optionText, form.restDayPreferences.includes(day) && s.optionTextSelected]}>{day}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        );
+      }
 
       case 'sessionLength':
         return (
@@ -423,15 +595,24 @@ export default function UpdateProgramScreen({ navigation }: Props) {
           </View>
         );
 
-      case 'restDays':
+      case 'doubleDays': {
+        const trainingDays = ALL_DAYS.filter(d => !form.restDayPreferences.includes(d));
         return (
           <View style={s.stepContent}>
-            <Text style={s.label}>How many rest days per week?</Text>
-            {(['1','2','3'] as const).map(d =>
-              renderOpt(d === '1' ? '1 day' : `${d} days`, form.restDays === d, () => setForm(p => ({ ...p, restDays: d })))
-            )}
+            <Text style={s.label}>Which days can you train twice?</Text>
+            <Text style={s.sublabel}>Select all days when you can do both AM and PM sessions</Text>
+            {trainingDays.map(day => (
+              <TouchableOpacity
+                key={day}
+                style={[s.option, form.doubleDays.includes(day) && s.optionSelected]}
+                onPress={() => toggleDoubleDay(day)}
+              >
+                <Text style={[s.optionText, form.doubleDays.includes(day) && s.optionTextSelected]}>{day}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
         );
+      }
 
       case 'equipment': {
         const opts = form.goal === 'hyrox' ? HYROX_EQUIPMENT : GF_EQUIPMENT;
@@ -454,43 +635,36 @@ export default function UpdateProgramScreen({ navigation }: Props) {
         );
       }
 
-      case 'runConfidence':
-        return (
-          <View style={s.stepContent}>
-            <Text style={s.label}>How confident are you with running?</Text>
-            <Text style={s.sublabel}>1 = needs the most work{'  '}5 = your strongest asset</Text>
-            <View style={s.confidenceRow}>
-              {([1,2,3,4,5] as const).map(n => (
-                <TouchableOpacity
-                  key={n}
-                  style={[s.confidenceBtn, form.runConfidence === n && s.confidenceBtnSelected]}
-                  onPress={() => setForm(p => ({ ...p, runConfidence: n }))}
-                >
-                  <Text style={[s.confidenceBtnText, form.runConfidence === n && { color: Colors.background }]}>{n}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        );
-
       case 'review': {
         if (!original) return null;
         const isHyrox = form.goal === 'hyrox';
+
+        function fmtFitnessGoal(v: string): string {
+          const map: Record<string, string> = {
+            look_better: 'Look better', get_stronger: 'Get stronger',
+            improve_performance: 'Improve performance', all_around: 'All-around fitness',
+          };
+          return map[v] || v || '—';
+        }
+
         const fields: { label: string; oldVal: string; newVal: string }[] = [
-          { label: 'Goal',          oldVal: fmtGoal(original.goal),           newVal: fmtGoal(form.goal) },
+          { label: 'Goal', oldVal: fmtGoal(original.goal), newVal: fmtGoal(form.goal) },
           ...(isHyrox ? [
-            { label: 'Race Date',   oldVal: original.raceDate || 'Not set',    newVal: form.raceDate || 'Not set' },
-            { label: 'Division',    oldVal: original.division || '—',          newVal: form.division || '—' },
-          ] : []),
-          { label: 'Training Days', oldVal: original.trainingDays ? `${original.trainingDays}/wk` : '—', newVal: form.trainingDays ? `${form.trainingDays}/wk` : '—' },
-          { label: 'Session',       oldVal: fmtLen(original.sessionLength),    newVal: fmtLen(form.sessionLength) },
-          { label: 'Availability',  oldVal: fmtAvail(original.availability),   newVal: fmtAvail(form.availability) },
-          { label: 'Rest Days',     oldVal: fmtRestDays(original.restDays),    newVal: fmtRestDays(form.restDays) },
+            { label: 'Race Date',    oldVal: original.raceDate      || 'Not set', newVal: form.raceDate      || 'Not set' },
+            { label: 'Division',     oldVal: original.division      || '—',       newVal: form.division      || '—' },
+            { label: 'Goal Time',    oldVal: original.hyroxGoalTime || '—',       newVal: form.hyroxGoalTime || '—' },
+            { label: 'Weaknesses',   oldVal: original.stationWeaknesses.join(', ') || 'None', newVal: form.stationWeaknesses.join(', ') || 'None' },
+          ] : [
+            { label: 'Primary Goal', oldVal: fmtFitnessGoal(original.fitnessGoal), newVal: fmtFitnessGoal(form.fitnessGoal) },
+          ]),
+          { label: 'Training Days', oldVal: original.trainingDays ? `${original.trainingDays} days/wk` : '—', newVal: form.trainingDays ? `${form.trainingDays} days/wk` : '—' },
+          { label: 'Rest Days',     oldVal: original.restDayPreferences.join(', ') || '—', newVal: form.restDayPreferences.join(', ') || '—' },
+          { label: 'Session',       oldVal: fmtLen(original.sessionLength),   newVal: fmtLen(form.sessionLength) },
+          { label: 'Availability',  oldVal: fmtAvail(original.availability),  newVal: fmtAvail(form.availability) },
+          { label: 'Double Days',   oldVal: original.doubleDays.join(', ') || 'None', newVal: form.doubleDays.join(', ') || 'None' },
           { label: 'Equipment',     oldVal: original.equipment.join(', ') || 'None', newVal: form.equipment.join(', ') || 'None' },
-          ...(isHyrox ? [
-            { label: 'Run Confidence', oldVal: `${original.runConfidence}/5`, newVal: `${form.runConfidence}/5` },
-          ] : []),
         ];
+
         const hasChanges = fields.some(f => f.oldVal !== f.newVal);
         return (
           <View style={s.stepContent}>
@@ -557,15 +731,14 @@ export default function UpdateProgramScreen({ navigation }: Props) {
 
   // ── Main flow ─────────────────────────────────────────────────────────────
 
-  const isEquipmentStep = currentKey === 'equipment';
-  const isReviewStep    = currentKey === 'review';
-  const isRaceDateStep  = currentKey === 'raceDate';
+  const isEquipmentOrStations = currentKey === 'equipment' || currentKey === 'stationWeaknesses';
+  const isReviewStep  = currentKey === 'review';
+  const isRaceDateStep = currentKey === 'raceDate';
 
   return (
     <SafeAreaView style={s.container} edges={['top', 'bottom']}>
       <Text style={s.logo}>Peak 65</Text>
 
-      {/* Header: back + progress */}
       <View style={s.header}>
         <TouchableOpacity
           style={s.backBtn}
@@ -581,7 +754,7 @@ export default function UpdateProgramScreen({ navigation }: Props) {
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        {isEquipmentStep ? (
+        {isEquipmentOrStations ? (
           <View style={s.multiContainer}>
             {renderCurrentStep()}
           </View>
@@ -596,7 +769,6 @@ export default function UpdateProgramScreen({ navigation }: Props) {
           </ScrollView>
         )}
 
-        {/* Footer */}
         <View style={s.footer}>
           {isRaceDateStep && (
             <TouchableOpacity style={s.skipBtn} onPress={handleNext}>
@@ -658,14 +830,6 @@ const s = StyleSheet.create({
   optionSelected:     { backgroundColor: Colors.accent, borderColor: Colors.accent },
   optionText:         { color: Colors.textPrimary, fontSize: 16 },
   optionTextSelected: { color: Colors.background, fontWeight: '700' },
-
-  confidenceRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
-  confidenceBtn: {
-    flex: 1, backgroundColor: Colors.card, borderRadius: 12,
-    paddingVertical: 16, alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
-  },
-  confidenceBtnSelected: { backgroundColor: Colors.accent, borderColor: Colors.accent },
-  confidenceBtnText:     { color: Colors.textPrimary, fontSize: 18, fontWeight: '700' },
 
   footer:   { paddingHorizontal: 24, paddingBottom: 20, paddingTop: 8, gap: 10 },
   skipBtn:  { alignItems: 'center', paddingVertical: 4 },

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, Image, Platform, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -304,6 +304,31 @@ async function resolveAppState(
   return { state, isCoach };
 }
 
+// ─── Branded loading screen ──────────────────────────────────────────────────
+
+function BrandedLoadingScreen() {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.08, duration: 600, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1.0,  duration: 600, useNativeDriver: true }),
+      ]),
+    ).start();
+  }, []);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#080808', alignItems: 'center', justifyContent: 'center' }}>
+      <Animated.Image
+        source={require('../assets/splash.png')}
+        style={{ width: 120, height: 120, transform: [{ scale }] }}
+        resizeMode="contain"
+      />
+    </View>
+  );
+}
+
 // ─── Error boundary ───────────────────────────────────────────────────────────
 
 class ErrorBoundary extends React.Component<
@@ -458,7 +483,7 @@ export default function RootLayout() {
     return () => clearTimeout(t);
   }, [appState]);
 
-  if (appState === 'loading' || !fontsLoaded) return <View style={{ flex: 1, backgroundColor: '#080808' }} />;
+  if (appState === 'loading' || !fontsLoaded) return <BrandedLoadingScreen />;
 
   if (appState === 'unauthenticated') {
     return (

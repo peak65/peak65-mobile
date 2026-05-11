@@ -362,7 +362,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
 
           {/* ── 3. 65 SCORE TREND ─────────────────────────────────────────── */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>65 Score — Last 7 Days</Text>
+            <Text style={styles.sectionTitle}>Peak Score — Last 7 Days</Text>
             <View style={styles.chartCard}>
               <View style={styles.chartBars}>
                 {last7.map(date => {
@@ -703,7 +703,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  // ── 65 Score chart
+  // ── Peak Score chart
   chartCard: {
     backgroundColor: CARD_BG,
     borderRadius: 12,
