@@ -1803,30 +1803,74 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   if (closingPhase === 'assessment') {
     const isHyrox = data.goal === 'hyrox';
-    const days = [
-      { day: 'Day 1', session: 'Run Assessment' },
-      { day: 'Day 2', session: 'Easy Recovery' },
-      { day: 'Day 3', session: isHyrox ? 'Strength + Erg Assessment' : 'Strength Assessment' },
-      { day: 'Day 4', session: 'Easy Recovery' },
-      { day: 'Day 5', session: 'Rest — Your full program unlocks today' },
-      { day: 'Day 6', session: 'Work Capacity Test' },
-      { day: 'Day 7', session: 'Easy Recovery' },
-    ];
+    const trainingDays = Array.isArray(data.training_days) ? data.training_days : [];
+    const restDays = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+      .filter(d => !trainingDays.includes(d));
+
+    const dayOrder = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const sortedTrainingDays = [...trainingDays].sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
+
+    // Build session schedule based on actual training days
+    // Hard 1, Easy 1, Hard 2, Easy 2, Hard 3, Easy 3, then rest days
+    const sessionTypes = isHyrox
+      ? ['Run Time Trial', 'Easy Recovery', 'Ski Erg + Strength', 'Easy Recovery', 'Work Capacity AMRAP', 'Easy Recovery']
+      : ['Run Time Trial', 'Easy Recovery', 'Strength Baseline', 'Easy Recovery', 'Work Capacity AMRAP', 'Easy Recovery'];
+
+    const schedule: { day: string; session: string; isHard: boolean; isRest: boolean }[] = [];
+    let sessionIndex = 0;
+
+    for (const day of dayOrder) {
+      if (restDays.includes(day)) {
+        schedule.push({ day, session: 'Rest', isHard: false, isRest: true });
+      } else if (sessionIndex < sessionTypes.length) {
+        const session = sessionTypes[sessionIndex];
+        const isHard = sessionIndex % 2 === 0;
+        schedule.push({ day, session, isHard, isRest: false });
+        sessionIndex++;
+      } else {
+        schedule.push({ day, session: 'Easy Recovery', isHard: false, isRest: false });
+      }
+    }
+
     return (
-      <SafeAreaView style={styles.container} edges={['top','bottom']}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <Text style={styles.logo}>Peak 65</Text>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 24, flexGrow: 1 }}>
-          <Text style={styles.label}>{isHyrox ? 'By Day 5, Peak 65 will know more about your body than any training app you\'ve ever used.' : 'Your program generates on Day 5. Here\'s what the next week looks like.'}</Text>
-          <View style={{ gap: 10, marginTop: 16 }}>
-            {days.map(d => (
-              <View key={d.day} style={styles.assessDay}>
+          <Text style={styles.label}>
+            {isHyrox
+              ? "Here's your assessment week."
+              : "Here's your assessment week."}
+          </Text>
+          <Text style={{ color: '#8a877f', fontSize: 14, marginTop: 8, marginBottom: 20, lineHeight: 20 }}>
+            {isHyrox
+              ? "Three hard sessions establish your baseline. Upload your HR data after each cardio session — it's how we set your training zones."
+              : "Three hard sessions establish your baseline. Upload your HR data after each cardio session — it's how we set your training zones."}
+          </Text>
+          <View style={{ gap: 10 }}>
+            {schedule.map(d => (
+              <View key={d.day} style={[
+                styles.assessDay,
+                d.isHard && { borderLeftWidth: 3, borderLeftColor: '#e8ff47' },
+                d.isRest && { opacity: 0.5 }
+              ]}>
                 <Text style={styles.assessDayLabel}>{d.day}</Text>
-                <Text style={styles.assessDaySession}>{d.session}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  {d.isHard && (
+                    <View style={{ backgroundColor: '#ff3b3b', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                      <Text style={{ color: 'white', fontSize: 10, fontWeight: '700' }}>HARD</Text>
+                    </View>
+                  )}
+                  <Text style={styles.assessDaySession}>{d.session}</Text>
+                </View>
               </View>
             ))}
           </View>
-          <View style={[styles.coachingCard, { marginTop: 16 }]}>
-            <Text style={styles.coachingText}>Your complete program starts Day 8. Days 1–7 are your assessment — the data that makes everything after it precise.</Text>
+          <View style={[styles.coachingCard, { marginTop: 20 }]}>
+            <Text style={styles.coachingText}>
+              {isHyrox
+                ? "Week 2 adds your row erg baseline. Your full program generates after assessment is complete."
+                : "Your full program generates after assessment is complete. Every session after that is built around your real numbers."}
+            </Text>
           </View>
         </ScrollView>
         <View style={styles.footer}>
