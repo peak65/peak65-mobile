@@ -565,7 +565,7 @@ export default function OnboardingScreen({ navigation }: Props) {
     const { data: authData } = await supabase.auth.getUser();
     if (!authData.user) return;
 
-    await supabase.from('profiles').upsert({
+    const { error: upsertError } = await supabase.from('profiles').upsert({
       id: authData.user.id,
       first_name: data.first_name || null,
       last_name: data.last_name || null,
@@ -609,6 +609,12 @@ export default function OnboardingScreen({ navigation }: Props) {
       referral_source: data.referral_source || null,
       onboarding_complete: true,
     });
+
+    if (upsertError) {
+      console.error('[onboarding] profile upsert failed:', upsertError.message);
+      Alert.alert('Something went wrong', 'We could not save your profile. Please try again.');
+      return;
+    }
 
     // Elite invite check (preserve existing logic)
     const userEmail = authData.user.email;
