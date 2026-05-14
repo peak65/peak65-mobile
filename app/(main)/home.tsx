@@ -9,7 +9,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { Zap, Target } from 'lucide-react-native';
+import { Zap, Target, Activity, Moon, Heart } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../lib/supabase';
 import {
   getTodayHealthData, fetchTodayHealthData, fetchTodayWorkouts,
@@ -27,7 +28,6 @@ import type { Program, ProgramDay, TabParamList, MainStackParamList } from '../_
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
-import Tooltip from '../components/Tooltip';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -307,6 +307,27 @@ function ShimmerBox({ width = 64, height = 26 }: { width?: number; height?: numb
   );
 }
 
+function PulsingRing() {
+  const scale = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.08, duration: 1200, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1,    duration: 1200, useNativeDriver: true }),
+      ]),
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [scale]);
+  return (
+    <Animated.View style={{
+      width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: 'rgba(232,255,71,0.15)',
+      position: 'absolute', alignSelf: 'center', backgroundColor: 'transparent',
+      transform: [{ scale }],
+    }} />
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
@@ -347,6 +368,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing]               = useState(false);
   const [todayCompleted, setTodayCompleted]       = useState(false);
   const [scoreModalVisible, setScoreModalVisible] = useState(false);
+  const [workoutSheetOpen, setWorkoutSheetOpen]   = useState(false);
   const [cacheStale, setCacheStale]               = useState(false);
 
   // ── Week 2 generation ────────────────────────────────────────────────────────
@@ -852,6 +874,22 @@ export default function HomeScreen() {
 
   const hasWearable = healthConnected || !!(storedProfile?.whoop_connected || storedProfile?.whoop_access_token || storedProfile?.whoop_refresh_token);
 
+  const hasWearableData = hasWearable && !!readinessData;
+  const hrvR   = hasWearableData ? selectHRVSource(readinessData!, storedProfile ?? {}) : null;
+  const sleepR = hasWearableData ? selectSleepSource(readinessData!) : null;
+  const rhrR   = hasWearableData ? selectRHRSource(readinessData!) : null;
+
+  function startWorkout() {
+    const firstSession = sessions[0] ?? null;
+    if (!firstSession || !program || !todayDay) return;
+    (navigation as any).getParent<NativeStackNavigationProp<MainStackParamList>>()?.navigate('LiveWorkout', {
+      sessionJson: JSON.stringify(firstSession),
+      programId:   program.id,
+      weekNumber:  program.week_number,
+      dayName:     todayDay.day,
+    });
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
 
@@ -870,6 +908,7 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
+      <View style={{ flex: 1 }}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
@@ -885,66 +924,170 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Peak Score card */}
-        <Modal visible={scoreModalVisible} transparent animationType="fade">
-          <TouchableOpacity
-            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}
-            activeOpacity={1}
-            onPress={() => setScoreModalVisible(false)}
-          >
-            <View style={{ backgroundColor: Colors.card, borderRadius: 16, padding: 24 }}>
-              <Text style={{ color: Colors.accent, fontSize: 20, fontWeight: '700', marginBottom: 12 }}>Your Peak Score</Text>
-              <Text style={{ color: Colors.textSecondary, fontSize: 14, lineHeight: 22 }}>
-                Your Peak Score is a daily readiness number from 0–100 that blends your HRV, resting heart rate, and sleep quality into a single signal.{'\n\n'}A score above 75 means your body is primed — go hard today. Between 50 and 75, train as planned. Below 50, prioritize recovery: reduce intensity, keep it easy.{'\n\n'}The score becomes more accurate over 14 days as it calibrates to your personal baseline.
-              </Text>
-              <TouchableOpacity
-                onPress={() => setScoreModalVisible(false)}
-                style={{ backgroundColor: Colors.accent, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 20 }}
-              >
-                <Text style={{ color: '#080808', fontWeight: '700', fontSize: 15 }}>Got it</Text>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-        {(() => {
-          const borderColor = healthConnected && peakScore
-            ? scoreColor(peakScore.score)
-            : Colors.card;
-          return (
-            <Tooltip id="peak_score" text="Your Peak Score updates every morning. Tap it to learn what it means." arrowDirection="up">
-            <TouchableOpacity activeOpacity={0.8} onPress={() => setScoreModalVisible(true)} style={[styles.scoreCard, { borderColor }]}>
-              <Text style={styles.scoreCardLabel}>PEAK SCORE</Text>
-              {healthConnected && peakScore ? (
-                <>
-                  <Text style={[styles.scoreNum, { color: scoreColor(peakScore.score) }]}>
-                    {peakScore.score}
-                  </Text>
-                  <Text style={styles.scoreCoach}>{peakScore.coachingLine}</Text>
-                  {peakScore.baselineDay < 14 && (
-                    <View style={styles.calibrationBar}>
-                      <View style={[styles.calibrationFill, { width: `${(peakScore.baselineDay / 14) * 100}%` as any, backgroundColor: scoreColor(peakScore.score) }]} />
+        {/* Peak Score bottom sheet */}
+        <Modal
+          visible={scoreModalVisible}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          transparent={false}
+          onRequestClose={() => setScoreModalVisible(false)}
+        >
+          <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+            <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setScoreModalVisible(false)} />
+            <View style={styles.scoreSheet}>
+              <View style={styles.sheetHandle} />
+              <View style={{ alignItems: 'center', paddingHorizontal: 24, paddingTop: 16 }}>
+                {hasWearable && peakScore ? (
+                  <>
+                    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                      <View style={[styles.scoreGlow, { backgroundColor: scoreColor(peakScore.score) + '1F' }]} />
+                      <Text style={[styles.sheetScoreNum, { color: scoreColor(peakScore.score) }]}>{peakScore.score}</Text>
                     </View>
+                    <Text style={styles.sheetCoachLine} numberOfLines={2}>{peakScore.coachingLine}</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={[styles.sheetScoreNum, { color: '#8a877f' }]}>—</Text>
+                    <Text style={styles.sheetCoachLine}>No score available yet</Text>
+                  </>
+                )}
+              </View>
+              <View style={styles.sheetDivider} />
+              {[
+                {
+                  key: 'hrv',
+                  label: 'HRV',
+                  icon: <Activity size={16} color="#8a877f" />,
+                  displayVal: (hrvR && !hrvR.noWearable && hrvR.value != null) ? `${Math.round(hrvR.value as number)}ms` : null,
+                  explanation: 'Higher is better. Shows how recovered your nervous system is.',
+                },
+                {
+                  key: 'sleep',
+                  label: 'Sleep',
+                  icon: <Moon size={16} color="#8a877f" />,
+                  displayVal: (sleepR && !sleepR.noWearable && sleepR.value != null) ? `${(sleepR.value as number).toFixed(1)}h` : null,
+                  explanation: 'Hours of sleep last night. Below 7 affects recovery.',
+                },
+                {
+                  key: 'rhr',
+                  label: 'RHR',
+                  icon: <Heart size={16} color="#8a877f" />,
+                  displayVal: (rhrR && !rhrR.noWearable && rhrR.value != null) ? `${Math.round(rhrR.value as number)}bpm` : null,
+                  explanation: 'Lower resting HR = better aerobic fitness and recovery.',
+                },
+              ].map(m => (
+                <View key={m.key} style={styles.sheetMetricRow}>
+                  <View style={styles.sheetMetricHeader}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      {m.icon}
+                      <Text style={styles.sheetMetricLabel}>{m.label}</Text>
+                    </View>
+                    <Text style={styles.sheetMetricVal}>{m.displayVal ?? '—'}</Text>
+                  </View>
+                  {m.displayVal != null ? (
+                    <Text style={styles.sheetMetricExplain}>{m.explanation}</Text>
+                  ) : (
+                    <TouchableOpacity onPress={() => { setScoreModalVisible(false); navigation.navigate('Profile'); }}>
+                      <Text style={styles.sheetConnectWearable}>Connect wearable →</Text>
+                    </TouchableOpacity>
                   )}
-                  <Text style={[styles.scoreWearable, { color: scoreColor(peakScore.score) }]}>
-                    {peakScore.baselineDay < 14
-                      ? `Calibrating — day ${peakScore.baselineDay} of 14`
-                      : scoreStatusText(peakScore.score)}
-                  </Text>
-                </>
-              ) : healthConnected ? (
-                <>
-                  <Text style={[styles.scoreNum, { color: Colors.textSecondary }]}>--</Text>
-                  <Text style={styles.scoreCoach}>Loading your score...</Text>
-                </>
+                </View>
+              ))}
+            </View>
+          </View>
+        </Modal>
+
+        {/* Workout preview bottom sheet */}
+        <Modal
+          visible={workoutSheetOpen}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          transparent={false}
+          onRequestClose={() => setWorkoutSheetOpen(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: '#111111' }}>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}>
+              <View style={styles.sheetHandle} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <Text style={styles.workoutDayLabel}>{dayLabel}</Text>
+                {typeLabel && todayDay ? (
+                  <View style={[styles.typeBadge, {
+                    backgroundColor: todayDay.type === 'hard' ? 'rgba(255,59,59,0.15)' :
+                                     todayDay.type === 'easy' ? 'rgba(0,212,170,0.15)' :
+                                     'rgba(138,135,127,0.15)',
+                  }]}>
+                    <Text style={[styles.typeBadgeText, {
+                      color: todayDay.type === 'hard' ? '#ff3b3b' :
+                             todayDay.type === 'easy' ? '#00d4aa' :
+                             '#8a877f',
+                    }]}>{typeLabel.toUpperCase()}</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={[styles.workoutSessionTitle, { marginBottom: 8 }]}>{sessionTitle}</Text>
+              <View style={{ height: 1, backgroundColor: '#1a1a1a', marginBottom: 20 }} />
+              {sessions.map((session, si) => (
+                <View key={si} style={{ marginBottom: 8 }}>
+                  {(session.blocks ?? []).map((block: any, bi: number) => {
+                    const bn = block.block_name.toLowerCase();
+                    if (bn.includes('warm') || bn.includes('cool')) return null;
+                    return (
+                      <View key={bi} style={{ marginBottom: 20 }}>
+                        <Text style={{ color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 10 }}>{block.block_name}</Text>
+                        {(block.exercises ?? []).map((ex: any, ei: number) => (
+                          <View key={ei} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                            <View style={{ flex: 1, marginRight: 12 }}>
+                              <Text style={{ color: '#f0ede8', fontSize: 14, fontWeight: '600' }}>{ex.name}</Text>
+                              {ex.notes ? <Text style={{ color: '#8a877f', fontSize: 12, marginTop: 2, lineHeight: 16 }}>{ex.notes}</Text> : null}
+                            </View>
+                            {(ex.sets || ex.reps_per_set) ? (
+                              <Text style={{ color: '#8a877f', fontSize: 13, fontWeight: '600' }}>
+                                {ex.sets && ex.reps_per_set ? `${ex.sets}×${ex.reps_per_set}` : ex.sets ? `${ex.sets} sets` : `${ex.reps_per_set} reps`}
+                              </Text>
+                            ) : null}
+                          </View>
+                        ))}
+                      </View>
+                    );
+                  })}
+                </View>
+              ))}
+              <View style={{ height: 1, backgroundColor: '#1a1a1a', marginBottom: 20 }} />
+              <TouchableOpacity
+                style={styles.viewWorkoutBtn}
+                activeOpacity={0.85}
+                onPress={() => { setWorkoutSheetOpen(false); startWorkout(); }}
+              >
+                <Text style={styles.viewWorkoutBtnText}>START WORKOUT →</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </Modal>
+
+        {/* Peak Score hero card */}
+        {(() => {
+          const sc = hasWearable && peakScore ? peakScore.score : null;
+          const borderColor = sc != null ? scoreColor(sc) + '66' : '#1a1a1a';
+          return (
+            <TouchableOpacity activeOpacity={0.8} onPress={() => setScoreModalVisible(true)} style={[styles.scoreCard, { borderColor }]}>
+              {sc != null ? (
+                <View style={{ alignItems: 'center' }}>
+                  <View style={[styles.scoreGlow, { backgroundColor: scoreColor(sc) + '1F' }]} />
+                  <Text style={[styles.scoreNum, { color: scoreColor(sc) }]}>{sc}</Text>
+                  <Text style={styles.heroCoachLine} numberOfLines={2}>{peakScore!.coachingLine}</Text>
+                </View>
               ) : (
-                <>
-                  <Text style={[styles.scoreNum, { color: Colors.textSecondary }]}>--</Text>
-                  <Text style={styles.scoreCoach}>Track readiness daily.</Text>
-                  <Text style={styles.scoreWearable}>Connect your wearable for live scores</Text>
-                </>
+                <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+                  <Text style={styles.scoreCardEmptyLabel}>PEAK SCORE</Text>
+                  <View style={{ height: 80, justifyContent: 'center', alignItems: 'center' }}>
+                    <PulsingRing />
+                  </View>
+                  <TouchableOpacity onPress={() => navigation.navigate('Profile')} style={{ marginTop: 12 }}>
+                    <Text style={styles.scoreCardConnectText}>Connect a wearable to unlock</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </TouchableOpacity>
-            </Tooltip>
           );
         })()}
 
@@ -956,12 +1099,12 @@ export default function HomeScreen() {
               <Text style={styles.streakNum}>{streak}</Text>
             </View>
             <Text style={styles.miniCardLabel}>Day Streak</Text>
-            <Text style={styles.miniCardSub}>Keep your plan. Keep your streak.</Text>
+            {streak > 0 && <Text style={styles.miniCardSub}>Keep your plan. Keep your streak.</Text>}
           </View>
           <View style={[styles.miniCard, { flex: 1 }]}>
             <Text style={styles.streakNum}>{sessionCount}</Text>
             <Text style={styles.miniCardLabel}>Sessions</Text>
-            <Text style={styles.miniCardSub}>Every rep counts.</Text>
+            {sessionCount > 0 && <Text style={styles.miniCardSub}>Each one compounds.</Text>}
           </View>
         </View>
 
@@ -980,7 +1123,11 @@ export default function HomeScreen() {
               </Text>
             )}
             <Text style={styles.statLabel}>Active</Text>
-            {!hasWearable && <Text style={styles.statSub}>Connect Health</Text>}
+            {!hasWearable && (
+              <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+                <Text style={styles.connectBtn}>Connect →</Text>
+              </TouchableOpacity>
+            )}
           </View>
           {/* Total calories — Whoop cycle total or BMR + active projection */}
           {(() => {
@@ -1040,7 +1187,11 @@ export default function HomeScreen() {
                   <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                   <Text style={styles.statVal}>--</Text>
                   <Text style={styles.statLabel}>Total</Text>
-                  {!hasWearable && <Text style={styles.statSub}>Connect Health</Text>}
+                  {!hasWearable && (
+                    <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+                      <Text style={styles.connectBtn}>Connect →</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               );
             }
@@ -1056,47 +1207,6 @@ export default function HomeScreen() {
           })()}
         </View>
 
-        {/* Morning Readiness row — HRV | Sleep | RHR — always rendered */}
-        {(() => {
-          const hasWearableData = hasWearable && !!readinessData;
-          const hrvR   = hasWearableData ? selectHRVSource(readinessData!, storedProfile ?? {}) : null;
-          const sleepR = hasWearableData ? selectSleepSource(readinessData!) : null;
-          const rhrR   = hasWearableData ? selectRHRSource(readinessData!) : null;
-          const tiles = [
-            { icon: 'heart' as const,    label: 'HRV',   reading: hrvR,   unit: 'ms' },
-            { icon: 'moon' as const,     label: 'Sleep', reading: sleepR, unit: 'h' },
-            { icon: 'activity' as const, label: 'RHR',   reading: rhrR,   unit: 'bpm' },
-          ] as const;
-          return (
-            <View style={styles.row}>
-              {tiles.map(t => (
-                <TouchableOpacity
-                  key={t.label}
-                  style={[styles.statCard, { flex: 1 }]}
-                  onPress={() => navigation.navigate('Profile')}
-                  activeOpacity={0.75}
-                >
-                  <Feather name={t.icon} color={Colors.textSecondary} size={20} />
-                  {t.reading && !t.reading.noWearable && t.reading.value != null ? (
-                    <Text style={styles.recoveryVal}>
-                      {t.label === 'Sleep'
-                        ? t.reading.value.toFixed(1)
-                        : Math.round(t.reading.value as number)}{t.unit}
-                    </Text>
-                  ) : fetchingFresh && !readinessData && hasWearable ? (
-                    <ShimmerBox width={56} height={32} />
-                  ) : (
-                    <Text style={styles.connectWearable}>Connect wearable</Text>
-                  )}
-                  <Text style={styles.statLabel}>{t.label}</Text>
-                  {t.reading && !t.reading.noWearable && t.reading.source ? (
-                    <Text style={styles.readinessSource}>{t.reading.source}</Text>
-                  ) : null}
-                </TouchableOpacity>
-              ))}
-            </View>
-          );
-        })()}
 
         {/* Workout confirmation cards */}
         {pendingCandidates.map(candidate => (
@@ -1124,27 +1234,33 @@ export default function HomeScreen() {
             <Text style={styles.emptyText}>Rest day — recover well.</Text>
           </View>
         ) : (() => {
-          const firstSession = sessions[0] ?? null;
-          function startWorkout() {
-            if (!firstSession || !program) return;
-            (navigation as any).getParent<NativeStackNavigationProp<MainStackParamList>>()?.navigate('LiveWorkout', {
-              sessionJson: JSON.stringify(firstSession),
-              programId:   program.id,
-              weekNumber:  program.week_number,
-              dayName:     todayDay!.day,
-            });
-          }
           return (
             <View style={styles.workoutCard}>
-              <View style={styles.workoutCardTop}>
-                <Text style={styles.workoutDayLabel}>
-                  {dayLabel}{typeLabel ? ` — ${typeLabel}` : ''}
-                </Text>
-                <Text style={styles.workoutSessionTitle} numberOfLines={2}>{sessionTitle}</Text>
-              </View>
-              {!!workoutSummary && (
-                <Text style={styles.workoutSummary} numberOfLines={1}>{workoutSummary}</Text>
-              )}
+              <TouchableOpacity activeOpacity={0.8} onPress={() => setWorkoutSheetOpen(true)}>
+                <View style={styles.workoutCardTop}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={styles.workoutDayLabel}>{dayLabel}</Text>
+                    {typeLabel ? (
+                      <View style={[styles.typeBadge, {
+                        backgroundColor: todayDay!.type === 'hard' ? 'rgba(255,59,59,0.15)' :
+                                         todayDay!.type === 'easy' ? 'rgba(0,212,170,0.15)' :
+                                         'rgba(138,135,127,0.15)',
+                      }]}>
+                        <Text style={[styles.typeBadgeText, {
+                          color: todayDay!.type === 'hard' ? '#ff3b3b' :
+                                 todayDay!.type === 'easy' ? '#00d4aa' :
+                                 '#8a877f',
+                        }]}>{typeLabel.toUpperCase()}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.workoutSessionTitle}>{sessionTitle}</Text>
+                </View>
+                {!!workoutSummary && (
+                  <Text style={styles.workoutSummary}>{workoutSummary}</Text>
+                )}
+              </TouchableOpacity>
+              <View style={{ height: 1, backgroundColor: '#1a1a1a' }} />
               {todayCompleted ? (
                 <View style={[styles.viewWorkoutBtn, { backgroundColor: '#1a2a1a' }]}>
                   <Text style={[styles.viewWorkoutBtnText, { color: '#4aff78' }]}>SESSION COMPLETE ✓</Text>
@@ -1236,6 +1352,10 @@ export default function HomeScreen() {
         )}
 
       </ScrollView>
+      <View style={{ height: 40, position: 'absolute', bottom: 0, left: 0, right: 0 }} pointerEvents="none">
+        <LinearGradient colors={['transparent', '#111111']} style={{ flex: 1 }} />
+      </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -1252,29 +1372,68 @@ const styles = StyleSheet.create({
   headerLogo: { color: Colors.accent, fontSize: 20, fontWeight: '800', letterSpacing: -0.5 },
   headerDate: { color: Colors.textSecondary, fontSize: 13 },
 
-  // Peak Score card
+  // Peak Score hero card
   scoreCard: {
     margin: 16, backgroundColor: Colors.card, borderRadius: 16, padding: 24,
-    alignItems: 'center', borderWidth: 1.5,
-  },
-  scoreCardLabel: {
-    color: Colors.textSecondary, fontSize: 11, fontWeight: '600',
-    letterSpacing: 1.5, textTransform: 'uppercase',
+    alignItems: 'center', borderWidth: 0.5,
   },
   scoreNum: {
-    fontFamily: Fonts.metricHeavy, fontSize: 80, lineHeight: 96,
+    fontFamily: Fonts.metricHeavy, fontSize: 88, lineHeight: 100,
   },
-  scoreCoach: { color: Colors.textPrimary, fontSize: 14, textAlign: 'center', marginTop: 4 },
-  scoreWearable: { color: Colors.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 8, fontWeight: '600' },
-  calibrationBar: {
-    width: '100%', height: 4, backgroundColor: Colors.nested,
-    borderRadius: 2, marginTop: 14, overflow: 'hidden',
+  scoreGlow: {
+    position: 'absolute', width: 140, height: 140, borderRadius: 70,
   },
-  calibrationFill: { height: '100%', borderRadius: 2 },
+  heroCoachLine: {
+    color: '#8a877f', fontSize: 13, fontStyle: 'italic', textAlign: 'center', marginTop: 4,
+  },
+  scoreCardEmptyLabel: {
+    color: '#8a877f', fontSize: 11, fontWeight: '600', letterSpacing: 2,
+    textTransform: 'uppercase', textAlign: 'center', marginBottom: 16,
+  },
+  scoreCardConnectText: { color: '#e8ff47', fontSize: 12 },
+
+  // Peak Score bottom sheet
+  scoreSheet: {
+    backgroundColor: '#111111',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingBottom: 40,
+  },
+  sheetHandle: {
+    width: 40, height: 4, backgroundColor: '#333', borderRadius: 2,
+    alignSelf: 'center', marginTop: 12, marginBottom: 20,
+  },
+  sheetScoreNum: {
+    fontFamily: Fonts.metricHeavy, fontSize: 72,
+  },
+  sheetCoachLine: {
+    color: '#8a877f', fontSize: 14, fontStyle: 'italic', textAlign: 'center',
+    marginTop: 8, marginBottom: 24,
+  },
+  sheetDivider: {
+    height: 1, backgroundColor: '#1a1a1a', marginBottom: 24, marginHorizontal: 24,
+  },
+  sheetMetricRow: {
+    paddingHorizontal: 24, marginBottom: 20,
+  },
+  sheetMetricHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+  },
+  sheetMetricLabel: {
+    color: '#8a877f', fontSize: 12, fontWeight: '600', letterSpacing: 1, textTransform: 'uppercase',
+  },
+  sheetMetricVal: {
+    fontFamily: Fonts.metricHeavy, fontSize: 18, color: 'white',
+  },
+  sheetMetricExplain: {
+    color: '#8a877f', fontSize: 12, marginTop: 4,
+  },
+  sheetConnectWearable: {
+    color: '#e8ff47', fontSize: 12, marginTop: 4,
+  },
 
   // Mini + stat cards
   row: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginBottom: 10 },
-  miniCard: { backgroundColor: Colors.card, borderRadius: 14, padding: 16 },
+  miniCard: { backgroundColor: Colors.card, borderRadius: 14, padding: 16, alignItems: 'center', justifyContent: 'center' },
   streakRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   streakNum: {
     fontFamily: Fonts.metric, fontSize: 32, color: Colors.textPrimary,
@@ -1282,19 +1441,15 @@ const styles = StyleSheet.create({
   miniCardLabel: { color: Colors.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: 2 },
   miniCardSub: { color: Colors.textSecondary, fontSize: 11 },
   statCard: {
-    backgroundColor: Colors.card, borderRadius: 14, padding: 12, alignItems: 'center', gap: 4,
+    backgroundColor: Colors.card, borderRadius: 14, padding: 12, alignItems: 'center', justifyContent: 'center', gap: 4,
   },
   statVal: {
     fontFamily: Fonts.metric, color: Colors.textPrimary, fontSize: 26,
   },
-  recoveryVal: {
-    fontFamily: Fonts.metric, color: Colors.textPrimary, fontSize: 32,
-  },
   statLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600' },
   statSub:  { color: Colors.textSecondary, fontSize: 10 },
   statSync: { color: Colors.textSecondary, fontSize: 9, marginTop: 1 },
-  readinessSource:  { color: Colors.textSecondary, fontSize: 9, marginTop: 1, textAlign: 'center' },
-  connectWearable:  { color: Colors.textSecondary, fontSize: 11, textAlign: 'center', marginTop: 1 },
+  connectBtn: { color: '#e8ff47', fontSize: 12, fontWeight: '600' },
 
   // Today section header
   todayHeader: {
@@ -1306,7 +1461,8 @@ const styles = StyleSheet.create({
 
   // Compact workout card
   workoutCard: {
-    marginHorizontal: 16, backgroundColor: Colors.card, borderRadius: 16, padding: 20,
+    marginHorizontal: 16, backgroundColor: Colors.card, borderRadius: 16,
+    padding: 20, paddingBottom: 24,
     borderLeftWidth: 3, borderLeftColor: Colors.accent, gap: 12,
   },
   workoutCardTop: { gap: 4 },
@@ -1314,8 +1470,10 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary, fontSize: 11, fontWeight: '700',
     textTransform: 'uppercase', letterSpacing: 1,
   },
-  workoutSessionTitle: { color: Colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  workoutSessionTitle: { fontFamily: Fonts.metricHeavy, fontSize: 26, color: '#f0ede8' },
   workoutSummary: { color: Colors.textSecondary, fontSize: 13, lineHeight: 18 },
+  typeBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  typeBadgeText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
   viewWorkoutBtn: {
     backgroundColor: Colors.accent, borderRadius: 10, paddingVertical: 13,
     alignItems: 'center', marginTop: 4,

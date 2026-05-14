@@ -18,6 +18,6 @@ export const Fonts = {
 
 export function scoreColor(score: number): string {
   if (score >= 70) return Colors.green;
-  if (score >= 41) return Colors.yellow;
+  if (score >= 40) return Colors.yellow;
   return Colors.red;
 }
