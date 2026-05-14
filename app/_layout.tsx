@@ -47,7 +47,8 @@ import MessagesScreen from './(main)/messages';
 
 export type ExerciseItem = {
   name: string;
-  type?: 'strength' | 'cardio' | 'mobility';
+  type?: 'strength' | 'cardio' | 'mobility' | 'bodyweight';
+  is_bodyweight?: boolean;
   sets?: number;
   reps?: string;
   rest?: string;

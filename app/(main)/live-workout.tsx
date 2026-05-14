@@ -8,8 +8,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Modal, Vibration, Alert, KeyboardAvoidingView,
-  Platform, StatusBar, ActivityIndicator, AppState, Animated,
+  Modal, Vibration, Alert, KeyboardAvoidingView,
+  Platform, StatusBar, ActivityIndicator, AppState, Animated, Dimensions,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Haptics from 'expo-haptics';
@@ -21,6 +21,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainStackParamList, ProgramSession, SessionBlock, ExerciseItem } from '../_layout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../lib/supabase';
+import Svg, { Circle as SvgCircle } from 'react-native-svg';
 import { Feather } from '@expo/vector-icons';
 import { Colors, Fonts } from '../../lib/theme';
 import Tooltip from '../components/Tooltip';
@@ -157,12 +158,22 @@ function buildSpeechAnnouncement(step: Step): string | null {
 }
 
 const BODYWEIGHT_NAMES = [
-  'burpee', 'push-up', 'push up', 'pushup', 'pull-up', 'pull up', 'pullup',
-  'chin-up', 'chin up', 'chinup', 'lunge', 'squat', 'sit-up', 'sit up', 'situp',
-  'plank', 'hollow hold', 'hollow body', 'mountain climber', 'box jump',
-  'dip', 'ring dip', 'jumping jack', 'bear crawl', 'inchworm', 'walkout',
-  'v-up', 'v up', 'glute bridge', 'hip thrust', 'air squat', 'tuck jump',
-  'broad jump', 'step-up', 'step up', 'calf raise', 'jump squat',
+  'push up', 'push-up', 'pushup',
+  'pull up', 'pull-up', 'pullup',
+  'chin up', 'chin-up', 'chinup',
+  'burpee',
+  'air squat',
+  'bodyweight',
+  'banded',
+  'plank',
+  'ttb', 'toes to bar', 'toes-to-bar',
+  'leg raise',
+  'rollout',
+  'hollow hold', 'hollow body',
+  'mountain climber',
+  'bear crawl',
+  'inchworm',
+  'v-up', 'v up',
 ];
 
 function isBodyweightExercise(name: string): boolean {
@@ -255,6 +266,30 @@ function isWarmupStep(step: Step): boolean {
 function isCooldownStep(step: Step): boolean {
   if (step.kind === 'generic') return /cool/i.test(step.blockName);
   return false;
+}
+
+function nextStepLabel(step: Step | null | undefined): { name: string; detail: string } {
+  if (!step) return { name: '', detail: '' };
+  if (step.kind === 'strength')     return { name: step.exercise.name, detail: `Set ${step.setNum} of ${step.totalSets}` };
+  if (step.kind === 'run_interval') return { name: step.exercise.name, detail: `Interval ${step.intervalNum}/${step.totalIntervals}` };
+  if (step.kind === 'generic')      return { name: step.exercise.name, detail: step.exercise.reps ? String(step.exercise.reps) : '' };
+  if (step.kind === 'metcon')       return { name: step.block.block_name, detail: step.format.toUpperCase() };
+  if (step.kind === 'transition')   return { name: `${step.to} Block`, detail: 'Transition' };
+  if (step.kind === 'rest')         return { name: 'Rest', detail: formatTime(step.seconds) };
+  return { name: '', detail: '' };
+}
+
+function getCategoryLabel(step: Step): string {
+  switch (step.kind) {
+    case 'strength':     return step.blockName;
+    case 'generic':      return step.blockName;
+    case 'run_interval': return `${step.blockName} · ${step.intervalNum}/${step.totalIntervals}`;
+    case 'metcon':       return step.block.block_name;
+    case 'z2_cardio':    return 'ZONE 2';
+    case 'rest':         return 'REST';
+    case 'transition':   return `${step.from} → ${step.to}`;
+    default:             return '';
+  }
 }
 
 function buildSteps(session: ProgramSession): Step[] {
@@ -405,11 +440,48 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
   );
 }
 const pb = StyleSheet.create({
-  track: { height: 3, backgroundColor: '#222', width: '100%' },
+  track: { height: 3, backgroundColor: '#1a1a1a', width: '100%' },
   fill:  { height: 3, backgroundColor: Colors.accent },
 });
 
-function RestCountdown({ seconds, label, onSkip }: { seconds: number; label: string; onSkip: () => void }) {
+// ─── Workout Top Bar ──────────────────────────────────────────────────────────
+
+function WorkoutTopBar({ categoryLabel, elapsed, onExit }: { categoryLabel: string; elapsed: number; onExit: () => void }) {
+  return (
+    <View style={tb.bar}>
+      <TouchableOpacity onPress={onExit} style={tb.exitBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+        <Feather name="x" color="#8a877f" size={22} />
+      </TouchableOpacity>
+      <Text style={tb.category} numberOfLines={1}>{categoryLabel.toUpperCase()}</Text>
+      <Text style={tb.elapsed}>{formatTime(elapsed)}</Text>
+    </View>
+  );
+}
+const tb = StyleSheet.create({
+  bar:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8 },
+  exitBtn:  { padding: 4, width: 40 },
+  category: { color: '#8a877f', fontSize: 11, fontWeight: '700', letterSpacing: 2, flex: 1, textAlign: 'center' },
+  elapsed:  { color: '#e8ff47', fontSize: 28, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const], width: 80, textAlign: 'right' },
+});
+
+const RC_SIZE  = Math.min(Dimensions.get('window').width * 0.72, 280);
+const RC_CX    = RC_SIZE / 2;
+const RC_CY    = RC_SIZE / 2;
+const RC_R     = RC_SIZE * 0.4;
+const RC_SW    = 3;
+const RC_CIRC  = 2 * Math.PI * RC_R;
+
+function RestCountdown({
+  seconds, onSkip, lastLoggedSet, onGoBack, nextName, nextDetail,
+}: {
+  seconds: number;
+  label: string;
+  onSkip: () => void;
+  lastLoggedSet?: LoggedSet | null;
+  onGoBack?: () => void;
+  nextName?: string;
+  nextDetail?: string;
+}) {
   const [rem, setRem] = useState(seconds);
   useEffect(() => { setRem(seconds); }, [seconds]);
   useEffect(() => {
@@ -427,30 +499,89 @@ function RestCountdown({ seconds, label, onSkip }: { seconds: number; label: str
     const id = setTimeout(() => setRem(r => r - 1), 1000);
     return () => clearTimeout(id);
   }, [rem, onSkip]);
-  const pct = seconds > 0 ? Math.min((seconds - rem) / seconds, 1) : 1;
+
+  const dashOffset = RC_CIRC * rem / Math.max(1, seconds);
+
   return (
     <View style={rc.container}>
-      <Text style={rc.restLabel}>REST</Text>
-      <Text style={rc.countdown}>{formatTime(rem)}</Text>
-      <View style={rc.progressTrack}>
-        <View style={[rc.progressFill, { width: `${Math.round(pct * 100)}%` as unknown as number }]} />
+      {/* Back button + what was just logged */}
+      {lastLoggedSet && (
+        <View style={rc.loggedSection}>
+          {onGoBack && (
+            <TouchableOpacity onPress={onGoBack} style={rc.backBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Feather name="arrow-left" color="#8a877f" size={15} />
+              <Text style={rc.backText}>Re-log set</Text>
+            </TouchableOpacity>
+          )}
+          <Text style={rc.loggedExName}>{lastLoggedSet.exerciseName.toUpperCase()}</Text>
+          <Text style={rc.loggedValue}>
+            {lastLoggedSet.weight && lastLoggedSet.weight !== 'BW'
+              ? `${lastLoggedSet.weight} LBS × ${lastLoggedSet.reps} REPS`
+              : `${lastLoggedSet.reps} REPS`
+            }
+          </Text>
+        </View>
+      )}
+
+      {/* Circular ring + countdown */}
+      <View style={rc.ringWrap}>
+        <Svg width={RC_SIZE} height={RC_SIZE} style={{ position: 'absolute' }}>
+          {/* Dim background (remaining) */}
+          <SvgCircle cx={RC_CX} cy={RC_CY} r={RC_R} stroke="rgba(232,255,71,0.3)" strokeWidth={RC_SW} fill="none" />
+          {/* Bright arc (elapsed) */}
+          <SvgCircle
+            cx={RC_CX} cy={RC_CY} r={RC_R}
+            stroke="#e8ff47"
+            strokeWidth={RC_SW}
+            fill="none"
+            strokeDasharray={RC_CIRC}
+            strokeDashoffset={dashOffset}
+            strokeLinecap="butt"
+            transform={`rotate(-90, ${RC_CX}, ${RC_CY})`}
+          />
+        </Svg>
+        <View style={{ width: RC_SIZE, height: RC_SIZE, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={rc.restLabel}>REST</Text>
+          <Text style={rc.countdown}>{formatTime(rem)}</Text>
+        </View>
       </View>
-      <Text style={rc.restNote}>{label}</Text>
-      <TouchableOpacity style={rc.skip} onPress={onSkip}>
-        <Text style={rc.skipText}>Skip rest</Text>
+
+      {/* Next Up card */}
+      {nextName ? (
+        <View style={rc.nextCard}>
+          <Text style={rc.nextLabel}>NEXT</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={rc.nextName}>{nextName}</Text>
+            {nextDetail ? <Text style={rc.nextDetail}>{nextDetail}</Text> : null}
+          </View>
+        </View>
+      ) : null}
+
+      <View style={{ flex: 1 }} />
+
+      {/* Skip */}
+      <TouchableOpacity onPress={onSkip} style={rc.skip}>
+        <Text style={rc.skipText}>Skip rest →</Text>
       </TouchableOpacity>
     </View>
   );
 }
 const rc = StyleSheet.create({
-  container:     { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  restLabel:     { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 12 },
-  countdown:     { color: Colors.accent, fontSize: 88, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const] },
-  progressTrack: { width: '60%', height: 3, backgroundColor: '#222', borderRadius: 2, marginTop: 16, overflow: 'hidden' },
-  progressFill:  { height: 3, backgroundColor: Colors.accent, borderRadius: 2 },
-  restNote:      { color: Colors.textSecondary, fontSize: 13, marginTop: 16, textAlign: 'center', paddingHorizontal: 32 },
-  skip:          { marginTop: 40 },
-  skipText:      { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  container:     { flex: 1, paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 },
+  loggedSection: { marginBottom: 12 },
+  backBtn:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
+  backText:      { color: '#8a877f', fontSize: 13 },
+  loggedExName:  { color: '#8a877f', fontSize: 11, fontWeight: '700', letterSpacing: 2, marginBottom: 6 },
+  loggedValue:   { color: '#f0ede8', fontSize: 22, fontFamily: Fonts.metricHeavy },
+  ringWrap:      { alignItems: 'center', justifyContent: 'center' },
+  restLabel:     { color: '#8a877f', fontSize: 11, fontWeight: '700', letterSpacing: 2, marginBottom: 4 },
+  countdown:     { color: '#e8ff47', fontSize: 64, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const] },
+  nextCard:      { backgroundColor: '#111111', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
+  nextLabel:     { color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
+  nextName:      { color: '#f0ede8', fontSize: 14, fontWeight: '600' },
+  nextDetail:    { color: '#8a877f', fontSize: 12, marginTop: 2 },
+  skip:          { alignItems: 'flex-end' },
+  skipText:      { color: '#8a877f', fontSize: 13 },
 });
 
 function SwapSheet({ visible, onClose, onSelect }: { visible: boolean; onClose: () => void; onSelect: (l: string) => void }) {
@@ -550,6 +681,7 @@ export default function LiveWorkoutScreen() {
   const [userId,      setUserId]      = useState<string | null>(null);
   const [savedLogId,  setSavedLogId]  = useState<string | null>(null);
   const [hrZoneStep,  setHrZoneStep]  = useState<'none' | 'prompt' | 'uploading' | 'done'>('none');
+  const [lastLoggedSet, setLastLoggedSet] = useState<LoggedSet | null>(null);
 
   // Metcon state
   const [metconRounds,      setMetconRounds]      = useState(0);
@@ -855,9 +987,15 @@ export default function LiveWorkoutScreen() {
     afterRest.current = () => {
       startTimeRef.current = 0;
       Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
-      const next = stepIdx + 1;
-      if (next >= totalSteps) { setPhase('complete'); }
-      else { setStepIdx(next); setPhase('active'); setWeightInput(''); setRepsInput(''); }
+      const nextIdx = stepIdx + 1;
+      if (nextIdx >= steps.length) {
+        setPhase('complete');
+      } else {
+        setStepIdx(nextIdx);
+        setWeightInput('');
+        setRepsInput('');
+        setPhase('active');
+      }
     };
     const trNext = steps[stepIdx + 1];
     pushLiveActivityUpdate({
@@ -877,15 +1015,32 @@ export default function LiveWorkoutScreen() {
   }, []);
 
   function logSet(step: Extract<Step, { kind: 'strength' }>) {
+    const ex = step.exercise;
+    const isBW = ex.type === 'bodyweight' || (ex.type === undefined && isBodyweightExercise(ex.name));
+    const prevForEx = loggedSets.filter(l => l.exerciseName === step.exercise.name);
+    const lastW = prevForEx.length > 0 ? prevForEx[prevForEx.length - 1].weight : null;
+    const numRepsDefault = String(step.exercise.reps ?? '').match(/\d+/)?.[0] ?? String(step.exercise.reps ?? '');
     const newSet: LoggedSet = {
       exerciseName: step.exercise.name,
       set:          step.setNum,
-      weight:       weightInput,
-      reps:         repsInput || String(step.exercise.reps ?? ''),
+      weight:       isBW ? 'BW' : (weightInput || lastW || '0'),
+      reps:         repsInput || numRepsDefault,
     };
     setLoggedSets(prev => [...prev, newSet]);
+    setLastLoggedSet(newSet);
     const restS = parseRestSeconds(step.exercise.rest, step.totalSets > 3 ? 180 : 90);
     triggerRest(restS, step.exercise.rest ?? `${restS}s rest`);
+  }
+
+  function goBackToRelog() {
+    const last = loggedSets[loggedSets.length - 1];
+    setLoggedSets(prev => prev.slice(0, -1));
+    if (last) {
+      setWeightInput(last.weight === 'BW' ? '' : last.weight);
+      setRepsInput(last.reps);
+    }
+    startTimeRef.current = 0;
+    setPhase('active');
   }
 
   async function saveSession(full: boolean): Promise<string | null> {
@@ -1130,11 +1285,39 @@ export default function LiveWorkoutScreen() {
   // ── REST ──────────────────────────────────────────────────────────────────────
 
   if (phase === 'rest') {
+    const restNextStep = steps[stepIdx + 1] ?? null;
+    const restNext = nextStepLabel(restNextStep);
+    const canGoBack = steps[stepIdx]?.kind === 'strength' && lastLoggedSet != null;
+    const restExitModal = (
+      <Modal visible={exitModalVisible} transparent animationType="slide" onRequestClose={() => setExitModalVisible(false)}>
+        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} activeOpacity={1} onPress={() => setExitModalVisible(false)} />
+        <View style={{ backgroundColor: '#111111', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}>
+          <View style={{ width: 40, height: 4, backgroundColor: '#333333', borderRadius: 2, alignSelf: 'center', marginBottom: 24 }} />
+          <Text style={{ color: '#f0ede8', fontSize: 20, fontWeight: '800', marginBottom: 24 }}>End workout?</Text>
+          <TouchableOpacity style={{ backgroundColor: Colors.accent, borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 16 }} onPress={() => { setExitModalVisible(false); setPhase('complete'); }}>
+            <Text style={{ color: '#080808', fontSize: 15, fontWeight: '800' }}>End Session</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={{ alignItems: 'center', padding: 8 }} onPress={() => { setExitModalVisible(false); Alert.alert('Abandon workout?', 'All progress will be lost.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Abandon', style: 'destructive', onPress: () => { endLiveActivity(); navigation.goBack(); } }]); }}>
+            <Text style={{ color: '#8a877f', fontSize: 14 }}>Abandon Workout</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    );
     return (
       <SafeAreaView style={s.container}>
         <StatusBar barStyle="light-content" />
+        <WorkoutTopBar categoryLabel="REST" elapsed={elapsed} onExit={() => setExitModalVisible(true)} />
         <ProgressBar done={stepIdx} total={totalSteps} />
-        <RestCountdown seconds={restSecs} label={restLabel} onSkip={onRestDone} />
+        <RestCountdown
+          seconds={restSecs}
+          label={restLabel}
+          onSkip={onRestDone}
+          lastLoggedSet={canGoBack ? lastLoggedSet : null}
+          onGoBack={canGoBack ? goBackToRelog : undefined}
+          nextName={restNext.name}
+          nextDetail={restNext.detail}
+        />
+        {restExitModal}
       </SafeAreaView>
     );
   }
@@ -1145,6 +1328,7 @@ export default function LiveWorkoutScreen() {
     return (
       <SafeAreaView style={s.container}>
         <StatusBar barStyle="light-content" />
+        <WorkoutTopBar categoryLabel={`${transFrom} → ${transTo}`} elapsed={elapsed} onExit={() => setExitModalVisible(true)} />
         <ProgressBar done={stepIdx} total={totalSteps} />
         <View style={s.transContainer}>
           <Text style={s.transTag}>{transFrom.toUpperCase()} COMPLETE</Text>
@@ -1203,17 +1387,14 @@ export default function LiveWorkoutScreen() {
     </Modal>
   );
 
+  const activeNextStep = steps[stepIdx + 1] ?? null;
+
   if (isHyroxStation) {
     return (
       <SafeAreaView style={s.container}>
         <StatusBar barStyle="light-content" />
+        <WorkoutTopBar categoryLabel={getCategoryLabel(currentStep)} elapsed={elapsed} onExit={() => setExitModalVisible(true)} />
         <ProgressBar done={stepIdx} total={totalSteps} />
-        <TouchableOpacity
-          style={{ position: 'absolute', top: 8, left: 16, zIndex: 10, padding: 8 }}
-          onPress={() => setExitModalVisible(true)}
-        >
-          <Feather name="x" color={Colors.textSecondary} size={22} />
-        </TouchableOpacity>
         <HyroxTapZone
           exerciseName={(currentStep as any).exercise.name}
           target={String((currentStep as any).exercise.reps ?? '')}
@@ -1228,13 +1409,8 @@ export default function LiveWorkoutScreen() {
   return (
     <SafeAreaView style={s.container}>
       <StatusBar barStyle="light-content" />
+      <WorkoutTopBar categoryLabel={getCategoryLabel(currentStep)} elapsed={elapsed} onExit={() => setExitModalVisible(true)} />
       <ProgressBar done={stepIdx} total={totalSteps} />
-      <TouchableOpacity
-        style={{ position: 'absolute', top: 8, left: 16, zIndex: 10, padding: 8 }}
-        onPress={() => setExitModalVisible(true)}
-      >
-        <Feather name="x" color={Colors.textSecondary} size={22} />
-      </TouchableOpacity>
 
       {currentStep.kind === 'z2_cardio' && (
         <Z2Phase
@@ -1279,11 +1455,12 @@ export default function LiveWorkoutScreen() {
 
       {currentStep.kind === 'strength' && (
         <StrengthPhase
+          key={stepIdx}
           step={currentStep}
-          elapsed={elapsed}
           weightInput={weightInput}
           repsInput={repsInput}
           prevSets={loggedSets.filter(l => l.exerciseName === currentStep.exercise.name)}
+          nextStep={activeNextStep}
           onWeightChange={setWeightInput}
           onRepsChange={setRepsInput}
           onLogSet={() => logSet(currentStep)}
@@ -1613,101 +1790,132 @@ const rp = StyleSheet.create({
 // ─── Strength Phase ───────────────────────────────────────────────────────────
 
 function StrengthPhase({
-  step, elapsed, weightInput, repsInput, prevSets, onWeightChange, onRepsChange, onLogSet,
+  step, weightInput, repsInput, prevSets, nextStep, onWeightChange, onRepsChange, onLogSet,
 }: {
   step: Extract<Step, { kind: 'strength' }>;
-  elapsed: number;
   weightInput: string;
   repsInput: string;
   prevSets: LoggedSet[];
+  nextStep: Step | null;
   onWeightChange: (v: string) => void;
   onRepsChange: (v: string) => void;
   onLogSet: () => void;
 }) {
-  const ex         = step.exercise;
-  const numReps    = String(ex.reps ?? '').match(/\d+/)?.[0] ?? '';
+  const ex = step.exercise;
+  const prescribedReps = parseInt(String(ex.reps ?? '').match(/\d+/)?.[0] ?? '0') || 0;
   const lastWeight = prevSets.length > 0 ? prevSets[prevSets.length - 1].weight : null;
-  const isBW       = isBodyweightExercise(ex.name);
+  // Check type field first (set by AI), fall back to name matching for legacy programs
+  const isBW = ex.type === 'bodyweight' || (
+    ex.type === undefined && isBodyweightExercise(ex.name)
+  );
+
+  const displayWeight = weightInput !== '' ? (parseFloat(weightInput) || 0) : (lastWeight ? (parseFloat(lastWeight) || 0) : 0);
+  const displayReps   = repsInput   !== '' ? (parseInt(repsInput)    || 0) : prescribedReps;
+
+  function adjustWeight(delta: number) {
+    const cur  = weightInput !== '' ? (parseFloat(weightInput) || 0) : (lastWeight ? (parseFloat(lastWeight) || 0) : 0);
+    const next = Math.max(0, Math.round((cur + delta) * 10) / 10);
+    onWeightChange(Number.isInteger(next) ? String(next) : next.toFixed(1));
+  }
+
+  function adjustReps(delta: number) {
+    const cur  = repsInput !== '' ? (parseInt(repsInput) || 0) : prescribedReps;
+    const next = Math.max(0, cur + delta);
+    onRepsChange(String(next));
+  }
+
+  let nextLabel = '';
+  if (nextStep) {
+    if (nextStep.kind === 'strength')        nextLabel = `${nextStep.exercise.name} · Set ${nextStep.setNum}`;
+    else if (nextStep.kind === 'rest')        nextLabel = `Rest · ${formatTime(nextStep.seconds)}`;
+    else if ('exercise' in nextStep)          nextLabel = (nextStep as any).exercise.name;
+    else if (nextStep.kind === 'transition')  nextLabel = `${nextStep.to} block`;
+  }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={sp.container} keyboardShouldPersistTaps="handled">
-        <View style={sp.header}>
-          <Text style={sp.blockLabel}>{step.blockName.toUpperCase()}</Text>
-          <Text style={sp.elapsed}>{formatTime(elapsed)}</Text>
-        </View>
-
+    <View style={{ flex: 1 }}>
+      {/* Exercise header */}
+      <View style={sp.header}>
         <Text style={sp.setCounter}>SET {step.setNum} OF {step.totalSets}</Text>
         <Text style={sp.name}>{ex.name}</Text>
         <Text style={sp.prescribed}>{ex.sets} × {ex.reps}{ex.rest ? ` · ${ex.rest} rest` : ''}</Text>
         {!!(ex.notes || ex.note) && <Text style={sp.note}>{ex.notes || ex.note}</Text>}
+      </View>
 
-        {!isBW && lastWeight && <Text style={sp.lastWeight}>Last set: {lastWeight} lbs</Text>}
-
-        <View style={sp.inputRow}>
-          <View style={isBW ? { flex: 1 } : sp.inputGroup}>
-            <Text style={sp.inputLabel}>REPS</Text>
-            <TextInput
-              style={sp.input}
-              value={repsInput}
-              onChangeText={onRepsChange}
-              placeholder={numReps || '—'}
-              placeholderTextColor={Colors.textSecondary}
-              keyboardType="number-pad"
-              selectionColor={Colors.accent}
-            />
-          </View>
-          {!isBW && (
-            <View style={sp.inputGroup}>
-              <Text style={sp.inputLabel}>WEIGHT (LBS)</Text>
-              <TextInput
-                style={sp.input}
-                value={weightInput}
-                onChangeText={onWeightChange}
-                placeholder={lastWeight ?? '0'}
-                placeholderTextColor={Colors.textSecondary}
-                keyboardType="decimal-pad"
-                selectionColor={Colors.accent}
-              />
+      {/* Stepper inputs */}
+      <View style={sp.stepperRow}>
+        {!isBW && (
+          <View style={sp.stepperGroup}>
+            <Text style={sp.stepperLabel}>WEIGHT</Text>
+            <View style={sp.stepperControls}>
+              <TouchableOpacity style={sp.stepperBtn} onPress={() => adjustWeight(-2.5)}>
+                <Feather name="minus" color="#8a877f" size={20} />
+              </TouchableOpacity>
+              <Text style={sp.stepperValue}>{Number.isInteger(displayWeight) ? displayWeight : displayWeight.toFixed(1)}</Text>
+              <TouchableOpacity style={sp.stepperBtn} onPress={() => adjustWeight(2.5)}>
+                <Feather name="plus" color="#8a877f" size={20} />
+              </TouchableOpacity>
             </View>
-          )}
-        </View>
-
-        <TouchableOpacity style={[s.primaryBtn, { marginTop: 4 }]} onPress={onLogSet}>
-          <Text style={s.primaryBtnTxt}>LOG SET {step.setNum}</Text>
-        </TouchableOpacity>
-
-        {prevSets.length > 0 && (
-          <View style={sp.prevSets}>
-            {prevSets.map((ls, i) => (
-              <Text key={i} style={sp.prevRow}>Set {ls.set} · {ls.reps} reps · {ls.weight} lbs</Text>
-            ))}
+            <Text style={sp.stepperUnit}>LBS</Text>
           </View>
         )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+        <View style={sp.stepperGroup}>
+          <Text style={sp.stepperLabel}>REPS</Text>
+          <View style={sp.stepperControls}>
+            <TouchableOpacity style={sp.stepperBtn} onPress={() => adjustReps(-1)}>
+              <Feather name="minus" color="#8a877f" size={20} />
+            </TouchableOpacity>
+            <Text style={sp.stepperValue}>{displayReps}</Text>
+            <TouchableOpacity style={sp.stepperBtn} onPress={() => adjustReps(1)}>
+              <Feather name="plus" color="#8a877f" size={20} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <View style={{ flex: 1 }} />
+
+      {/* Previous sets */}
+      {prevSets.length > 0 && (
+        <View style={sp.prevSets}>
+          {prevSets.map((ls, i) => (
+            <Text key={i} style={sp.prevRow}>Set {ls.set} · {ls.reps} reps{ls.weight && ls.weight !== 'BW' ? ` · ${ls.weight} lbs` : ''}</Text>
+          ))}
+        </View>
+      )}
+
+      {/* Next Up card */}
+      {nextLabel ? (
+        <View style={s.nextCard}>
+          <Text style={s.nextCardLabel}>NEXT</Text>
+          <Text style={s.nextCardName}>{nextLabel}</Text>
+        </View>
+      ) : null}
+
+      {/* Log button */}
+      <TouchableOpacity style={sp.logBtn} onPress={onLogSet}>
+        <Text style={sp.logBtnTxt}>LOG SET {step.setNum}</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 const sp = StyleSheet.create({
-  container:   { padding: 28, paddingBottom: 60, flexGrow: 1 },
-  header:      { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  blockLabel:  { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 2 },
-  elapsed:     { color: Colors.textSecondary, fontSize: 13, fontVariant: ['tabular-nums' as const] },
-  setCounter:  { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
-  name:        { color: Colors.textPrimary, fontSize: 28, fontWeight: '800', lineHeight: 32, marginBottom: 4 },
-  prescribed:  { color: Colors.textSecondary, fontSize: 14, marginBottom: 4 },
-  note:        { color: Colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 8 },
-  lastWeight:  { color: Colors.textSecondary, fontSize: 13, marginBottom: 20 },
-  inputRow:    { flexDirection: 'row', gap: 16, marginBottom: 20 },
-  inputGroup:  { flex: 1, gap: 6 },
-  inputLabel:  { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
-  input: {
-    backgroundColor: Colors.nested, borderRadius: 10, padding: 14,
-    color: Colors.textPrimary, fontSize: 28, fontFamily: Fonts.metric, textAlign: 'center',
-    borderWidth: 1, borderColor: '#2a2a2a',
-  },
-  prevSets: { marginTop: 24, gap: 4 },
-  prevRow:  { color: '#444', fontSize: 13 },
+  header:          { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 12 },
+  setCounter:      { color: '#8a877f', fontSize: 11, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
+  name:            { color: '#f0ede8', fontSize: 38, fontFamily: Fonts.metricHeavy, lineHeight: 42, marginBottom: 6 },
+  prescribed:      { color: '#8a877f', fontSize: 13, marginBottom: 4 },
+  note:            { color: '#8a877f', fontSize: 13, fontStyle: 'italic', lineHeight: 18 },
+  stepperRow:      { flexDirection: 'row', paddingHorizontal: 24, gap: 16, marginTop: 24 },
+  stepperGroup:    { flex: 1, alignItems: 'center' },
+  stepperLabel:    { color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 12 },
+  stepperControls: { flexDirection: 'row', alignItems: 'center', gap: 20 },
+  stepperBtn:      { width: 48, height: 48, borderRadius: 24, backgroundColor: '#1a1a1a', alignItems: 'center', justifyContent: 'center' },
+  stepperValue:    { color: '#f0ede8', fontSize: 48, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const], minWidth: 80, textAlign: 'center' },
+  stepperUnit:     { color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginTop: 8 },
+  prevSets:        { paddingHorizontal: 24, gap: 4, marginBottom: 8 },
+  prevRow:         { color: '#3a3a3a', fontSize: 13 },
+  logBtn:          { backgroundColor: '#e8ff47', margin: 16, borderRadius: 14, padding: 20, alignItems: 'center' },
+  logBtnTxt:       { color: '#080808', fontSize: 20, fontFamily: Fonts.metricHeavy, letterSpacing: 1 },
 });
 
 // ─── Hyrox Tap Zone ───────────────────────────────────────────────────────────
@@ -1868,7 +2076,7 @@ function HRZoneUploader({
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: Colors.background },
+  container:    { flex: 1, backgroundColor: '#080808' },
   centerPad:    { padding: 24, paddingBottom: 60, flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
   transContainer: { flex: 1, padding: 28, justifyContent: 'center', alignItems: 'center' },
   transTag:     { color: Colors.accent, fontSize: 11, fontWeight: '800', letterSpacing: 2, marginBottom: 16 },
@@ -1893,4 +2101,8 @@ const s = StyleSheet.create({
   rpeTxt:   { color: Colors.textSecondary, fontSize: 14, fontWeight: '700' },
   rpeTxtOn: { color: Colors.background },
   rpeDesc:  { color: Colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 40 },
+
+  nextCard:      { marginHorizontal: 16, marginBottom: 8, backgroundColor: '#111111', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  nextCardLabel: { color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
+  nextCardName:  { color: '#f0ede8', fontSize: 14, fontWeight: '600', flex: 1 },
 });
