@@ -1858,11 +1858,11 @@ export default function OnboardingScreen({ navigation }: Props) {
                 d.isHard && { borderLeftWidth: 3, borderLeftColor: '#e8ff47' },
                 d.isRest && { opacity: 0.5 }
               ]}>
-                <Text style={styles.assessDayLabel}>{d.day}</Text>
+                <Text style={[styles.assessDayLabel, { minWidth: 90, flexShrink: 0 }]}>{d.day}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   {d.isHard && (
-                    <View style={{ backgroundColor: '#ff3b3b', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                      <Text style={{ color: 'white', fontSize: 10, fontWeight: '700' }}>HARD</Text>
+                    <View style={{ backgroundColor: '#e8ff47', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                      <Text style={{ color: '#080808', fontSize: 10, fontWeight: '700' }}>HARD</Text>
                     </View>
                   )}
                   <Text style={styles.assessDaySession}>{d.session}</Text>
