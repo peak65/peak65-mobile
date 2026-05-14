@@ -468,9 +468,13 @@ export default function OnboardingScreen({ navigation }: Props) {
   }
 
   function toggleTrainingDay(day: string) {
+    const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
+    const dayOrder = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
     setData(prev => {
       const arr = prev.training_days;
-      const next = arr.includes(day) ? arr.filter(d => d !== day) : [...arr, day];
+      const next = arr.includes(capitalizedDay)
+        ? arr.filter(d => d !== capitalizedDay)
+        : [...arr, capitalizedDay].sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
       return { ...prev, training_days: next, training_days_count: next.length };
     });
   }
@@ -1803,12 +1807,13 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   if (closingPhase === 'assessment') {
     const isHyrox = data.goal === 'hyrox';
-    const trainingDays = Array.isArray(data.training_days) ? data.training_days : [];
-    const restDays = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
-      .filter(d => !trainingDays.includes(d));
-
     const dayOrder = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-    const sortedTrainingDays = [...trainingDays].sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
+    const trainingDays = Array.isArray(data.training_days)
+      ? [...data.training_days]
+          .map((d: string) => d.charAt(0).toUpperCase() + d.slice(1))
+          .sort((a: string, b: string) => dayOrder.indexOf(a) - dayOrder.indexOf(b))
+      : [];
+    const restDays = dayOrder.filter(d => !trainingDays.includes(d));
 
     // Build session schedule based on actual training days
     // Hard 1, Easy 1, Hard 2, Easy 2, Hard 3, Easy 3, then rest days

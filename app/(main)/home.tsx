@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { Zap, Target, Activity, Moon, Heart } from 'lucide-react-native';
+import { Zap, Target, Activity, Moon, Heart, Flame, Dumbbell } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../lib/supabase';
 import {
@@ -370,6 +370,26 @@ export default function HomeScreen() {
   const [scoreModalVisible, setScoreModalVisible] = useState(false);
   const [workoutSheetOpen, setWorkoutSheetOpen]   = useState(false);
   const [cacheStale, setCacheStale]               = useState(false);
+  const [countupFraction, setCountupFraction]     = useState(1);
+
+  // ── Count-up animation (once per calendar day) ──────────────────────────────
+
+  async function runCountupIfNeeded() {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const last = await AsyncStorage.getItem('countup_date');
+    if (last === todayStr) return;
+    await AsyncStorage.setItem('countup_date', todayStr);
+    const startTime = Date.now();
+    const duration = 600;
+    function tick() {
+      const elapsed = Date.now() - startTime;
+      const f = Math.min(1, elapsed / duration);
+      setCountupFraction(f);
+      if (f < 1) requestAnimationFrame(tick);
+    }
+    setCountupFraction(0);
+    requestAnimationFrame(tick);
+  }
 
   // ── Week 2 generation ────────────────────────────────────────────────────────
 
@@ -542,6 +562,7 @@ export default function HomeScreen() {
 
     setLoading(false);
     setCacheStale(false);
+    runCountupIfNeeded();
 
     // Persist home data to AsyncStorage for instant render on next open
     AsyncStorage.setItem('home_cache', JSON.stringify({
@@ -1095,14 +1116,17 @@ export default function HomeScreen() {
         <View style={styles.row}>
           <View style={[styles.miniCard, { flex: 1 }]}>
             <View style={styles.streakRow}>
-              <Feather name="zap" color={Colors.accent} size={18} />
-              <Text style={styles.streakNum}>{streak}</Text>
+              <Flame color={Colors.accent} size={18} strokeWidth={1.5} />
+              <Text style={styles.streakNum}>{Math.round(streak * countupFraction)}</Text>
             </View>
             <Text style={styles.miniCardLabel}>Day Streak</Text>
             {streak > 0 && <Text style={styles.miniCardSub}>Keep your plan. Keep your streak.</Text>}
           </View>
           <View style={[styles.miniCard, { flex: 1 }]}>
-            <Text style={styles.streakNum}>{sessionCount}</Text>
+            <View style={styles.streakRow}>
+              <Dumbbell color={Colors.textSecondary} size={18} strokeWidth={1.5} />
+              <Text style={styles.streakNum}>{Math.round(sessionCount * countupFraction)}</Text>
+            </View>
             <Text style={styles.miniCardLabel}>Sessions</Text>
             {sessionCount > 0 && <Text style={styles.miniCardSub}>Each one compounds.</Text>}
           </View>
@@ -1118,11 +1142,11 @@ export default function HomeScreen() {
             ) : (
               <Text style={styles.statVal}>
                 {hasWearable && (readinessData?.activeCalories?.value ?? healthData?.activeCalories) != null
-                  ? `${readinessData?.activeCalories?.value ?? healthData?.activeCalories}`
+                  ? `${Math.round((readinessData?.activeCalories?.value ?? healthData?.activeCalories)! * countupFraction)}`
                   : '--'}
               </Text>
             )}
-            <Text style={styles.statLabel}>Active</Text>
+            <Text style={styles.statLabel}>Active Cal</Text>
             {!hasWearable && (
               <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
                 <Text style={styles.connectBtn}>Connect →</Text>
@@ -1136,7 +1160,7 @@ export default function HomeScreen() {
                 <View style={[styles.statCard, { flex: 1 }]}>
                   <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                   <ShimmerBox width={64} height={26} />
-                  <Text style={styles.statLabel}>Total</Text>
+                  <Text style={styles.statLabel}>Total Cal</Text>
                 </View>
               );
             }
@@ -1159,8 +1183,8 @@ export default function HomeScreen() {
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
                   <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
-                  <Text style={styles.statVal}>{projectedTotal ?? whoopTotal}</Text>
-                  <Text style={styles.statLabel}>{projectedTotal != null ? 'Projected' : 'Total'}</Text>
+                  <Text style={styles.statVal}>{Math.round((projectedTotal ?? whoopTotal)! * countupFraction)}</Text>
+                  <Text style={styles.statLabel}>{projectedTotal != null ? 'Projected' : 'Total Cal'}</Text>
                   <Text style={styles.statSub}>{projectedTotal != null ? `${whoopTotal} so far` : 'Whoop'}</Text>
                 </View>
               );
@@ -1186,7 +1210,7 @@ export default function HomeScreen() {
                 <View style={[styles.statCard, { flex: 1 }]}>
                   <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
                   <Text style={styles.statVal}>--</Text>
-                  <Text style={styles.statLabel}>Total</Text>
+                  <Text style={styles.statLabel}>Total Cal</Text>
                   {!hasWearable && (
                     <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
                       <Text style={styles.connectBtn}>Connect →</Text>
@@ -1198,7 +1222,7 @@ export default function HomeScreen() {
             return (
               <View style={[styles.statCard, { flex: 1 }]}>
                 <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
-                <Text style={styles.statVal}>{projected}</Text>
+                <Text style={styles.statVal}>{Math.round(projected * countupFraction)}</Text>
                 <Text style={styles.statLabel}>Projected</Text>
                 {currentBurn != null && <Text style={styles.statSub}>{currentBurn} so far</Text>}
                 {syncTime && <Text style={styles.statSync}>synced {syncTime}</Text>}
