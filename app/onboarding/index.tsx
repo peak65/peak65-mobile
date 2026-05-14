@@ -2095,29 +2095,19 @@ export default function OnboardingScreen({ navigation }: Props) {
             </>
           )}
 
-          {/* HR requirement card */}
-          <View style={{
-            backgroundColor: '#0f0f0f',
-            borderRadius: 12,
-            padding: 16,
-            marginTop: 8,
+          {/* Closing statement */}
+          <Text style={{
+            fontSize: 20,
+            fontWeight: '800',
+            fontFamily: 'BarlowCondensed_700Bold',
+            color: '#f0ede8',
+            textAlign: 'center',
+            marginTop: 28,
             marginBottom: 8,
-            borderWidth: 1,
-            borderColor: '#1a1a1a',
-            flexDirection: 'row',
-            alignItems: 'flex-start',
-            gap: 12,
+            lineHeight: 26,
           }}>
-            <Text style={{ fontSize: 18 }}>📊</Text>
-            <Text style={{
-              fontSize: 13,
-              color: '#8a877f',
-              lineHeight: 19,
-              flex: 1,
-            }}>
-              Upload your HR screenshot after every cardio session. That data is what makes this personal.
-            </Text>
-          </View>
+            Three sessions. Real data.{'\n'}Then we build your 65.
+          </Text>
         </ScrollView>
 
         <View style={styles.footer}>
