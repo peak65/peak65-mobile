@@ -1840,47 +1840,292 @@ export default function OnboardingScreen({ navigation }: Props) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <Text style={styles.logo}>Peak 65</Text>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 24, flexGrow: 1 }}>
-          <Text style={styles.label}>
-            {isHyrox
-              ? "Here's your assessment week."
-              : "Here's your assessment week."}
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <Text style={{
+            fontSize: 32,
+            fontWeight: '800',
+            color: '#f0ede8',
+            lineHeight: 38,
+            marginBottom: 8,
+          }}>
+            Your baseline{'\n'}starts now.
           </Text>
-          <Text style={{ color: '#8a877f', fontSize: 14, marginTop: 8, marginBottom: 20, lineHeight: 20 }}>
-            {isHyrox
-              ? "Three hard sessions establish your baseline. Upload your HR data after each cardio session — it's how we set your training zones."
-              : "Three hard sessions establish your baseline. Upload your HR data after each cardio session — it's how we set your training zones."}
+          <Text style={{
+            fontSize: 15,
+            color: '#8a877f',
+            marginBottom: 32,
+            lineHeight: 22,
+            letterSpacing: 0.2,
+          }}>
+            Assess. Real data. A program built for you.
           </Text>
-          <View style={{ gap: 10 }}>
-            {schedule.map(d => (
-              <View key={d.day} style={[
-                styles.assessDay,
-                d.isHard && { borderLeftWidth: 3, borderLeftColor: '#e8ff47' },
-                d.isRest && { opacity: 0.5 }
-              ]}>
-                <Text style={[styles.assessDayLabel, { minWidth: 90, flexShrink: 0 }]}>{d.day}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  {d.isHard && (
-                    <View style={{ backgroundColor: '#e8ff47', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                      <Text style={{ color: '#080808', fontSize: 10, fontWeight: '700' }}>HARD</Text>
-                    </View>
-                  )}
-                  <Text style={styles.assessDaySession}>{d.session}</Text>
-                </View>
+
+          {/* Hard session cards */}
+          {isHyrox ? (
+            <>
+              {/* Hyrox Card 1 */}
+              <View style={{
+                backgroundColor: '#111111',
+                borderRadius: 16,
+                padding: 20,
+                marginBottom: 12,
+                borderLeftWidth: 3,
+                borderLeftColor: '#e8ff47',
+              }}>
+                <Text style={{
+                  fontSize: 11,
+                  fontWeight: '700',
+                  letterSpacing: 2,
+                  color: '#e8ff47',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}>Hard Session 1</Text>
+                <Text style={{
+                  fontSize: 22,
+                  fontWeight: '800',
+                  color: '#f0ede8',
+                  marginBottom: 6,
+                  fontFamily: 'BarlowCondensed_700Bold',
+                }}>Run Time Trial</Text>
+                <Text style={{
+                  fontSize: 13,
+                  color: '#8a877f',
+                  lineHeight: 19,
+                }}>Your pace + HR sets your threshold anchor. Every run in your program traces back to this moment.</Text>
               </View>
-            ))}
-          </View>
-          <View style={[styles.coachingCard, { marginTop: 20 }]}>
-            <Text style={styles.coachingText}>
-              {isHyrox
-                ? "Week 2 adds your row erg baseline. Your full program generates after assessment is complete."
-                : "Your full program generates after assessment is complete. Every session after that is built around your real numbers."}
+
+              {/* Hyrox Card 2 */}
+              <View style={{
+                backgroundColor: '#111111',
+                borderRadius: 16,
+                padding: 20,
+                marginBottom: 12,
+                borderLeftWidth: 3,
+                borderLeftColor: '#e8ff47',
+              }}>
+                <Text style={{
+                  fontSize: 11,
+                  fontWeight: '700',
+                  letterSpacing: 2,
+                  color: '#e8ff47',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}>Hard Session 2</Text>
+                <Text style={{
+                  fontSize: 22,
+                  fontWeight: '800',
+                  color: '#f0ede8',
+                  marginBottom: 6,
+                  fontFamily: 'BarlowCondensed_700Bold',
+                }}>Ski Erg Time Trial</Text>
+                <Text style={{
+                  fontSize: 13,
+                  color: '#8a877f',
+                  lineHeight: 19,
+                }}>15 min rest, then strength. One session, two baselines. Your erg splits anchor every station session from here.</Text>
+              </View>
+
+              {/* Hyrox Card 3 */}
+              <View style={{
+                backgroundColor: '#111111',
+                borderRadius: 16,
+                padding: 20,
+                marginBottom: 12,
+                borderLeftWidth: 3,
+                borderLeftColor: '#e8ff47',
+              }}>
+                <Text style={{
+                  fontSize: 11,
+                  fontWeight: '700',
+                  letterSpacing: 2,
+                  color: '#e8ff47',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}>Hard Session 3</Text>
+                <Text style={{
+                  fontSize: 22,
+                  fontWeight: '800',
+                  color: '#f0ede8',
+                  marginBottom: 6,
+                  fontFamily: 'BarlowCondensed_700Bold',
+                }}>Work Capacity AMRAP</Text>
+                <Text style={{
+                  fontSize: 13,
+                  color: '#8a877f',
+                  lineHeight: 19,
+                }}>25 minutes. Your engine, measured.</Text>
+              </View>
+
+              {/* Hyrox Card 4 — Week 2 */}
+              <View style={{
+                backgroundColor: '#111111',
+                borderRadius: 16,
+                padding: 20,
+                marginBottom: 12,
+                borderLeftWidth: 3,
+                borderLeftColor: '#e8ff47',
+                opacity: 0.75,
+              }}>
+                <Text style={{
+                  fontSize: 11,
+                  fontWeight: '700',
+                  letterSpacing: 2,
+                  color: '#e8ff47',
+                  textTransform: 'uppercase',
+                  marginBottom: 4,
+                }}>Week 2 — Hard Session 4</Text>
+                <Text style={{
+                  fontSize: 11,
+                  color: '#8a877f',
+                  marginBottom: 8,
+                  fontStyle: 'italic',
+                }}>Unlocks after Week 1 is complete</Text>
+                <Text style={{
+                  fontSize: 22,
+                  fontWeight: '800',
+                  color: '#f0ede8',
+                  marginBottom: 6,
+                  fontFamily: 'BarlowCondensed_700Bold',
+                }}>Row Erg Time Trial</Text>
+                <Text style={{
+                  fontSize: 13,
+                  color: '#8a877f',
+                  lineHeight: 19,
+                }}>Your full erg profile locked in. Now the AI has everything it needs.</Text>
+              </View>
+            </>
+          ) : (
+            <>
+              {/* GF Card 1 */}
+              <View style={{
+                backgroundColor: '#111111',
+                borderRadius: 16,
+                padding: 20,
+                marginBottom: 12,
+                borderLeftWidth: 3,
+                borderLeftColor: '#e8ff47',
+              }}>
+                <Text style={{
+                  fontSize: 11,
+                  fontWeight: '700',
+                  letterSpacing: 2,
+                  color: '#e8ff47',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}>Hard Session 1</Text>
+                <Text style={{
+                  fontSize: 22,
+                  fontWeight: '800',
+                  color: '#f0ede8',
+                  marginBottom: 6,
+                  fontFamily: 'BarlowCondensed_700Bold',
+                }}>Run Time Trial</Text>
+                <Text style={{
+                  fontSize: 13,
+                  color: '#8a877f',
+                  lineHeight: 19,
+                }}>Your pace + HR sets every future run zone. This is the number everything builds from.</Text>
+              </View>
+
+              {/* GF Card 2 */}
+              <View style={{
+                backgroundColor: '#111111',
+                borderRadius: 16,
+                padding: 20,
+                marginBottom: 12,
+                borderLeftWidth: 3,
+                borderLeftColor: '#e8ff47',
+              }}>
+                <Text style={{
+                  fontSize: 11,
+                  fontWeight: '700',
+                  letterSpacing: 2,
+                  color: '#e8ff47',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}>Hard Session 2</Text>
+                <Text style={{
+                  fontSize: 22,
+                  fontWeight: '800',
+                  color: '#f0ede8',
+                  marginBottom: 6,
+                  fontFamily: 'BarlowCondensed_700Bold',
+                }}>Strength Baseline</Text>
+                <Text style={{
+                  fontSize: 13,
+                  color: '#8a877f',
+                  lineHeight: 19,
+                }}>5RM testing across four lifts. Every load in your program traces back to what you do here.</Text>
+              </View>
+
+              {/* GF Card 3 */}
+              <View style={{
+                backgroundColor: '#111111',
+                borderRadius: 16,
+                padding: 20,
+                marginBottom: 12,
+                borderLeftWidth: 3,
+                borderLeftColor: '#e8ff47',
+              }}>
+                <Text style={{
+                  fontSize: 11,
+                  fontWeight: '700',
+                  letterSpacing: 2,
+                  color: '#e8ff47',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}>Hard Session 3</Text>
+                <Text style={{
+                  fontSize: 22,
+                  fontWeight: '800',
+                  color: '#f0ede8',
+                  marginBottom: 6,
+                  fontFamily: 'BarlowCondensed_700Bold',
+                }}>Work Capacity AMRAP</Text>
+                <Text style={{
+                  fontSize: 13,
+                  color: '#8a877f',
+                  lineHeight: 19,
+                }}>25 minutes. Your engine, measured.</Text>
+              </View>
+            </>
+          )}
+
+          {/* HR requirement card */}
+          <View style={{
+            backgroundColor: '#0f0f0f',
+            borderRadius: 12,
+            padding: 16,
+            marginTop: 8,
+            marginBottom: 8,
+            borderWidth: 1,
+            borderColor: '#1a1a1a',
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: 12,
+          }}>
+            <Text style={{ fontSize: 18 }}>📊</Text>
+            <Text style={{
+              fontSize: 13,
+              color: '#8a877f',
+              lineHeight: 19,
+              flex: 1,
+            }}>
+              Upload your HR screenshot after every cardio session. That data is what makes this personal.
             </Text>
           </View>
         </ScrollView>
+
         <View style={styles.footer}>
-          <TouchableOpacity style={styles.continueBtn} onPress={() => navigation.replace('Tabs')}>
-            <Text style={styles.continueBtnText}>Start My Assessment Week</Text>
+          <TouchableOpacity
+            style={styles.continueBtn}
+            onPress={() => navigation.replace('Tabs')}
+          >
+            <Text style={styles.continueBtnText}>Let's build your baseline →</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
