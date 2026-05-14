@@ -1957,7 +1957,7 @@ export default function OnboardingScreen({ navigation }: Props) {
                   fontSize: 13,
                   color: '#8a877f',
                   lineHeight: 19,
-                }}>25 minutes. Your engine, measured.</Text>
+                }}>25 minutes. Your engine, measured. Every rep tells us how your engine handles fatigue. This number changes everything that comes after.</Text>
               </View>
 
               {/* Hyrox Card 4 — Week 2 */}
@@ -2090,23 +2090,23 @@ export default function OnboardingScreen({ navigation }: Props) {
                   fontSize: 13,
                   color: '#8a877f',
                   lineHeight: 19,
-                }}>25 minutes. Your engine, measured.</Text>
+                }}>25 minutes. Your engine, measured. Every rep tells us how your engine handles fatigue. This number changes everything that comes after.</Text>
               </View>
             </>
           )}
 
           {/* Closing statement */}
           <Text style={{
-            fontSize: 20,
-            fontWeight: '800',
-            fontFamily: 'BarlowCondensed_700Bold',
-            color: '#f0ede8',
+            fontSize: 38,
+            fontWeight: '900',
+            fontFamily: 'BarlowCondensed_900Black',
+            color: '#e8ff47',
             textAlign: 'center',
-            marginTop: 28,
-            marginBottom: 8,
-            lineHeight: 26,
+            marginTop: 40,
+            marginBottom: 16,
+            lineHeight: 44,
           }}>
-            Three sessions. Real data.{'\n'}Then we build your 65.
+            Three sessions.{'\n'}Real data.{'\n'}Then we build your 65.
           </Text>
         </ScrollView>
 
@@ -2115,7 +2115,7 @@ export default function OnboardingScreen({ navigation }: Props) {
             style={styles.continueBtn}
             onPress={() => navigation.replace('Tabs')}
           >
-            <Text style={styles.continueBtnText}>Let's build your baseline →</Text>
+            <Text style={styles.continueBtnText}>I'M READY →</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
