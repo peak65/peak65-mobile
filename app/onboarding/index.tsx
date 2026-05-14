@@ -1431,7 +1431,7 @@ export default function OnboardingScreen({ navigation }: Props) {
         <Text style={styles.sublabel}>Select the days you can train each week</Text>
         <View style={styles.dayGrid}>
           {WEEK_DAYS.map((day, i) => {
-            const selected = data.training_days.includes(day);
+            const selected = data.training_days.includes(day.charAt(0).toUpperCase() + day.slice(1));
             return (
               <TouchableOpacity key={day} style={[styles.dayBtn, selected && styles.dayBtnSelected]} onPress={() => toggleTrainingDay(day)}>
                 <Text style={[styles.dayBtnText, selected && styles.dayBtnTextSelected]}>{WEEK_LABELS[i]}</Text>
