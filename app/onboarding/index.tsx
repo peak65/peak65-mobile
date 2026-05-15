@@ -80,7 +80,7 @@ type StepKey =
   | 'trainingDays' | 'sessionDetails' | 'wearable' | 'referral'
   | 'gfClosing' | 'onboardingSummary';
 
-type ClosingPhase = null | 'calibrating' | 'push' | 'assessment' | 'startdate';
+type ClosingPhase = null | 'saving' | 'push' | 'assessment' | 'startdate' | 'generating';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -379,9 +379,9 @@ export default function OnboardingScreen({ navigation }: Props) {
     }
   }, [currentKey]);
 
-  // Calibration checklist ticker
+  // Saving checklist ticker
   useEffect(() => {
-    if (closingPhase !== 'calibrating') return;
+    if (closingPhase !== 'saving') return;
     if (checklistStep >= CHECKLIST_ITEMS.length - 1) return;
     const id = setTimeout(() => setChecklistStep(s => s + 1), 2000);
     return () => clearTimeout(id);
@@ -389,10 +389,18 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   // Coaching card rotator
   useEffect(() => {
-    if (closingPhase !== 'calibrating') return;
+    if (closingPhase !== 'saving') return;
     const id = setInterval(() => setCardIdx(i => (i + 1) % COACHING_CARDS.length), 3000);
     return () => clearInterval(id);
   }, [closingPhase]);
+
+  // Generating checklist ticker
+  useEffect(() => {
+    if (closingPhase !== 'generating') return;
+    if (checklistStep >= 4) return;
+    const t = setTimeout(() => setChecklistStep(s => s + 1), 2000);
+    return () => clearTimeout(t);
+  }, [closingPhase, checklistStep]);
 
   // Default selectedStartDate to first training day in next 7 days
   useEffect(() => {
@@ -571,7 +579,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       });
       clearTimeout(timeout);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setClosingPhase('push');
+      navigation.replace('Tabs');
     } catch {
       clearTimeout(timeout);
       setApiError(true);
@@ -579,7 +587,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   }, []);
 
   async function handleSubmit() {
-    setClosingPhase('calibrating');
+    setClosingPhase('saving');
     setChecklistStep(0);
 
     const { data: authData } = await supabase.auth.getUser();
@@ -1759,15 +1767,21 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   // ── Closing phase renders ─────────────────────────────────────────────────────
 
-  if (closingPhase === 'calibrating') {
+  if (closingPhase === 'saving') {
+    const savingItems = [
+      'Saving your profile',
+      'Setting up your coaching system',
+      'Preparing your assessment week',
+      'Almost ready...',
+    ];
     return (
       <SafeAreaView style={styles.container} edges={['top','bottom']}>
         <Text style={styles.logo}>Peak 65</Text>
         <View style={styles.loadingBody}>
-          <Text style={styles.loadingTitle}>Building your engine{data.first_name ? `, ${data.first_name}` : ''}.</Text>
+          <Text style={styles.loadingTitle}>Setting things up{data.first_name ? `, ${data.first_name}` : ''}.</Text>
           <Text style={styles.loadingSubtext}>This takes a few seconds.</Text>
           <View style={styles.checklistContainer}>
-            {CHECKLIST_ITEMS.map((item, i) => {
+            {savingItems.map((item, i) => {
               const done = i < checklistStep;
               const active = i === checklistStep;
               return (
@@ -1784,15 +1798,9 @@ export default function OnboardingScreen({ navigation }: Props) {
               );
             })}
           </View>
-          {apiError ? (
-            <TouchableOpacity onPress={callGenerateAssessment} style={styles.retryBtn}>
-              <Text style={styles.retryText}>Something went wrong. Tap to try again.</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={[styles.coachingCard, { marginTop: 32 }]}>
-              <Text style={[styles.coachingText, { textAlign: 'center' }]}>{COACHING_CARDS[cardIdx]}</Text>
-            </View>
-          )}
+          <View style={[styles.coachingCard, { marginTop: 32 }]}>
+            <Text style={[styles.coachingText, { textAlign: 'center' }]}>{COACHING_CARDS[cardIdx]}</Text>
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -2159,15 +2167,16 @@ export default function OnboardingScreen({ navigation }: Props) {
 
     const handleBuildProgram = async () => {
       if (!selectedStartDate) return;
-      const { data: authData } = await supabase.auth.getUser();
-      if (!authData?.user) return;
-      setApiError(false);
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth?.user) return;
       const formattedDate = formatDate(selectedStartDate);
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       await supabase.from('profiles').update({
         program_start_date: formattedDate,
         timezone: tz,
-      }).eq('id', authData.user.id);
+      }).eq('id', auth.user.id);
+      setChecklistStep(0);
+      setClosingPhase('generating');
       callGenerateAssessment();
     };
 
@@ -2325,6 +2334,73 @@ export default function OnboardingScreen({ navigation }: Props) {
     );
   }
 
+
+  if (closingPhase === 'generating') {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <Text style={styles.logo}>Peak 65</Text>
+        <View style={{ flex: 1, paddingHorizontal: 24, justifyContent: 'center' }}>
+          <Text style={{
+            fontSize: 28,
+            fontWeight: '800',
+            color: '#f0ede8',
+            marginBottom: 8,
+            fontFamily: 'BarlowCondensed_700Bold',
+          }}>Building your{'\n'}program.</Text>
+          <Text style={{
+            fontSize: 14,
+            color: '#8a877f',
+            marginBottom: 40,
+            lineHeight: 20,
+          }}>
+            The AI is reading your data and building every session from scratch. This usually takes 1–2 minutes.
+          </Text>
+          {[
+            'Analyzing your profile and goals',
+            'Applying Peak 65 coaching methodology',
+            'Calibrating your threshold zones',
+            'Building your assessment sessions',
+          ].map((item, idx) => (
+            <View key={idx} style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+              marginBottom: 16,
+            }}>
+              <View style={{
+                width: 20,
+                height: 20,
+                borderRadius: 10,
+                backgroundColor: checklistStep > idx ? '#e8ff47' : '#1a1a1a',
+                borderWidth: 1,
+                borderColor: checklistStep > idx ? '#e8ff47' : '#333',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                {checklistStep > idx && (
+                  <Text style={{ color: '#080808', fontSize: 11, fontWeight: '900' }}>✓</Text>
+                )}
+              </View>
+              <Text style={{
+                fontSize: 14,
+                color: checklistStep > idx ? '#f0ede8' : '#8a877f',
+                fontWeight: checklistStep > idx ? '600' : '400',
+                flex: 1,
+              }}>{item}</Text>
+            </View>
+          ))}
+          {apiError && (
+            <TouchableOpacity
+              style={[styles.continueBtn, { marginTop: 32 }]}
+              onPress={callGenerateAssessment}
+            >
+              <Text style={styles.continueBtnText}>Try again</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // ── Splash ────────────────────────────────────────────────────────────────────
 
