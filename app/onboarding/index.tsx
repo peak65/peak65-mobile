@@ -80,7 +80,7 @@ type StepKey =
   | 'trainingDays' | 'sessionDetails' | 'wearable' | 'referral'
   | 'gfClosing' | 'onboardingSummary';
 
-type ClosingPhase = null | 'saving' | 'assessment' | 'startdate' | 'generating';
+type ClosingPhase = null | 'loading' | 'assessment' | 'startdate' | 'generating';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -119,16 +119,16 @@ const CHECKLIST_ITEMS = [
 
 function getSteps(data: OnboardingData): StepKey[] {
   if (data.goal === 'hyrox') {
-    const steps: StepKey[] = ['goal', 'hyroxBackground', 'aboutYou', 'hyroxRace', 'hyroxFormat', 'hyroxGoalTime', 'hyroxHistory'];
+    const steps: StepKey[] = ['goal', 'aboutYou', 'hyroxRace', 'hyroxFormat', 'hyroxHistory'];
     if (data.hyrox_has_raced === 'yes') steps.push('hyroxResultsImport');
     const hasRealSplits = (data.race_data_source === 'api' || data.race_data_source === 'manual') && data.station_splits !== null;
     if (!hasRealSplits) steps.push('hyroxStationConf');
-    steps.push('hyroxRadarChart', 'hyroxRaceDay');
+    steps.push('hyroxRadarChart', 'hyroxRaceDay', 'hyroxGoalTime', 'hyroxBackground');
     steps.push('injuries', 'trainingSetup', 'trainingDays', 'sessionDetails', 'wearable', 'referral', 'onboardingSummary');
     return steps;
   }
   if (data.goal === 'general_fitness') {
-    const steps: StepKey[] = ['goal', 'gfBackground', 'gfPrimaryGoals', 'aboutYou'];
+    const steps: StepKey[] = ['goal', 'aboutYou', 'gfBackground', 'gfPrimaryGoals'];
     if (data.primary_goals.some(g => ['lose_weight', 'look_better', 'all'].includes(g))) steps.push('gfBodyFat');
     steps.push('injuries', 'gfEquipment', 'trainingDays', 'sessionDetails', 'wearable', 'referral', 'gfClosing', 'onboardingSummary');
     return steps;
@@ -379,21 +379,6 @@ export default function OnboardingScreen({ navigation }: Props) {
     }
   }, [currentKey]);
 
-  // Saving checklist ticker
-  useEffect(() => {
-    if (closingPhase !== 'saving') return;
-    if (checklistStep >= CHECKLIST_ITEMS.length - 1) return;
-    const id = setTimeout(() => setChecklistStep(s => s + 1), 2000);
-    return () => clearTimeout(id);
-  }, [closingPhase, checklistStep]);
-
-  // Coaching card rotator
-  useEffect(() => {
-    if (closingPhase !== 'saving') return;
-    const id = setInterval(() => setCardIdx(i => (i + 1) % COACHING_CARDS.length), 3000);
-    return () => clearInterval(id);
-  }, [closingPhase]);
-
   // Generating checklist ticker
   useEffect(() => {
     if (closingPhase !== 'generating') return;
@@ -401,6 +386,24 @@ export default function OnboardingScreen({ navigation }: Props) {
     const t = setTimeout(() => setChecklistStep(s => s + 1), 2000);
     return () => clearTimeout(t);
   }, [closingPhase, checklistStep]);
+
+  // Loading checklist ticker — auto-advances to 'assessment' when complete
+  useEffect(() => {
+    if (closingPhase !== 'loading') return;
+    if (checklistStep >= CHECKLIST_ITEMS.length) {
+      const t = setTimeout(() => setClosingPhase('assessment'), 600);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(() => setChecklistStep(s => s + 1), 1800);
+    return () => clearTimeout(t);
+  }, [closingPhase, checklistStep]);
+
+  // Loading card rotator
+  useEffect(() => {
+    if (closingPhase !== 'loading') return;
+    const t = setInterval(() => setCardIdx(i => (i + 1) % COACHING_CARDS.length), 3000);
+    return () => clearInterval(t);
+  }, [closingPhase]);
 
   // Default selectedStartDate to first training day in next 7 days
   useEffect(() => {
@@ -587,9 +590,6 @@ export default function OnboardingScreen({ navigation }: Props) {
   }, []);
 
   async function handleSubmit() {
-    setClosingPhase('saving');
-    setChecklistStep(0);
-
     const { data: authData } = await supabase.auth.getUser();
     if (!authData.user) return;
 
@@ -669,7 +669,9 @@ export default function OnboardingScreen({ navigation }: Props) {
       return;
     }
 
-    setClosingPhase('assessment');
+    setChecklistStep(0);
+    setCardIdx(0);
+    setClosingPhase('loading');
   }
 
   // ── Step renders ──────────────────────────────────────────────────────────────
@@ -1767,37 +1769,47 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   // ── Closing phase renders ─────────────────────────────────────────────────────
 
-  if (closingPhase === 'saving') {
-    const savingItems = [
-      'Saving your profile',
-      'Setting up your coaching system',
-      'Preparing your assessment week',
-      'Almost ready...',
-    ];
+  if (closingPhase === 'loading') {
     return (
-      <SafeAreaView style={styles.container} edges={['top','bottom']}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <Text style={styles.logo}>Peak 65</Text>
-        <View style={styles.loadingBody}>
-          <Text style={styles.loadingTitle}>Setting things up{data.first_name ? `, ${data.first_name}` : ''}.</Text>
-          <Text style={styles.loadingSubtext}>This takes a few seconds.</Text>
-          <View style={styles.checklistContainer}>
-            {savingItems.map((item, i) => {
-              const done = i < checklistStep;
-              const active = i === checklistStep;
-              return (
-                <View key={i} style={styles.checklistRow}>
-                  {done ? (
-                    <Feather name="check" size={16} color={Colors.accent} />
-                  ) : active ? (
-                    <ActivityIndicator size="small" color={Colors.accent} />
-                  ) : (
-                    <View style={styles.checklistDot} />
-                  )}
-                  <Text style={[styles.checklistText, done && { color: Colors.accent }, active && { color: Colors.textPrimary }]}>{item}</Text>
+        <View style={{ flex: 1, paddingHorizontal: 24, justifyContent: 'center' }}>
+          <Text style={{
+            fontSize: 32,
+            fontWeight: '800',
+            color: '#f0ede8',
+            marginBottom: 8,
+            fontFamily: 'BarlowCondensed_700Bold',
+          }}>
+            {`Building your engine,\n${data.first_name || 'Athlete'}.`}
+          </Text>
+          <Text style={{ fontSize: 14, color: '#8a877f', marginBottom: 40, lineHeight: 20 }}>
+            This takes a few seconds.
+          </Text>
+          {CHECKLIST_ITEMS.map((item, idx) => {
+            const done = checklistStep > idx;
+            const active = checklistStep === idx;
+            return (
+              <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <View style={{
+                  width: 22, height: 22, borderRadius: 11,
+                  backgroundColor: done ? '#e8ff47' : '#1a1a1a',
+                  borderWidth: 1,
+                  borderColor: done ? '#e8ff47' : active ? '#e8ff47' : '#333',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {done && <Text style={{ color: '#080808', fontSize: 12, fontWeight: '900' }}>✓</Text>}
+                  {active && !done && <ActivityIndicator size="small" color="#e8ff47" />}
                 </View>
-              );
-            })}
-          </View>
+                <Text style={{
+                  fontSize: 14,
+                  color: done ? '#f0ede8' : active ? '#f0ede8' : '#8a877f',
+                  fontWeight: done || active ? '600' : '400',
+                  flex: 1,
+                }}>{item}</Text>
+              </View>
+            );
+          })}
           <View style={[styles.coachingCard, { marginTop: 32 }]}>
             <Text style={[styles.coachingText, { textAlign: 'center' }]}>{COACHING_CARDS[cardIdx]}</Text>
           </View>
