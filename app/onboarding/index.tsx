@@ -80,7 +80,7 @@ type StepKey =
   | 'trainingDays' | 'sessionDetails' | 'wearable' | 'referral'
   | 'gfClosing' | 'onboardingSummary';
 
-type ClosingPhase = null | 'saving' | 'push' | 'assessment' | 'startdate' | 'generating';
+type ClosingPhase = null | 'saving' | 'assessment' | 'startdate' | 'generating';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -669,7 +669,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       return;
     }
 
-    setClosingPhase('push');
+    setClosingPhase('assessment');
   }
 
   // ── Step renders ──────────────────────────────────────────────────────────────
@@ -1801,31 +1801,6 @@ export default function OnboardingScreen({ navigation }: Props) {
           <View style={[styles.coachingCard, { marginTop: 32 }]}>
             <Text style={[styles.coachingText, { textAlign: 'center' }]}>{COACHING_CARDS[cardIdx]}</Text>
           </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (closingPhase === 'push') {
-    return (
-      <SafeAreaView style={styles.container} edges={['top','bottom']}>
-        <Text style={styles.logo}>Peak 65</Text>
-        <View style={styles.loadingBody}>
-          <View style={styles.notifPreview}>
-            <Feather name="bell" size={24} color={Colors.accent} />
-            <Text style={styles.notifPreviewText}>Peak 65 — Today's workout is waiting for you</Text>
-          </View>
-          <Text style={[styles.loadingTitle, { marginTop: 24 }]}>You're 2x more likely to finish your plan with workout reminders.</Text>
-          <Text style={[styles.loadingSubtext, { marginTop: 8, marginBottom: 32 }]}>Athletes who enable reminders are significantly more likely to complete their program and hit their goal time.</Text>
-          <TouchableOpacity style={styles.continueBtn} onPress={async () => {
-            await Notifications.requestPermissionsAsync().catch(() => {});
-            setClosingPhase('assessment');
-          }}>
-            <Text style={styles.continueBtnText}>OK</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.skipBtn} onPress={() => setClosingPhase('assessment')}>
-            <Text style={styles.skipText}>Maybe later</Text>
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
