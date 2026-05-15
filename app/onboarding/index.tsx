@@ -80,7 +80,7 @@ type StepKey =
   | 'trainingDays' | 'sessionDetails' | 'wearable' | 'referral'
   | 'gfClosing' | 'onboardingSummary';
 
-type ClosingPhase = null | 'calibrating' | 'push' | 'assessment';
+type ClosingPhase = null | 'calibrating' | 'push' | 'assessment' | 'startdate';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -320,6 +320,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   const [step, setStep]                 = useState(0);
   const [data, setData]                 = useState<OnboardingData>(INITIAL);
   const [closingPhase, setClosingPhase] = useState<ClosingPhase>(null);
+  const [selectedStartDate, setSelectedStartDate] = useState<Date | null>(null);
   const [apiError, setApiError]         = useState(false);
   const [checklistStep, setChecklistStep] = useState(0);
   const [cardIdx, setCardIdx]           = useState(0);
@@ -392,6 +393,21 @@ export default function OnboardingScreen({ navigation }: Props) {
     const id = setInterval(() => setCardIdx(i => (i + 1) % COACHING_CARDS.length), 3000);
     return () => clearInterval(id);
   }, [closingPhase]);
+
+  // Default selectedStartDate to first training day in next 7 days
+  useEffect(() => {
+    if (closingPhase !== 'startdate') return;
+    const next7: Date[] = [];
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      next7.push(d);
+    }
+    const first = next7.find(d =>
+      (data.training_days as string[]).includes(d.toLocaleDateString('en-US', { weekday: 'long' }))
+    );
+    if (first) setSelectedStartDate(first);
+  }, [closingPhase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Navigation ────────────────────────────────────────────────────────────────
 
@@ -612,6 +628,8 @@ export default function OnboardingScreen({ navigation }: Props) {
       wearable: data.wearable.length > 0 ? data.wearable : null,
       referral_source: data.referral_source || null,
       onboarding_complete: true,
+      program_start_date: null,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
 
     if (upsertError) {
@@ -643,7 +661,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       return;
     }
 
-    await callGenerateAssessment();
+    setClosingPhase('push');
   }
 
   // ── Step renders ──────────────────────────────────────────────────────────────
@@ -2113,7 +2131,7 @@ export default function OnboardingScreen({ navigation }: Props) {
         <View style={styles.footer}>
           <TouchableOpacity
             style={styles.continueBtn}
-            onPress={() => navigation.replace('Tabs')}
+            onPress={() => setClosingPhase('startdate')}
           >
             <Text style={styles.continueBtnText}>I'M READY →</Text>
           </TouchableOpacity>
@@ -2121,6 +2139,192 @@ export default function OnboardingScreen({ navigation }: Props) {
       </SafeAreaView>
     );
   }
+
+  if (closingPhase === 'startdate') {
+    const dayOrder = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const next7: Date[] = [];
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      next7.push(d);
+    }
+
+    const formatDate = (d: Date) => d.toISOString().split('T')[0];
+    const getDayName = (d: Date) => d.toLocaleDateString('en-US', { weekday: 'long' });
+    const getDayAbbr = (d: Date) => d.toLocaleDateString('en-US', { weekday: 'short' });
+    const getDateNum = (d: Date) => d.getDate();
+
+    const isTrainingDay = (d: Date) => (data.training_days as string[]).includes(getDayName(d));
+    const isSelected = (d: Date) => selectedStartDate ? formatDate(d) === formatDate(selectedStartDate) : false;
+
+    const handleBuildProgram = async () => {
+      if (!selectedStartDate) return;
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData?.user) return;
+      setApiError(false);
+      const formattedDate = formatDate(selectedStartDate);
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      await supabase.from('profiles').update({
+        program_start_date: formattedDate,
+        timezone: tz,
+      }).eq('id', authData.user.id);
+      callGenerateAssessment();
+    };
+
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <Text style={styles.logo}>Peak 65</Text>
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <Text style={{
+            fontSize: 36,
+            fontWeight: '900',
+            color: '#f0ede8',
+            lineHeight: 42,
+            marginBottom: 8,
+            fontFamily: 'BarlowCondensed_700Bold',
+            letterSpacing: 0.5,
+          }}>
+            Pick your{'\n'}Day One.
+          </Text>
+          <Text style={{
+            fontSize: 14,
+            color: '#8a877f',
+            marginBottom: 32,
+            lineHeight: 20,
+          }}>
+            The sooner you start, the smarter your program gets.
+          </Text>
+
+          {/* Date pills — full width row, 7 pills */}
+          <View style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            marginBottom: 28,
+          }}>
+            {next7.map((date, idx) => {
+              const training = isTrainingDay(date);
+              const selected = isSelected(date);
+              return (
+                <TouchableOpacity
+                  key={idx}
+                  disabled={!training}
+                  onPress={() => training && setSelectedStartDate(date)}
+                  style={{
+                    flex: 1,
+                    marginHorizontal: 3,
+                    height: 76,
+                    borderRadius: 14,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: selected ? '#e8ff47' : training ? '#111111' : '#0a0a0a',
+                    borderWidth: 1,
+                    borderColor: selected ? '#e8ff47' : training ? '#1a1a1a' : '#0f0f0f',
+                    opacity: training ? 1 : 0.35,
+                    shadowColor: selected ? '#e8ff47' : 'transparent',
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: selected ? 0.25 : 0,
+                    shadowRadius: selected ? 8 : 0,
+                    elevation: selected ? 4 : 0,
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 10,
+                    fontWeight: '700',
+                    letterSpacing: 0.5,
+                    color: selected ? '#080808' : training ? '#8a877f' : '#2a2a2a',
+                    marginBottom: 4,
+                    textTransform: 'uppercase',
+                  }}>
+                    {getDayAbbr(date)}
+                  </Text>
+                  <Text style={{
+                    fontSize: 22,
+                    fontWeight: '900',
+                    fontFamily: 'BarlowCondensed_700Bold',
+                    color: selected ? '#080808' : training ? '#f0ede8' : '#2a2a2a',
+                    lineHeight: 24,
+                  }}>
+                    {getDateNum(date)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Session preview card */}
+          <View style={{
+            backgroundColor: '#111111',
+            borderRadius: 16,
+            padding: 20,
+            borderLeftWidth: 3,
+            borderLeftColor: '#e8ff47',
+            marginBottom: 20,
+          }}>
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              letterSpacing: 2,
+              color: '#8a877f',
+              textTransform: 'uppercase',
+              marginBottom: 10,
+            }}>
+              Your First Session
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <View style={{
+                backgroundColor: '#e8ff47',
+                borderRadius: 4,
+                paddingHorizontal: 7,
+                paddingVertical: 3,
+              }}>
+                <Text style={{ color: '#080808', fontSize: 10, fontWeight: '800' }}>HARD</Text>
+              </View>
+              <Text style={{
+                fontSize: 22,
+                fontWeight: '800',
+                color: '#f0ede8',
+                fontFamily: 'BarlowCondensed_700Bold',
+              }}>
+                Run Time Trial
+              </Text>
+            </View>
+            <Text style={{
+              fontSize: 13,
+              color: '#8a877f',
+              lineHeight: 19,
+            }}>
+              Your pace + HR sets every future run zone. This is the number everything builds from.
+            </Text>
+          </View>
+
+          {/* Bottom note */}
+          <Text style={{
+            fontSize: 12,
+            color: '#8a877f',
+            textAlign: 'center',
+            lineHeight: 18,
+          }}>
+            Your program generates instantly after you tap.
+          </Text>
+        </ScrollView>
+
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={[styles.continueBtn, !selectedStartDate && { opacity: 0.5 }]}
+            onPress={handleBuildProgram}
+            disabled={!selectedStartDate}
+          >
+            <Text style={styles.continueBtnText}>Start Day One →</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
 
   // ── Splash ────────────────────────────────────────────────────────────────────
 
