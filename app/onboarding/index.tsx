@@ -2435,7 +2435,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Animated.View style={[{ flex: 1 }, { opacity: stepOpacity }]}>
           {currentKey === 'aboutYou' ? (
-            <View style={{ flex: 1 }}>{renderAboutYou()}</View>
+            renderAboutYou()
           ) : isScrollable ? (
             <View style={styles.scrollableContainer}>
               {renderCurrentStep()}
