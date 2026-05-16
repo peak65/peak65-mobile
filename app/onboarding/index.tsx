@@ -1221,7 +1221,7 @@ export default function OnboardingScreen({ navigation }: Props) {
     }
 
     return (
-      <View style={{ flex: 1, paddingHorizontal: 24, paddingVertical: 12, gap: 16 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 12, gap: 16 }} showsVerticalScrollIndicator={false}>
         <View>
           <Text style={styles.label}>About you.</Text>
           <Text style={styles.sublabel}>Help us personalize your experience</Text>
@@ -1291,7 +1291,7 @@ export default function OnboardingScreen({ navigation }: Props) {
             </View>
           </View>
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
