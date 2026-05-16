@@ -80,7 +80,7 @@ type StepKey =
   | 'trainingDays' | 'sessionDetails' | 'wearable' | 'referral'
   | 'gfClosing' | 'onboardingSummary';
 
-type ClosingPhase = null | 'loading' | 'assessment' | 'startdate' | 'generating';
+type ClosingPhase = null | 'loading' | 'assessment' | 'startdate';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -379,13 +379,6 @@ export default function OnboardingScreen({ navigation }: Props) {
     }
   }, [currentKey]);
 
-  // Generating checklist ticker
-  useEffect(() => {
-    if (closingPhase !== 'generating') return;
-    if (checklistStep >= 4) return;
-    const t = setTimeout(() => setChecklistStep(s => s + 1), 2000);
-    return () => clearTimeout(t);
-  }, [closingPhase, checklistStep]);
 
   // Loading checklist ticker — auto-advances to 'assessment' when complete
   useEffect(() => {
@@ -2160,7 +2153,6 @@ export default function OnboardingScreen({ navigation }: Props) {
         timezone: tz,
       }).eq('id', auth.user.id);
       setChecklistStep(0);
-      setClosingPhase('generating');
       callGenerateAssessment();
     };
 
@@ -2319,72 +2311,6 @@ export default function OnboardingScreen({ navigation }: Props) {
   }
 
 
-  if (closingPhase === 'generating') {
-    return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <Text style={styles.logo}>Peak 65</Text>
-        <View style={{ flex: 1, paddingHorizontal: 24, justifyContent: 'center' }}>
-          <Text style={{
-            fontSize: 28,
-            fontWeight: '800',
-            color: '#f0ede8',
-            marginBottom: 8,
-            fontFamily: 'BarlowCondensed_700Bold',
-          }}>Building your{'\n'}program.</Text>
-          <Text style={{
-            fontSize: 14,
-            color: '#8a877f',
-            marginBottom: 40,
-            lineHeight: 20,
-          }}>
-            The AI is reading your data and building every session from scratch. This usually takes 1–2 minutes.
-          </Text>
-          {[
-            'Analyzing your profile and goals',
-            'Applying Peak 65 coaching methodology',
-            'Calibrating your threshold zones',
-            'Building your assessment sessions',
-          ].map((item, idx) => (
-            <View key={idx} style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 12,
-              marginBottom: 16,
-            }}>
-              <View style={{
-                width: 20,
-                height: 20,
-                borderRadius: 10,
-                backgroundColor: checklistStep > idx ? '#e8ff47' : '#1a1a1a',
-                borderWidth: 1,
-                borderColor: checklistStep > idx ? '#e8ff47' : '#333',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}>
-                {checklistStep > idx && (
-                  <Text style={{ color: '#080808', fontSize: 11, fontWeight: '900' }}>✓</Text>
-                )}
-              </View>
-              <Text style={{
-                fontSize: 14,
-                color: checklistStep > idx ? '#f0ede8' : '#8a877f',
-                fontWeight: checklistStep > idx ? '600' : '400',
-                flex: 1,
-              }}>{item}</Text>
-            </View>
-          ))}
-          {apiError && (
-            <TouchableOpacity
-              style={[styles.continueBtn, { marginTop: 32 }]}
-              onPress={callGenerateAssessment}
-            >
-              <Text style={styles.continueBtnText}>Try again</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   // ── Splash ────────────────────────────────────────────────────────────────────
 
