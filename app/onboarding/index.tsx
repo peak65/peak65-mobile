@@ -1221,13 +1221,13 @@ export default function OnboardingScreen({ navigation }: Props) {
     }
 
     return (
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 12, gap: 16 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 12, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <View>
           <Text style={styles.label}>About you.</Text>
           <Text style={styles.sublabel}>Help us personalize your experience</Text>
         </View>
 
-        <View style={{ gap: 8 }}>
+        <View style={{ gap: 8, marginBottom: 16 }}>
           <Text style={styles.sectionHeader}>GENDER</Text>
           {data.goal === 'hyrox' ? (
             <View style={styles.twoCardRow}>
@@ -1250,7 +1250,7 @@ export default function OnboardingScreen({ navigation }: Props) {
           )}
         </View>
 
-        <View style={{ gap: 4 }}>
+        <View style={{ gap: 4, marginBottom: 16 }}>
           <View style={styles.unitToggleRow}>
             <Text style={styles.sectionHeader}>HEIGHT / WEIGHT</Text>
             <View style={styles.unitToggle}>
@@ -1274,7 +1274,7 @@ export default function OnboardingScreen({ navigation }: Props) {
           </View>
         </View>
 
-        <View style={{ gap: 4 }}>
+        <View style={{ gap: 4, marginBottom: 16 }}>
           <Text style={styles.sectionHeader}>DATE OF BIRTH</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 3 }}>
