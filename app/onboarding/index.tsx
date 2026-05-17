@@ -1047,20 +1047,27 @@ export default function OnboardingScreen({ navigation }: Props) {
           <Text style={styles.coachingText}>
             {(() => {
               if (hasRealSplits && data.station_splits) {
-                const weakestEntry = Object.entries(data.station_splits).reduce((worst, curr) => {
-                  const toSecs = (t: string) => {
-                    const parts = t.split(':').map(Number);
-                    return parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0];
-                  };
-                  return toSecs(curr[1]) > toSecs(worst[1]) ? curr : worst;
-                });
+                const toSecs = (t: string) => {
+                  const parts = t.split(':').map(Number);
+                  return parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0];
+                };
+                const entries = Object.entries(data.station_splits);
+                const weakestEntry = entries.reduce((worst, curr) =>
+                  toSecs(curr[1]) > toSecs(worst[1]) ? curr : worst
+                );
+                const weakestSecs = toSecs(weakestEntry[1]);
+                const avgSecs = entries.reduce((sum, e) => sum + toSecs(e[1]), 0) / entries.length;
                 const weakestKey = weakestEntry[0];
                 const weakestLabel = STATION_LABELS[weakestKey] ?? weakestKey;
-                return `Your ${weakestLabel} is costing you the most time. That's where your program starts.`;
+
+                if (weakestSecs < avgSecs * 1.15) {
+                  return 'Your stations are balanced. Your run pace is where your race time is built or lost — and that\'s exactly what your program targets.';
+                }
+                return `Your ${weakestLabel} are costing you the most time. Set your goal and see exactly how much ground your program needs to close.`;
               }
               if (firstWeakness) {
                 const label = STATION_LABELS[firstWeakness] ?? firstWeakness;
-                return `You flagged ${label} as a weakness. Your program targets it from session one.`;
+                return `You flagged ${label} as a weakness. Set your goal time and we\'ll show you what closing that gap looks like.`;
               }
               return 'Assessment week will map your station profile. Every session after that has a reason.';
             })()}
@@ -1765,7 +1772,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   function continueLabel(): string {
     if (currentKey === 'onboardingSummary') return 'Build My Plan';
     if (currentKey === 'gfClosing') return 'Build My Plan';
-    if (currentKey === 'hyroxRadarChart') return 'See Your Race Day Goal';
+    if (currentKey === 'hyroxRadarChart') return 'Set Your Race Day Goal';
     if (currentKey === 'hyroxRaceDay') return 'Lock In My Plan';
     return 'Continue';
   }
