@@ -108,10 +108,10 @@ const COACHING_CARDS = [
 ];
 
 const CHECKLIST_ITEMS = [
-  'Analyzing your profile',
+  'Reading your race splits',
   'Applying Peak 65 coaching system',
-  'Calibrating your threshold zones',
-  'Building your training plan...',
+  'Targeting your weakest stations',
+  'Individualizing your program...',
 ];
 
 
@@ -1802,7 +1802,7 @@ export default function OnboardingScreen({ navigation }: Props) {
             marginBottom: 8,
             fontFamily: 'BarlowCondensed_700Bold',
           }}>
-            {`Building your engine,\n${data.first_name || 'Athlete'}.`}
+            {`${data.first_name || 'Athlete'}, your program\nis being built.`}
           </Text>
           <Text style={{ fontSize: 14, color: '#8a877f', marginBottom: 40, lineHeight: 20 }}>
             This takes a few seconds.
