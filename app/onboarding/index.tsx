@@ -1176,7 +1176,7 @@ export default function OnboardingScreen({ navigation }: Props) {
         <View style={[styles.coachingCard, { alignSelf: 'stretch', marginTop: -20 }]}>
           <Text style={styles.coachingText}>{(() => {
             const splits = data.station_splits;
-            if (!splits) return 'With targeted training across all 8 stations, every weakness becomes a strength.';
+            if (!splits) return improvementMins > 0 ? `${improvementMins} minutes between you and your goal. Your program is built around closing that gap — starting with your weakest station.` : 'Your program is built around your goal time. Every session has a reason — and it starts at your weakest station.';
             const STATION_NAMES: Record<string, string> = {
               ski_erg: 'Ski Erg', sled_push: 'Sled Push', sled_pull: 'Sled Pull',
               burpee_broad_jump: 'Burpee Broad Jumps', burpee_broad_jumps: 'Burpee Broad Jumps',
@@ -1189,7 +1189,7 @@ export default function OnboardingScreen({ navigation }: Props) {
             );
             const name = STATION_NAMES[weakest[0]] ?? weakest[0];
             const verb = ['Wall Balls','Sandbag Lunges','Burpee Broad Jumps'].includes(name) ? 'are' : 'is';
-            return `Your ${name} ${verb} your biggest opportunity. We're targeting it from day one.`;
+            return `Your ${name} ${verb} costing you the most time right now. Every session in your program has a reason — and it starts here.`;
           })()}</Text>
         </View>
       </View>
