@@ -1045,11 +1045,25 @@ export default function OnboardingScreen({ navigation }: Props) {
         <RadarChart day1={day1} size={280} />
         <View style={styles.coachingCard}>
           <Text style={styles.coachingText}>
-            {hasRealSplits
-              ? 'Your station shape comes from real race splits. We\'ll target your weakest stations from day one.'
-              : firstWeakness
-                ? `Your ${STATION_LABELS[firstWeakness]} is your biggest opportunity. We're targeting it from day one.`
-                : 'Assessment week will identify your station profile.'}
+            {(() => {
+              if (hasRealSplits && data.station_splits) {
+                const weakestEntry = Object.entries(data.station_splits).reduce((worst, curr) => {
+                  const toSecs = (t: string) => {
+                    const parts = t.split(':').map(Number);
+                    return parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0];
+                  };
+                  return toSecs(curr[1]) > toSecs(worst[1]) ? curr : worst;
+                });
+                const weakestKey = weakestEntry[0];
+                const weakestLabel = STATION_LABELS[weakestKey] ?? weakestKey;
+                return `Your ${weakestLabel} is costing you the most time. That's where your program starts.`;
+              }
+              if (firstWeakness) {
+                const label = STATION_LABELS[firstWeakness] ?? firstWeakness;
+                return `You flagged ${label} as a weakness. Your program targets it from session one.`;
+              }
+              return 'Assessment week will map your station profile. Every session after that has a reason.';
+            })()}
           </Text>
         </View>
       </View>
