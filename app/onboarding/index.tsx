@@ -220,16 +220,30 @@ function weaknessesToRadarValues(weaknesses: string[]): StationValues {
   return result;
 }
 
-function getDivisionBenchmarks(division: string, goalTimeMinutes: number): StationValues {
-  let score: number;
-  if (goalTimeMinutes < 60) score = 1.0;
-  else if (goalTimeMinutes < 70) score = 0.9;
-  else if (goalTimeMinutes < 80) score = 0.8;
-  else if (goalTimeMinutes < 90) score = 0.7;
-  else if (goalTimeMinutes < 100) score = 0.6;
-  else score = 0.5;
+function getDivisionBenchmarks(division: string, goalTimeMinutes: number, currentProfile?: StationValues): StationValues {
+  let benchmark: number;
+  if (goalTimeMinutes < 60) benchmark = 1.0;
+  else if (goalTimeMinutes < 70) benchmark = 0.9;
+  else if (goalTimeMinutes < 80) benchmark = 0.8;
+  else if (goalTimeMinutes < 90) benchmark = 0.7;
+  else if (goalTimeMinutes < 100) benchmark = 0.6;
+  else benchmark = 0.5;
+
   const result: StationValues = {};
-  STATION_KEYS.forEach(k => { result[k] = score; });
+  STATION_KEYS.forEach(k => {
+    if (currentProfile && currentProfile[k] !== undefined) {
+      const current = currentProfile[k] as number;
+      if (current < benchmark) {
+        // Weak station — pull it up 70% of the way toward benchmark
+        result[k] = current + (benchmark - current) * 0.7;
+      } else {
+        // Strong station — nudge it up slightly, cap at 1.0
+        result[k] = Math.min(Math.max(current, current + 0.03), 1.0);
+      }
+    } else {
+      result[k] = benchmark;
+    }
+  });
   return result;
 }
 
@@ -1083,7 +1097,7 @@ export default function OnboardingScreen({ navigation }: Props) {
     const day1 = hasRealSplits ? splitsToRadarValues(data.station_splits!) : weaknessesToRadarValues(weaknesses);
     const [h, m] = (data.hyrox_goal_time || '1:30').split(':').map(Number);
     const goalMinsTotal = (h || 0) * 60 + (m || 0);
-    const raceDay = getDivisionBenchmarks(data.hyrox_division || 'men-open', goalMinsTotal);
+    const raceDay = getDivisionBenchmarks(data.hyrox_division || 'men-open', goalMinsTotal, day1);
 
     const prevTimeSecs = data.previous_race_time ? parseTimeToSecs(data.previous_race_time) : 0;
     const goalTimeSecs = parseTimeToSecs(data.hyrox_goal_time || '1:30');
