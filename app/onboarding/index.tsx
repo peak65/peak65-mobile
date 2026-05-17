@@ -119,11 +119,11 @@ const CHECKLIST_ITEMS = [
 
 function getSteps(data: OnboardingData): StepKey[] {
   if (data.goal === 'hyrox') {
-    const steps: StepKey[] = ['aboutYou', 'hyroxRace', 'hyroxFormat', 'hyroxHistory'];
+    const steps: StepKey[] = ['aboutYou', 'hyroxRace', 'hyroxFormat', 'hyroxBackground', 'hyroxHistory'];
     if (data.hyrox_has_raced === 'yes') steps.push('hyroxResultsImport');
     const hasRealSplits = (data.race_data_source === 'api' || data.race_data_source === 'manual') && data.station_splits !== null;
     if (!hasRealSplits) steps.push('hyroxStationConf');
-    steps.push('hyroxRadarChart', 'hyroxGoalTime', 'hyroxRaceDay', 'hyroxBackground');
+    steps.push('hyroxRadarChart', 'hyroxGoalTime', 'hyroxRaceDay');
     steps.push('injuries', 'trainingSetup', 'trainingDays', 'sessionDetails', 'wearable', 'referral', 'onboardingSummary');
     return steps;
   }
@@ -1199,11 +1199,11 @@ export default function OnboardingScreen({ navigation }: Props) {
   function renderBackground(isHyrox: boolean) {
     const opts = isHyrox
       ? [
-          { label: 'HYROX experienced', sub: 'I\'ve raced HYROX before and want to beat my time', value: 'hyrox' },
-          { label: 'CrossFit / functional fitness', sub: 'I train CrossFit-style or functional workouts regularly', value: 'crossfit' },
-          { label: 'Running / endurance', sub: 'My background is running, triathlon, or endurance sport', value: 'endurance' },
-          { label: 'Regular gym-goer', sub: 'I train regularly but not in the categories above', value: 'gym' },
-          { label: 'New to fitness', sub: 'I\'m just getting started — ease me in', value: 'beginner' },
+          { label: 'Hybrid — run and lift', sub: 'I train both cardio and strength regularly.', value: 'hybrid' },
+          { label: 'Runner / endurance', sub: 'My background is running, triathlon, or endurance sport.', value: 'endurance' },
+          { label: 'CrossFit / functional fitness', sub: 'I train CrossFit-style or functional workouts regularly.', value: 'crossfit' },
+          { label: 'Strength / gym', sub: 'My background is primarily weight training.', value: 'gym' },
+          { label: 'New to structured training', sub: 'Just getting started — ease me in.', value: 'beginner' },
         ]
       : [
           { label: 'CrossFit / functional fitness', sub: 'I train CrossFit-style or functional workouts regularly', value: 'crossfit' },
@@ -1217,21 +1217,15 @@ export default function OnboardingScreen({ navigation }: Props) {
       <View style={[styles.stepContent, { flex: 1 }]}>
         <Text style={styles.label}>What's your fitness background?</Text>
         <Text style={styles.sublabel}>So we program your plan for where you're actually starting from</Text>
-        {isHyrox && (data.race_data_source === 'api' || data.race_data_source === 'manual') ? (
-          <View style={styles.coachingCard}>
-            <Text style={styles.coachingText}>We've noted your HYROX experience. Continuing with HYROX-experienced programming.</Text>
-          </View>
-        ) : (
-          <View style={{ gap: 10 }}>
-            {opts.map(o => (
-              <TouchableOpacity key={o.value} style={[styles.descOption, data.training_background === o.value && styles.descOptionSelected]}
-                onPress={() => set('training_background', o.value)}>
-                <Text style={[styles.descOptionTitle, data.training_background === o.value && { color: '#e8ff47' }]}>{o.label}</Text>
-                <Text style={styles.descOptionSub}>{o.sub}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+        <View style={{ gap: 10 }}>
+          {opts.map(o => (
+            <TouchableOpacity key={o.value} style={[styles.descOption, data.training_background === o.value && styles.descOptionSelected]}
+              onPress={() => set('training_background', o.value)}>
+              <Text style={[styles.descOptionTitle, data.training_background === o.value && { color: '#e8ff47' }]}>{o.label}</Text>
+              <Text style={styles.descOptionSub}>{o.sub}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
     );
   }
@@ -1966,7 +1960,7 @@ export default function OnboardingScreen({ navigation }: Props) {
                   fontSize: 13,
                   color: '#8a877f',
                   lineHeight: 19,
-                }}>15 min rest, then strength. One session, two baselines. Your erg splits anchor every station session from here.</Text>
+                }}>Ski erg then strength. One session, two baselines. Your erg and pulling strength anchor everything that follows.</Text>
               </View>
 
               {/* Hyrox Card 3 */}
