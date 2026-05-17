@@ -1052,7 +1052,7 @@ export default function OnboardingScreen({ navigation }: Props) {
 
     return (
       <View style={[styles.stepContent, { alignItems: 'center' }]}>
-        <Text style={[styles.label, { textAlign: 'center' }]}>Day 1 — Your Station Profile</Text>
+        <Text style={[styles.label, { textAlign: 'center' }]}>Here's what your data shows.</Text>
         <Text style={[styles.sublabel, { textAlign: 'center', marginBottom: 16 }]}>
           {hasRealSplits ? 'Based on your race data' : 'Based on your station selections'}
         </Text>
@@ -1133,7 +1133,7 @@ export default function OnboardingScreen({ navigation }: Props) {
 
     return (
       <View style={[styles.stepContent, { alignItems: 'center' }]}>
-        <Text style={[styles.label, { textAlign: 'center' }]}>Race Day</Text>
+        <Text style={[styles.label, { textAlign: 'center' }]}>Here's your gap.</Text>
         <Text style={[styles.sublabel, { textAlign: 'center' }]}>Your projected station profile with training</Text>
 
         {readiness > 0 && (
