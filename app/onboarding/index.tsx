@@ -119,11 +119,11 @@ const CHECKLIST_ITEMS = [
 
 function getSteps(data: OnboardingData): StepKey[] {
   if (data.goal === 'hyrox') {
-    const steps: StepKey[] = ['goal', 'aboutYou', 'hyroxRace', 'hyroxFormat', 'hyroxHistory'];
+    const steps: StepKey[] = ['aboutYou', 'hyroxRace', 'hyroxFormat', 'hyroxHistory'];
     if (data.hyrox_has_raced === 'yes') steps.push('hyroxResultsImport');
     const hasRealSplits = (data.race_data_source === 'api' || data.race_data_source === 'manual') && data.station_splits !== null;
     if (!hasRealSplits) steps.push('hyroxStationConf');
-    steps.push('hyroxRadarChart', 'hyroxRaceDay', 'hyroxGoalTime', 'hyroxBackground');
+    steps.push('hyroxRadarChart', 'hyroxGoalTime', 'hyroxRaceDay', 'hyroxBackground');
     steps.push('injuries', 'trainingSetup', 'trainingDays', 'sessionDetails', 'wearable', 'referral', 'onboardingSummary');
     return steps;
   }
@@ -302,7 +302,7 @@ function DrumRollPicker({ items, selectedIndex, onChange }: { items: string[]; s
 const INITIAL: OnboardingData = {
   first_name: '', last_name: '', date_of_birth: '1990-01-01', gender: '',
   height_cm: 173, weight_kg: 75, units: 'imperial',
-  goal: '', training_background: '',
+  goal: 'hyrox', training_background: '',
   primary_goals: [], what_matters_most: '', body_fat: '',
   race_date: '', race_event_name: '', race_event_city: '', weeks_to_race: null,
   hyrox_format: '', hyrox_division: '', hyrox_goal_time: '', hyrox_goal_percentile: '',
@@ -418,7 +418,9 @@ export default function OnboardingScreen({ navigation }: Props) {
   function fade(callback: () => void) {
     Animated.timing(stepOpacity, { toValue: 0, duration: 70, useNativeDriver: true }).start(() => {
       callback();
-      Animated.timing(stepOpacity, { toValue: 1, duration: 70, useNativeDriver: true }).start();
+      setTimeout(() => {
+        Animated.timing(stepOpacity, { toValue: 1, duration: 150, useNativeDriver: true }).start();
+      }, 50);
     });
   }
 
