@@ -69,6 +69,7 @@ type HomeProfile = {
   coros_connected: boolean | null;
   manual_hrv: number | null;
   manual_hrv_date: string | null;
+  program_start_date: string | null;
   goal_time: string | null;
   weight_kg: number | null;
   weight: string | null;
@@ -445,8 +446,21 @@ export default function HomeScreen() {
         if (ageMs < 4 * 60 * 60 * 1000) {
           const prog = c.program as Program | null;
           setProgram(prog);
-          const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-          setTodayDay(prog?.program_data?.days?.find((d: any) => d.day === todayStr) ?? null);
+          if (prog?.program_data?.days && prog.week_start_date) {
+            const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+            const weekStart = new Date(prog.week_start_date + 'T00:00:00');
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const matched = prog.program_data.days.find((d: any) => {
+              const dayOffset = DAY_NAMES.indexOf(d.day) - weekStart.getDay();
+              const sessionDate = new Date(weekStart.getTime() + dayOffset * 86_400_000);
+              sessionDate.setHours(0,0,0,0);
+              return sessionDate.getTime() === today.getTime();
+            });
+            setTodayDay(matched ?? null);
+          } else {
+            setTodayDay(null);
+          }
           setStreak(c.streak ?? 0);
           setSessionCount(c.sessionCount ?? 0);
           setTodayCompleted(c.todayCompleted ?? false);
@@ -473,7 +487,7 @@ export default function HomeScreen() {
       supabase.from('session_logs').select('completed_at, completed')
         .eq('user_id', uid).eq('completed', true).order('completed_at', { ascending: false }),
       supabase.from('profiles')
-        .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, whoop_access_token, whoop_refresh_token, garmin_connected, coros_connected, manual_hrv, manual_hrv_date')
+        .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, whoop_access_token, whoop_refresh_token, garmin_connected, coros_connected, manual_hrv, manual_hrv_date, program_start_date')
         .eq('id', uid)
         .maybeSingle(),
       supabase.from('external_workouts')
@@ -502,8 +516,19 @@ export default function HomeScreen() {
     const prog = activeProg;
     setProgram(prog);
 
-    if (prog?.program_data?.days) {
-      setTodayDay(prog.program_data.days.find(d => d.day === todayStr) ?? null);
+    if (prog?.program_data?.days && prog.week_start_date) {
+      const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      const weekStart = new Date(prog.week_start_date + 'T00:00:00');
+      const today = new Date();
+      today.setHours(0,0,0,0);
+
+      const matched = prog.program_data.days.find(d => {
+        const dayOffset = DAY_NAMES.indexOf(d.day) - weekStart.getDay();
+        const sessionDate = new Date(weekStart.getTime() + dayOffset * 86_400_000);
+        sessionDate.setHours(0,0,0,0);
+        return sessionDate.getTime() === today.getTime();
+      });
+      setTodayDay(matched ?? null);
     }
 
     setWeek2Exists(progs.some(p => p.week_number === 2));
@@ -1251,7 +1276,23 @@ export default function HomeScreen() {
 
         {!todayDay ? (
           <View style={styles.emptyBlock}>
-            <Text style={styles.emptyText}>No program found.</Text>
+            {program && program.week_start_date ? (() => {
+              const firstSession = program.program_data?.days?.find((d: any) => d.type !== 'rest' && d.sessions?.length > 0);
+              const firstName = firstSession?.sessions?.[0]?.name ?? 'your first session';
+              const startDate = new Date((storedProfile?.program_start_date || program.week_start_date) + 'T00:00:00');
+              const today = new Date();
+              today.setHours(0,0,0,0);
+              const daysUntil = Math.round((startDate.getTime() - today.getTime()) / 86_400_000);
+              const when = daysUntil === 1 ? 'Tomorrow' : daysUntil === 0 ? 'Today' : `In ${daysUntil} days`;
+              return (
+                <View style={{ gap: 8 }}>
+                  <Text style={[styles.emptyText, { color: '#e8ff47', fontSize: 16, fontWeight: '700' }]}>{when}: {firstName}</Text>
+                  <Text style={styles.emptyText}>Your baseline starts there. Everything builds from that session.</Text>
+                </View>
+              );
+            })() : (
+              <Text style={styles.emptyText}>Your program is being built. Check back shortly.</Text>
+            )}
           </View>
         ) : isRestDay ? (
           <View style={styles.emptyBlock}>
