@@ -1706,7 +1706,7 @@ export default function OnboardingScreen({ navigation }: Props) {
               {data.race_event_city ? `You're training for ${data.race_event_city}.` : 'Your program is ready to build.'}
             </Text>
             {data.weeks_to_race != null && (
-              <Text style={styles.summaryHighlight}><Text style={{ color: '#e8ff47' }}>{data.weeks_to_race} weeks</Text>. Your program starts now.</Text>
+              <Text style={styles.summaryHighlight}><Text style={{ color: '#e8ff47' }}>{data.weeks_to_race} weeks</Text> to race day. Your program starts now.</Text>
             )}
           </>
         ) : (
