@@ -242,7 +242,7 @@ export default function MessagesScreen() {
             <View style={s.empty}>
               <MessageSquare color={Colors.textSecondary} size={36} strokeWidth={1.5} />
               <Text style={s.emptyText}>No messages yet</Text>
-              <Text style={s.emptySubText}>Your AI coach will send you a message after your first session.</Text>
+              <Text style={s.emptySubText}>Your coach will send you a message after your first session.</Text>
             </View>
           }
           renderItem={({ item, index }) => {
@@ -281,7 +281,7 @@ export default function MessagesScreen() {
             );
           }}
         />
-        <Tooltip id="messages_coach" text="Ask your AI coach anything about your program, your progress, or what is coming up." arrowDirection="down">
+        <Tooltip id="messages_coach" text="Ask your coach anything about your program, your progress, or what is coming up." arrowDirection="down">
         <View style={s.compose}>
           <TextInput
             style={s.textInput}

@@ -28,9 +28,9 @@ type AthleteEntry = {
 };
 
 const TIER_LABELS: Record<string, string> = {
-  elite:      'Elite',
-  coached:    'Coached',
-  ai_coached: 'AI Coached',
+  elite:      'Champion',
+  coached:    'Performance',
+  ai_coached: 'Foundation',
 };
 
 function fmtDate(iso: string): string {

@@ -9,7 +9,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   Modal, Vibration, Alert, KeyboardAvoidingView,
-  Platform, StatusBar, ActivityIndicator, AppState, Animated, Dimensions,
+  Platform, StatusBar, ActivityIndicator, AppState, Animated, Dimensions, Image,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Haptics from 'expo-haptics';
@@ -662,6 +662,7 @@ export default function LiveWorkoutScreen() {
 
   const steps      = useRef(buildSteps(session)).current;
   const totalSteps = steps.length;
+  const isCardioSession = steps.some(s => s.kind === 'run_interval' || s.kind === 'z2_cardio');
 
   const [stepIdx,     setStepIdx]     = useState(0);
   const [phase,       setPhase]       = useState<'active' | 'rest' | 'transition' | 'complete'>('active');
@@ -680,7 +681,8 @@ export default function LiveWorkoutScreen() {
   const [swapLabel,   setSwapLabel]   = useState<string | null>(null);
   const [userId,      setUserId]      = useState<string | null>(null);
   const [savedLogId,  setSavedLogId]  = useState<string | null>(null);
-  const [hrZoneStep,  setHrZoneStep]  = useState<'none' | 'prompt' | 'uploading' | 'done'>('none');
+  const [hrZoneStep,  setHrZoneStep]  = useState<'none' | 'prompt' | 'debrief' | 'invalid' | 'network_error'>('none');
+  const [debriefResult, setDebriefResult] = useState<any>(null);
   const [lastLoggedSet, setLastLoggedSet] = useState<LoggedSet | null>(null);
 
   // Metcon state
@@ -1044,11 +1046,18 @@ export default function LiveWorkoutScreen() {
   }
 
   async function saveSession(full: boolean): Promise<string | null> {
-    if (!userId) return null;
+    console.log('[saveSession] called with completed:', full);
+    console.log('[saveSession] userId:', userId);
+    console.log('[saveSession] programId:', programId);
+    console.log('[saveSession] currentSession:', JSON.stringify(session?.name));
+    if (!userId) {
+      console.log('[saveSession] returning null at: no userId');
+      return null;
+    }
     setSaving(true);
     let insertedId: string | null = null;
     try {
-      const { data } = await supabase.from('session_logs').insert({
+      const { data, error } = await supabase.from('session_logs').insert({
         user_id:      userId,
         program_id:   programId,
         day_name:     dayName,
@@ -1065,9 +1074,12 @@ export default function LiveWorkoutScreen() {
         completed:    full,
         completed_at: new Date().toISOString(),
       }).select('id').single();
+      console.log('[saveSession] insert data:', JSON.stringify(data), 'error:', JSON.stringify(error));
       insertedId = (data as any)?.id ?? null;
+      if (!insertedId) console.log('[saveSession] returning null at: insertedId is null after insert');
       if (insertedId) setSavedLogId(insertedId);
     } catch (e) {
+      console.log('[saveSession] returning null at: caught exception:', e);
       console.log('[live-workout] save error:', e);
     }
 
@@ -1186,6 +1198,8 @@ export default function LiveWorkoutScreen() {
 
   async function saveAndExit() {
     const logId = await saveSession(true);
+    console.log('[hr-prompt] logId:', logId);
+    console.log('[hr-prompt] userId:', userId);
     if (logId && userId) {
       fetch('https://peak65.vercel.app/api/update-athlete-intelligence', {
         method: 'POST',
@@ -1202,7 +1216,9 @@ export default function LiveWorkoutScreen() {
         }),
       }).catch(() => {});
     }
-    if (logId) {
+    console.log('[hr-prompt] session steps:', JSON.stringify(steps?.map(s => s.kind)));
+    console.log('[hr-prompt] isCardioSession:', isCardioSession);
+    if (logId && isCardioSession) {
       setHrZoneStep('prompt');
     } else {
       navigation.goBack();
@@ -1214,37 +1230,41 @@ export default function LiveWorkoutScreen() {
   if (phase === 'complete') {
     if (hrZoneStep === 'prompt') {
       return (
-        <SafeAreaView style={s.container}>
-          <StatusBar barStyle="light-content" />
-          <ScrollView contentContainerStyle={s.centerPad}>
-            <Text style={s.completeTitle}>SESSION{'\n'}COMPLETE.</Text>
-            <Text style={s.completeSub}>{session.name}</Text>
-            <View style={{ height: 1, backgroundColor: '#222', width: '100%', marginVertical: 24 }} />
-            <Text style={[s.rpeLabel, { marginBottom: 8 }]}>ADD YOUR HEART RATE ZONES?</Text>
-            <Text style={{ color: Colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 28 }}>
-              Upload a screenshot from Whoop, Garmin, Polar, or any HR app. Your coach uses zone data to optimise future sessions.
-            </Text>
-            <TouchableOpacity
-              style={[s.primaryBtn, { marginBottom: 16 }]}
-              onPress={() => setHrZoneStep('uploading')}
-            >
-              <Text style={s.primaryBtnTxt}>UPLOAD SCREENSHOT</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => { firePostSessionCalls(); navigation.goBack(); }}>
-              <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Skip for now</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </SafeAreaView>
+        <HRUploadPrompt
+          session={session}
+          sessionLogId={savedLogId}
+          userId={userId}
+          programId={programId}
+          dayName={dayName}
+          onDebrief={(result) => { setDebriefResult(result); setHrZoneStep('debrief'); }}
+          onInvalid={() => setHrZoneStep('invalid')}
+          onNetworkError={() => setHrZoneStep('network_error')}
+          onSkip={() => { firePostSessionCalls(); navigation.goBack(); }}
+        />
       );
     }
-
-    if (hrZoneStep === 'uploading') {
+    if (hrZoneStep === 'debrief') {
       return (
-        <HRZoneUploader
+        <HRDebriefScreen
+          result={debriefResult}
           sessionLogId={savedLogId}
           userId={userId}
           onDone={() => { firePostSessionCalls(); navigation.goBack(); }}
-          onSkip={() => navigation.goBack()}
+        />
+      );
+    }
+    if (hrZoneStep === 'invalid') {
+      return (
+        <HRInvalidScreen
+          onRetry={() => setHrZoneStep('prompt')}
+          onSkip={() => { firePostSessionCalls(); navigation.goBack(); }}
+        />
+      );
+    }
+    if (hrZoneStep === 'network_error') {
+      return (
+        <HRNetworkErrorScreen
+          onDone={() => { firePostSessionCalls(); navigation.goBack(); }}
         />
       );
     }
@@ -1976,99 +1996,482 @@ function HyroxTapZone({
   );
 }
 
-// ─── HR Zone Uploader ─────────────────────────────────────────────────────────
+// ─── HR Debrief Flow ──────────────────────────────────────────────────────────
 
-function HRZoneUploader({
-  sessionLogId, userId, onDone, onSkip,
+type PickedImage = { base64: string; uri: string };
+
+async function pickImage(): Promise<PickedImage | null> {
+  let ImagePicker: any;
+  try { ImagePicker = require('expo-image-picker'); } catch {
+    Alert.alert('Not available', 'expo-image-picker is not installed.');
+    return null;
+  }
+  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!perm.granted) {
+    Alert.alert(
+      'Photo library access required',
+      'Go to Settings and allow Peak 65 to access your photos.',
+      [{ text: 'OK' }],
+    );
+    return null;
+  }
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    base64: true,
+    quality: 0.85,
+  });
+  if (result.canceled || !result.assets?.[0]?.base64) return null;
+  return { base64: result.assets[0].base64 as string, uri: result.assets[0].uri };
+}
+
+// ── Screen 1 + 2: Upload Prompt ───────────────────────────────────────────────
+
+function HRUploadPrompt({
+  session, sessionLogId, userId, programId, dayName,
+  onDebrief, onInvalid, onNetworkError, onSkip,
 }: {
+  session: ProgramSession;
   sessionLogId: string | null;
   userId: string | null;
-  onDone: () => void;
+  programId: string;
+  dayName: string;
+  onDebrief: (result: any) => void;
+  onInvalid: () => void;
+  onNetworkError: () => void;
   onSkip: () => void;
 }) {
-  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [zoneChart, setZoneChart] = useState<PickedImage | null>(null);
+  const [hrCurve, setHrCurve]     = useState<PickedImage | null>(null);
+  const [loading, setLoading]     = useState(false);
+  const spinVal = useRef(new Animated.Value(0)).current;
 
-  async function pickAndUpload() {
-    let ImagePicker: any;
+  useEffect(() => {
+    if (!loading) return;
+    Animated.loop(
+      Animated.timing(spinVal, { toValue: 1, duration: 900, useNativeDriver: true }),
+    ).start();
+    return () => { spinVal.stopAnimation(); spinVal.setValue(0); };
+  }, [loading]);
+
+  const spin = spinVal.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  async function analyze() {
+    setLoading(true);
     try {
-      ImagePicker = require('expo-image-picker');
-    } catch {
-      Alert.alert('Not available', 'expo-image-picker is not installed. Run: npx expo install expo-image-picker');
-      return;
-    }
+      const body: Record<string, any> = { sessionLogId, userId };
+      if (zoneChart) body.zoneChartBase64 = zoneChart.base64.replace(/^data:image\/\w+;base64,/, '');
+      if (hrCurve)   body.hrCurveBase64  = hrCurve.base64.replace(/^data:image\/\w+;base64,/, '');
 
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission required', 'Please allow access to your photo library.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      base64: true,
-      quality: 0.85,
-    });
-
-    if (result.canceled || !result.assets?.[0]?.base64) return;
-
-    setStatus('loading');
-    try {
-      const base64Image = result.assets[0].base64 as string;
       const res = await fetch('https://peak65.vercel.app/api/extract-hr-zones', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64Image, sessionLogId, userId }),
+        body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(`API error ${res.status}`);
-      const responseData = await res.json();
-      const zones = (responseData.zones ?? responseData) as Record<string, number>;
 
-      if (sessionLogId && userId) {
-        await supabase
-          .from('session_logs')
-          .update({ hr_zones: JSON.stringify(zones) })
-          .eq('id', sessionLogId);
-      }
+      if (!res.ok) { onNetworkError(); return; }
 
-      setStatus('idle');
-      Alert.alert('Zones saved', 'Heart rate zone breakdown added to your session.');
-      onDone();
-    } catch (e: any) {
-      setStatus('error');
-      setErrorMsg(String(e?.message ?? e));
+      const data = await res.json();
+      if (!data.success || data.analysis?.image_valid === false) { onInvalid(); return; }
+
+      onDebrief(data);
+    } catch {
+      onNetworkError();
+    } finally {
+      setLoading(false);
     }
   }
 
+  const hasImage = !!(zoneChart || hrCurve);
+
   return (
-    <SafeAreaView style={s.container}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#080808' }} edges={['top', 'bottom']}>
       <StatusBar barStyle="light-content" />
-      <ScrollView contentContainerStyle={s.centerPad}>
-        <Text style={s.completeTitle}>HR{'\n'}ZONES</Text>
-        <Text style={{ color: Colors.textSecondary, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 32 }}>
-          Select a screenshot showing your heart rate zone breakdown. Works with Whoop, Garmin Connect, Polar Flow, and any HR app.
-        </Text>
-        {status === 'loading' ? (
-          <>
-            <ActivityIndicator color={Colors.accent} size="large" />
-            <Text style={{ color: Colors.textSecondary, fontSize: 13, marginTop: 16 }}>Extracting zones...</Text>
-          </>
-        ) : (
-          <>
-            {status === 'error' && (
-              <Text style={{ color: '#ff4444', fontSize: 13, textAlign: 'center', marginBottom: 16 }}>
-                {errorMsg || 'Something went wrong. Try again.'}
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+
+        {/* Top */}
+        <View style={{ alignItems: 'center', paddingTop: 60, paddingHorizontal: 24 }}>
+          <Feather name="activity" size={52} color="#e8ff47" />
+          <Text style={{ fontSize: 34, fontWeight: '800', color: '#f0ede8', textAlign: 'center', marginTop: 16, fontFamily: 'BarlowCondensed_700Bold' }}>
+            Your debrief is ready.
+          </Text>
+          <Text style={{ fontSize: 17, color: '#8a877f', textAlign: 'center', maxWidth: 280, marginTop: 8, lineHeight: 26 }}>
+            Upload your heart rate data and get instant coaching feedback from your coach — specific to what your body just did.
+          </Text>
+        </View>
+
+        {/* Instruction card */}
+        <View style={{ backgroundColor: '#111111', borderRadius: 12, margin: 24, padding: 20 }}>
+          <Text style={{ color: '#e8ff47', fontSize: 13, fontWeight: '700', letterSpacing: 1, fontFamily: 'BarlowCondensed_700Bold' }}>
+            WHAT TO UPLOAD
+          </Text>
+          {([
+            { icon: 'smartphone' as const, text: 'Open Whoop, Garmin, Apple Health, or Polar' },
+            { icon: 'bar-chart-2' as const, text: "Find today's session or activity" },
+            { icon: 'camera' as const, text: 'Screenshot your zone chart, your HR graph, or both' },
+          ] as const).map((row, i) => (
+            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 }}>
+              <Feather name={row.icon} size={20} color="#e8ff47" />
+              <Text style={{ color: '#f0ede8', fontSize: 15, flex: 1 }}>{row.text}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Tip */}
+        <View style={{ backgroundColor: '#1a1a1a', borderRadius: 8, marginHorizontal: 24, padding: 12, flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+          <Feather name="info" size={16} color="#8a877f" style={{ marginTop: 2 }} />
+          <Text style={{ color: '#8a877f', fontSize: 13, lineHeight: 20, flex: 1 }}>
+            Zone chart = time in each zone. HR graph = your heart rate over time. Both together gives us the full picture.
+          </Text>
+        </View>
+
+        {/* Upload buttons or loading */}
+        <View style={{ margin: 24, gap: 12 }}>
+          {loading ? (
+            <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+              {/* Thumbnails */}
+              {(zoneChart || hrCurve) && (
+                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
+                  {zoneChart && (
+                    <View>
+                      <Image source={{ uri: zoneChart.uri }} style={{ width: 80, height: 80, borderRadius: 8 }} />
+                      <View style={{ position: 'absolute', top: 4, right: 4, backgroundColor: '#00d4aa', borderRadius: 10, width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
+                        <Feather name="check" size={12} color="#080808" />
+                      </View>
+                    </View>
+                  )}
+                  {hrCurve && (
+                    <View>
+                      <Image source={{ uri: hrCurve.uri }} style={{ width: 80, height: 80, borderRadius: 8 }} />
+                      <View style={{ position: 'absolute', top: 4, right: 4, backgroundColor: '#00d4aa', borderRadius: 10, width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
+                        <Feather name="check" size={12} color="#080808" />
+                      </View>
+                    </View>
+                  )}
+                </View>
+              )}
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <Feather name="refresh-cw" size={32} color="#e8ff47" />
+              </Animated.View>
+              <Text style={{ color: '#f0ede8', fontSize: 17, marginTop: 12 }}>Analyzing your session...</Text>
+              <Text style={{ color: '#8a877f', fontSize: 14, marginTop: 4, textAlign: 'center' }}>
+                Your coach is reviewing the data. This takes about 10 seconds.
               </Text>
-            )}
-            <TouchableOpacity style={[s.primaryBtn, { marginBottom: 16 }]} onPress={pickAndUpload}>
-              <Text style={s.primaryBtnTxt}>CHOOSE SCREENSHOT</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onSkip}>
-              <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Skip</Text>
-            </TouchableOpacity>
-          </>
-        )}
+            </View>
+          ) : (
+            <>
+              {/* Zone Chart button */}
+              <TouchableOpacity
+                style={{ backgroundColor: '#111111', borderWidth: 1.5, borderColor: '#e8ff47', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}
+                onPress={async () => { const img = await pickImage(); if (img) setZoneChart(img); }}
+              >
+                {zoneChart ? (
+                  <Image source={{ uri: zoneChart.uri }} style={{ width: 40, height: 40, borderRadius: 6 }} />
+                ) : (
+                  <Feather name="upload" size={20} color="#e8ff47" />
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#f0ede8', fontSize: 18, fontWeight: '700', fontFamily: 'BarlowCondensed_700Bold' }}>
+                    Zone Chart{zoneChart ? ' ✓' : ''}
+                  </Text>
+                  <Text style={{ color: '#8a877f', fontSize: 13 }}>Bar chart or pie chart showing zone breakdown</Text>
+                </View>
+                <Feather name="chevron-right" size={16} color="#8a877f" />
+              </TouchableOpacity>
+
+              {/* HR Graph button */}
+              <TouchableOpacity
+                style={{ backgroundColor: '#111111', borderWidth: 1.5, borderColor: '#e8ff47', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}
+                onPress={async () => { const img = await pickImage(); if (img) setHrCurve(img); }}
+              >
+                {hrCurve ? (
+                  <Image source={{ uri: hrCurve.uri }} style={{ width: 40, height: 40, borderRadius: 6 }} />
+                ) : (
+                  <Feather name="activity" size={20} color="#e8ff47" />
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#f0ede8', fontSize: 18, fontWeight: '700', fontFamily: 'BarlowCondensed_700Bold' }}>
+                    HR Graph{hrCurve ? ' ✓' : ''}
+                  </Text>
+                  <Text style={{ color: '#8a877f', fontSize: 13 }}>Line graph showing heart rate over time</Text>
+                </View>
+                <Feather name="chevron-right" size={16} color="#8a877f" />
+              </TouchableOpacity>
+
+              {/* Analyze button */}
+              {hasImage && (
+                <TouchableOpacity
+                  style={{ backgroundColor: '#e8ff47', borderRadius: 12, height: 56, alignItems: 'center', justifyContent: 'center', marginTop: 4 }}
+                  onPress={analyze}
+                >
+                  <Text style={{ color: '#080808', fontSize: 18, fontWeight: '800', fontFamily: 'BarlowCondensed_700Bold' }}>
+                    Analyze My Session
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Skip */}
+              <TouchableOpacity style={{ alignItems: 'center', marginTop: 4 }} onPress={onSkip}>
+                <Text style={{ color: '#8a877f', fontSize: 15, textDecorationLine: 'underline' }}>Skip for now</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
       </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+// ── Screen 3: Coaching Debrief ─────────────────────────────────────────────────
+
+function HRDebriefScreen({ result, sessionLogId, userId, onDone }: {
+  result: any;
+  sessionLogId: string | null;
+  userId: string | null;
+  onDone: () => void;
+}) {
+  const navigation = useNavigation<Nav>();
+  const analysis = result?.analysis ?? {};
+  const zones    = result?.zones ?? {};
+  const [flagSent, setFlagSent] = useState(false);
+
+  async function handleReply() {
+    const note = analysis.hr_coaching_notes ?? '';
+    if (note) {
+      await AsyncStorage.setItem('pending_coach_reply', note);
+    }
+    onDone();
+    (navigation as any).navigate('Messages');
+  }
+
+  async function handleFlag() {
+    if (flagSent) return;
+    try {
+      await fetch('https://peak65.vercel.app/api/ai-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          triggerType: 'flag_analysis',
+          sessionData: { sessionLogId, note: 'Athlete flagged HR analysis as inaccurate' },
+        }),
+      });
+    } catch {}
+    setFlagSent(true);
+  }
+
+  const execQuality: string = analysis.execution_quality ?? 'unable_to_assess';
+
+  const badgeConfig: Record<string, { color: string; icon: string; label: string }> = {
+    excellent:         { color: '#00d4aa', icon: 'check-circle', label: 'TEXTBOOK SESSION' },
+    good:              { color: '#00d4aa', icon: 'check',        label: 'SOLID WORK' },
+    slightly_overdone: { color: '#e8ff47', icon: 'alert-triangle', label: 'PUSHED THE LINE' },
+    overdone:          { color: '#ff3b3b', icon: 'alert-circle', label: 'LEFT IT ALL OUT THERE' },
+    underdone:         { color: '#8a877f', icon: 'minus-circle', label: 'MORE IN THE TANK' },
+    unable_to_assess:  { color: '#8a877f', icon: 'help-circle', label: 'SESSION LOGGED' },
+  };
+  const badge = badgeConfig[execQuality] ?? badgeConfig.unable_to_assess;
+
+  const coachingFlagMap: Record<string, string> = {
+    went_too_hard:            'You pushed above prescribed intensity. Check how your legs feel tomorrow morning before deciding whether to go full gas on the next session.',
+    stayed_too_easy:          "The data shows you stayed below prescribed intensity. Not every session needs to be maximal — but if you felt held back, trust the zone next time.",
+    poor_interval_recovery:   'Your HR stayed elevated between intervals. Take the full prescribed rest periods — the recovery is where the adaptation happens.',
+    zone2_drift_second_half:  'HR crept into higher zones in the second half. Slow down earlier to hold Zone 2 properly — the pace will feel frustratingly slow at first.',
+    hr_never_dropped_in_rest: "HR didn't drop during rest periods. Your body is carrying more fatigue than today's session alone explains. Watch tomorrow morning's readiness.",
+    excellent_execution:      'That is exactly what we programmed. Clean execution builds clean fitness — this is how you get faster.',
+    improving_fitness:        'Your recovery rate is trending up. The training is working. Keep showing up like this.',
+  };
+
+  // Zone bar
+  const zoneColors: Record<string, string> = {
+    z1: '#444444', z2: 'rgba(0,212,170,0.4)', z3: 'rgba(232,255,71,0.6)', z4: '#e8ff47', z5: '#ff3b3b',
+  };
+  const zoneEntries = (['z1','z2','z3','z4','z5'] as const).map(k => ({ key: k, mins: (zones[k] ?? 0) as number })).filter(z => z.mins > 0);
+  const totalZoneMins = zoneEntries.reduce((sum, z) => sum + z.mins, 0);
+  const topZone = zoneEntries.length > 0 ? zoneEntries.reduce((a, b) => a.mins > b.mins ? a : b) : null;
+
+  // Top zone color
+  const topZoneColor = topZone
+    ? (topZone.key === 'z4' || topZone.key === 'z5' ? '#00d4aa' : topZone.key === 'z3' ? '#e8ff47' : '#8a877f')
+    : '#8a877f';
+
+  const hrr = analysis.hr_recovery_1min as number | null;
+  const hrrColor = hrr == null ? '#8a877f' : hrr >= 25 ? '#00d4aa' : hrr >= 18 ? '#e8ff47' : '#ff3b3b';
+  const peakHr = analysis.peak_hr as number | null;
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#080808' }} edges={['top', 'bottom']}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+
+        {/* Execution badge */}
+        <View style={{ alignItems: 'center', paddingTop: 48 }}>
+          <Feather name={badge.icon as any} size={48} color={badge.color} />
+          <Text style={{ color: badge.color, fontSize: 13, fontWeight: '700', letterSpacing: 2, marginTop: 8, fontFamily: 'BarlowCondensed_700Bold' }}>
+            {badge.label}
+          </Text>
+        </View>
+
+        {/* Coaching card */}
+        <View style={{ backgroundColor: '#111111', borderRadius: 12, margin: 16, padding: 24 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Feather name="message-square" size={18} color="#e8ff47" />
+              <Text style={{ color: '#e8ff47', fontSize: 13, fontWeight: '700', letterSpacing: 1, fontFamily: 'BarlowCondensed_700Bold' }}>FROM YOUR COACH</Text>
+            </View>
+            <Text style={{ color: '#8a877f', fontSize: 12 }}>Just now</Text>
+          </View>
+          <Text style={{ color: '#f0ede8', fontSize: 17, lineHeight: 28, marginTop: 12 }}>
+            {analysis.hr_coaching_notes ?? 'Your session has been logged.'}
+          </Text>
+          <TouchableOpacity
+            style={{ backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#e8ff47', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16 }}
+            onPress={handleReply}
+          >
+            <Feather name="message-circle" size={16} color="#e8ff47" />
+            <Text style={{ color: '#e8ff47', fontSize: 15, fontWeight: '700', fontFamily: 'BarlowCondensed_700Bold' }}>Reply to your coach</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Stats row */}
+        <View style={{ flexDirection: 'row', marginHorizontal: 16, gap: 8 }}>
+          {/* Top zone */}
+          <View style={{ flex: 1, backgroundColor: '#111111', borderRadius: 10, padding: 14 }}>
+            <Text style={{ color: '#8a877f', fontSize: 11, letterSpacing: 1 }}>TOP ZONE</Text>
+            <Text style={{ color: topZoneColor, fontSize: 26, fontWeight: '800', fontFamily: 'BarlowCondensed_700Bold', marginTop: 4 }}>
+              {topZone ? topZone.key.toUpperCase() : '--'}
+            </Text>
+            <Text style={{ color: '#8a877f', fontSize: 11, marginTop: 2 }}>
+              {topZone ? `${Math.round(topZone.mins)} min` : 'No data'}
+            </Text>
+          </View>
+          {/* HRR */}
+          <View style={{ flex: 1, backgroundColor: '#111111', borderRadius: 10, padding: 14 }}>
+            <Text style={{ color: '#8a877f', fontSize: 11, letterSpacing: 1 }}>1-MIN RECOVERY</Text>
+            <Text style={{ color: hrr != null ? hrrColor : '#8a877f', fontSize: 26, fontWeight: '800', fontFamily: 'BarlowCondensed_700Bold', marginTop: 4 }}>
+              {hrr != null ? `${hrr}` : '--'}
+            </Text>
+            <Text style={{ color: '#8a877f', fontSize: 11, marginTop: 2 }}>
+              {hrr != null ? 'bpm' : 'Upload HR graph to unlock'}
+            </Text>
+          </View>
+          {/* Peak HR */}
+          <View style={{ flex: 1, backgroundColor: '#111111', borderRadius: 10, padding: 14 }}>
+            <Text style={{ color: '#8a877f', fontSize: 11, letterSpacing: 1 }}>PEAK HR</Text>
+            <Text style={{ color: '#f0ede8', fontSize: 26, fontWeight: '800', fontFamily: 'BarlowCondensed_700Bold', marginTop: 4 }}>
+              {peakHr != null ? `${peakHr}` : '--'}
+            </Text>
+            <Text style={{ color: '#8a877f', fontSize: 11, marginTop: 2 }}>bpm</Text>
+          </View>
+        </View>
+
+        {/* Zone breakdown bar */}
+        {zoneEntries.length > 0 && (
+          <View style={{ backgroundColor: '#111111', borderRadius: 12, margin: 16, padding: 20 }}>
+            <Text style={{ color: '#8a877f', fontSize: 12, letterSpacing: 1 }}>TIME IN ZONES</Text>
+            <View style={{ flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden', marginTop: 12 }}>
+              {zoneEntries.map(z => (
+                <View key={z.key} style={{ flex: z.mins / totalZoneMins, backgroundColor: zoneColors[z.key] }} />
+              ))}
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
+              {zoneEntries.map(z => (
+                <View key={z.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: zoneColors[z.key] }} />
+                  <Text style={{ color: '#8a877f', fontSize: 12 }}>{z.key.toUpperCase()} · {Math.round(z.mins)} min</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Coaching flag */}
+        {analysis.coaching_flag && coachingFlagMap[analysis.coaching_flag] && (
+          <View style={{ backgroundColor: '#1a1a1a', borderRadius: 10, borderLeftWidth: 3, borderLeftColor: '#e8ff47', marginHorizontal: 16, padding: 14, flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+            <Feather name="info" size={16} color="#e8ff47" style={{ marginTop: 2 }} />
+            <Text style={{ color: '#f0ede8', fontSize: 14, lineHeight: 22, flex: 1 }}>
+              {coachingFlagMap[analysis.coaching_flag]}
+            </Text>
+          </View>
+        )}
+
+        {/* Flag button */}
+        <TouchableOpacity
+          style={{ backgroundColor: '#1a1a1a', borderRadius: 8, marginHorizontal: 16, marginTop: 16, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+          onPress={handleFlag}
+          disabled={flagSent}
+        >
+          <Feather name="flag" size={14} color={flagSent ? '#00d4aa' : '#8a877f'} />
+          <Text style={{ color: flagSent ? '#00d4aa' : '#8a877f', fontSize: 13 }}>
+            {flagSent ? 'Flagged for review — thanks' : "This doesn't look right — flag for review"}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Done button */}
+        <TouchableOpacity
+          style={{ backgroundColor: '#e8ff47', borderRadius: 12, height: 56, alignItems: 'center', justifyContent: 'center', margin: 16, marginTop: 16, marginBottom: 32 }}
+          onPress={onDone}
+        >
+          <Text style={{ color: '#080808', fontSize: 18, fontWeight: '800', fontFamily: 'BarlowCondensed_700Bold' }}>Done</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+// ── Screen 4: Invalid Image ────────────────────────────────────────────────────
+
+function HRInvalidScreen({ onRetry, onSkip }: { onRetry: () => void; onSkip: () => void }) {
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#080808' }} edges={['top', 'bottom']}>
+      <StatusBar barStyle="light-content" />
+      <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: 32, paddingTop: 80 }}>
+        <Feather name="x-circle" size={48} color="#ff3b3b" />
+        <Text style={{ color: '#f0ede8', fontSize: 30, fontWeight: '800', textAlign: 'center', marginTop: 16, fontFamily: 'BarlowCondensed_700Bold' }}>
+          We couldn't read that
+        </Text>
+        <Text style={{ color: '#8a877f', fontSize: 16, textAlign: 'center', maxWidth: 300, marginTop: 8, lineHeight: 26 }}>
+          We need an actual heart rate graph — either the zone breakdown chart or the HR line over time. A text summary or number list won't work. Go back to your app and screenshot the graph.
+        </Text>
+        <View style={{ width: '100%', gap: 12, marginTop: 32 }}>
+          <TouchableOpacity
+            style={{ backgroundColor: '#e8ff47', borderRadius: 12, height: 56, alignItems: 'center', justifyContent: 'center' }}
+            onPress={onRetry}
+          >
+            <Text style={{ color: '#080808', fontSize: 18, fontWeight: '800', fontFamily: 'BarlowCondensed_700Bold' }}>Try Again</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{ borderRadius: 12, height: 56, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#8a877f' }}
+            onPress={onSkip}
+          >
+            <Text style={{ color: '#8a877f', fontSize: 18, fontWeight: '700', fontFamily: 'BarlowCondensed_700Bold' }}>Skip for now</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+// ── Screen 5: Network Error ────────────────────────────────────────────────────
+
+function HRNetworkErrorScreen({ onDone }: { onDone: () => void }) {
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#080808' }} edges={['top', 'bottom']}>
+      <StatusBar barStyle="light-content" />
+      <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: 32, paddingTop: 80 }}>
+        <Feather name="wifi-off" size={48} color="#8a877f" />
+        <Text style={{ color: '#f0ede8', fontSize: 30, fontWeight: '800', textAlign: 'center', marginTop: 16, fontFamily: 'BarlowCondensed_700Bold' }}>
+          Couldn't connect
+        </Text>
+        <Text style={{ color: '#8a877f', fontSize: 16, textAlign: 'center', maxWidth: 300, marginTop: 8, lineHeight: 26 }}>
+          Your session is saved. The HR analysis didn't go through — you can try again from your session history when you have a connection.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#e8ff47', borderRadius: 12, height: 56, alignItems: 'center', justifyContent: 'center', width: '100%', marginTop: 32 }}
+          onPress={onDone}
+        >
+          <Text style={{ color: '#080808', fontSize: 18, fontWeight: '800', fontFamily: 'BarlowCondensed_700Bold' }}>Done</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }

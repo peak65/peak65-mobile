@@ -1039,7 +1039,7 @@ export default function ProfileScreen() {
                 <ActivityIndicator color={Colors.accent} size="large" />
                 <Text style={[styles.pickerTitle, { marginTop: 20 }]}>Building Your Program...</Text>
                 <Text style={styles.gsSub}>
-                  Your AI coach is reviewing your profile and generating a personalised plan.
+                  Your coach is reviewing your profile and generating a personalised plan.
                 </Text>
               </View>
             )}
@@ -1399,7 +1399,7 @@ export default function ProfileScreen() {
         <Text style={styles.sectionHeading}>Account</Text>
         <View style={styles.section}>
           <SettingRow label="Email" value={email} />
-          <SettingRow label="Subscription" value="AI Coached • Active" />
+          <SettingRow label="Subscription" value="Foundation • Active" />
         </View>
 
         {/* Sign out */}
