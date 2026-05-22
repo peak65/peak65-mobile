@@ -15,6 +15,7 @@ import {
 } from '../../lib/healthKit';
 import { deriveZonesFromTimeTrial, type TrainingZones } from '../../lib/zoneDerivation';
 import { Colors, Fonts } from '../../lib/theme';
+import HRUploadPrompt from '../../components/HRUploadPrompt';
 
 type TimeTrialProfile = {
   goal: string | null;
@@ -140,22 +141,40 @@ function SessionDocument({ session }: { session: ProgramSession }) {
 
   function renderExerciseLine(ex: ExerciseItem, index: number, prefix?: string): React.ReactNode {
     const name = prefix ? `${prefix} ${ex.name}` : ex.name;
-    const detail: string[] = [];
     const duration = (ex as any).duration as string | undefined;
-    if (ex.sets && ex.reps && ex.reps !== '1') detail.push(`${ex.sets}×${ex.reps}`);
-    else if (ex.reps && ex.reps !== '1') detail.push(String(ex.reps));
-    if (duration) detail.push(duration);
-    if (ex.rest && ex.rest !== 'none' && ex.rest !== '0 min') detail.push(`${ex.rest} rest`);
-    const note = ex.notes || (ex as any).note;
-    if (note) {
-      const firstSentence = note.split(/[.!?]/)[0]?.trim();
-      if (firstSentence) detail.push(firstSentence);
+    const type = (ex as any).type as string | undefined;
+    const loadNote = (ex as any).load_note as string | undefined;
+    const note = ex.notes || (ex as any).note as string | undefined;
+    const firstSentence = note ? (note.split(/[.!?]/)[0]?.trim() ?? '') : '';
+
+    const parts: string[] = [];
+
+    if (type === 'strength' && ex.sets && ex.reps && Number(ex.sets) > 1) {
+      parts.push(`${ex.sets}×${ex.reps}`);
+    } else if (type === 'cardio' && duration && ex.sets && Number(ex.sets) > 1) {
+      parts.push(`${ex.sets}×${duration}`);
+    } else if (type === 'cardio' && duration) {
+      parts.push(duration);
+    } else if (type === 'z2_cardio' && duration) {
+      parts.push(duration);
+    } else if (ex.reps && ex.reps !== '1') {
+      parts.push(String(ex.reps));
     }
-    const detailStr = detail.join(' · ');
+
+    if (loadNote) parts.push(`(${loadNote})`);
+
+    if (ex.rest && ex.rest !== 'none' && ex.rest !== '0 min' && ex.rest !== '0:00') {
+      parts.push(`${ex.rest} rest`);
+    }
+
+    if (firstSentence) parts.push(firstSentence);
+
+    const detail = parts.join(' · ');
+
     return (
       <Text key={`ex-${index}-${prefix ?? ''}`} style={pd.exerciseLine}>
         <Text style={pd.exerciseName}>{name}</Text>
-        {detailStr ? <Text style={pd.exerciseDetail}>{'  '}{detailStr}</Text> : null}
+        {detail ? <Text style={pd.exerciseDetail}>{'  '}{detail}</Text> : null}
       </Text>
     );
   }
@@ -177,7 +196,9 @@ function SessionDocument({ session }: { session: ProgramSession }) {
             const rest = group.kind === 'circuit' ? group.rest : group.rest;
             return (
               <View key={gi} style={pd.circuitSection}>
-                <Text style={pd.circuitRounds}>{rounds} Rounds:</Text>
+                {(() => { const timeCap = members[0]?.ex && (members[0].ex as any).time_cap; return (
+                  <Text style={pd.circuitRounds}>{timeCap ? `${timeCap} AMRAP:` : `${rounds} Rounds:`}</Text>
+                ); })()}
                 {members.map(({ ex }, mi) => renderExerciseLine(ex, mi, undefined))}
                 {!!rest && (
                   <Text style={pd.exerciseDetail}>{'  '}{rest} rest between rounds</Text>
@@ -366,7 +387,7 @@ function TrialLogCard({
             onPress={onSave}
             disabled={!value.trim() || saving}
           >
-            <Text style={styles.trialBtnText}>{saving ? 'SAVING...' : 'LOG RESULT'}</Text>
+            <Text style={styles.trialBtnText}>{saving ? 'SAVING...' : 'LOG SESSION'}</Text>
           </TouchableOpacity>
         </>
       )}
@@ -384,7 +405,7 @@ function MarkCompleteCard({
   if (saved) {
     return (
       <View style={styles.completeConfirm}>
-        <Text style={styles.completeConfirmText}>Session complete. Good work.</Text>
+        <Text style={styles.completeConfirmText}>Logged. Good work.</Text>
       </View>
     );
   }
@@ -394,7 +415,7 @@ function MarkCompleteCard({
       onPress={onSave}
       disabled={saving}
     >
-      <Text style={styles.trialBtnText}>{saving ? 'SAVING...' : 'MARK COMPLETE'}</Text>
+      <Text style={styles.trialBtnText}>{saving ? 'SAVING...' : 'LOG SESSION'}</Text>
     </TouchableOpacity>
   );
 }
@@ -440,6 +461,10 @@ function DayCard({
     return init;
   });
   const [completeSaving, setCompleteSaving] = useState(false);
+
+  // ── HR upload state ──────────────────────────────────────────────────────────
+  const [showHRUpload, setShowHRUpload]   = useState(false);
+  const [sessionLogId, setSessionLogId]   = useState<string | null>(null);
 
   // ── Time trial state ─────────────────────────────────────────────────────────
   const [ttStatus, setTtStatus]               = useState<'idle'|'matching'|'matched'|'multiple'|'notFound'|'zonesSet'>('idle');
@@ -527,7 +552,7 @@ function DayCard({
   async function saveTrialResult(si: number, session: ProgramSession) {
     if (!userId || !trialValues[si]?.trim()) return;
     setTrialSaving(true);
-    const { error } = await supabase.from('session_logs').insert({
+    const { data: insertedLog, error } = await supabase.from('session_logs').insert({
       user_id:      userId,
       program_id:   programId,
       day_name:     day.day,
@@ -537,8 +562,9 @@ function DayCard({
       log_value:    trialValues[si].trim(),
       completed:    true,
       completed_at: new Date().toISOString(),
-    });
+    }).select('id').single();
     if (error) console.log('[program] saveTrialResult error:', error.message);
+    if (insertedLog?.id) setSessionLogId(insertedLog.id);
 
     // Hard 3 detection — triggers next week program generation
     try {
@@ -584,6 +610,7 @@ function DayCard({
 
     setTrialSaved(prev => ({ ...prev, [si]: true }));
     setTrialSaving(false);
+    setShowHRUpload(true);
 
     // Trigger zone derivation only for the Week 1 run time trial, not conditioning
     const sessionIsRunTrial =
@@ -646,7 +673,7 @@ function DayCard({
   async function markSessionComplete(si: number, sessionName: string) {
     if (!userId) return;
     setCompleteSaving(true);
-    const { error } = await supabase.from('session_logs').insert({
+    const { data: insertedComplete, error } = await supabase.from('session_logs').insert({
       user_id:      userId,
       program_id:   programId,
       day_name:     day.day,
@@ -655,8 +682,9 @@ function DayCard({
       log_field:    'session_complete',
       completed:    true,
       completed_at: new Date().toISOString(),
-    });
+    }).select('id').single();
     if (error) console.log('[program] markSessionComplete error:', error.message);
+    if (insertedComplete?.id) setSessionLogId(insertedComplete.id);
 
     // Hard 3 detection — triggers next week program generation
     try {
@@ -702,6 +730,7 @@ function DayCard({
 
     setCompleteSaved(prev => ({ ...prev, [si]: true }));
     setCompleteSaving(false);
+    setShowHRUpload(true);
   }
 
   return (
@@ -796,6 +825,35 @@ function DayCard({
         </View>
       ))}
     </View>
+
+    <Modal
+      visible={showHRUpload}
+      animationType="slide"
+      transparent
+      onRequestClose={() => setShowHRUpload(false)}
+    >
+      <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' }}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowHRUpload(false)} />
+        <View style={{ backgroundColor: '#111111', paddingBottom: 48, paddingTop: 16 }}>
+          <View style={{ paddingHorizontal: 24, paddingTop: 12, paddingBottom: 16 }}>
+            <Text style={{ color: '#00d4aa', fontSize: 13, fontWeight: '700', letterSpacing: 1, fontFamily: 'BarlowCondensed_700Bold' }}>
+              SESSION LOGGED ✓
+            </Text>
+            <Text style={{ color: '#8a877f', fontSize: 14, marginTop: 4 }}>
+              Upload your heart rate data for a coach debrief.
+            </Text>
+          </View>
+          <HRUploadPrompt
+            sessionLogId={sessionLogId}
+            userId={userId}
+            onDebrief={() => setShowHRUpload(false)}
+            onInvalid={() => setShowHRUpload(false)}
+            onNetworkError={() => setShowHRUpload(false)}
+            onSkip={() => setShowHRUpload(false)}
+          />
+        </View>
+      </View>
+    </Modal>
 
     <Modal
       visible={ttModalVisible}
