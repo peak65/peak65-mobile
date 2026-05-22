@@ -2,7 +2,6 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   View, Text, ScrollView, TouchableOpacity, RefreshControl,
   StyleSheet, ActivityIndicator, Modal, AppState, Animated,
@@ -24,7 +23,7 @@ import {
   selectHRVSource, selectRHRSource,
   selectSleepSource, resolveAllSources,
 } from '../../lib/wearablePriority';
-import type { Program, ProgramDay, TabParamList, MainStackParamList } from '../_layout';
+import type { Program, ProgramDay, TabParamList } from '../_layout';
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
@@ -446,17 +445,9 @@ export default function HomeScreen() {
         if (ageMs < 4 * 60 * 60 * 1000) {
           const prog = c.program as Program | null;
           setProgram(prog);
-          if (prog?.program_data?.days && prog.week_start_date) {
-            const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-            const weekStart = new Date(prog.week_start_date + 'T00:00:00');
-            const today = new Date();
-            today.setHours(0,0,0,0);
-            const matched = prog.program_data.days.find((d: any) => {
-              const dayOffset = DAY_NAMES.indexOf(d.day) - weekStart.getDay();
-              const sessionDate = new Date(weekStart.getTime() + dayOffset * 86_400_000);
-              sessionDate.setHours(0,0,0,0);
-              return sessionDate.getTime() === today.getTime();
-            });
+          if (prog?.program_data?.days) {
+            const todayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+            const matched = prog.program_data.days.find((d: any) => d.day === todayName);
             setTodayDay(matched ?? null);
           } else {
             setTodayDay(null);
@@ -516,18 +507,9 @@ export default function HomeScreen() {
     const prog = activeProg;
     setProgram(prog);
 
-    if (prog?.program_data?.days && prog.week_start_date) {
-      const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-      const weekStart = new Date(prog.week_start_date + 'T00:00:00');
-      const today = new Date();
-      today.setHours(0,0,0,0);
-
-      const matched = prog.program_data.days.find(d => {
-        const dayOffset = DAY_NAMES.indexOf(d.day) - weekStart.getDay();
-        const sessionDate = new Date(weekStart.getTime() + dayOffset * 86_400_000);
-        sessionDate.setHours(0,0,0,0);
-        return sessionDate.getTime() === today.getTime();
-      });
+    if (prog?.program_data?.days) {
+      const todayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+      const matched = prog.program_data.days.find(d => d.day === todayName);
       setTodayDay(matched ?? null);
     }
 
@@ -925,17 +907,6 @@ export default function HomeScreen() {
   const sleepR = hasWearableData ? selectSleepSource(readinessData!) : null;
   const rhrR   = hasWearableData ? selectRHRSource(readinessData!) : null;
 
-  function startWorkout() {
-    const firstSession = sessions[0] ?? null;
-    if (!firstSession || !program || !todayDay) return;
-    (navigation as any).getParent<NativeStackNavigationProp<MainStackParamList>>()?.navigate('LiveWorkout', {
-      sessionJson: JSON.stringify(firstSession),
-      programId:   program.id,
-      weekNumber:  program.week_number,
-      dayName:     todayDay.day,
-    });
-  }
-
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
 
@@ -1102,9 +1073,9 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={styles.viewWorkoutBtn}
                 activeOpacity={0.85}
-                onPress={() => { setWorkoutSheetOpen(false); startWorkout(); }}
+                onPress={() => { setWorkoutSheetOpen(false); navigation.navigate('Program'); }}
               >
-                <Text style={styles.viewWorkoutBtnText}>START WORKOUT →</Text>
+                <Text style={styles.viewWorkoutBtnText}>LOG SESSION →</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -1334,9 +1305,9 @@ export default function HomeScreen() {
                 <TouchableOpacity
                   style={styles.viewWorkoutBtn}
                   activeOpacity={0.85}
-                  onPress={startWorkout}
+                  onPress={() => navigation.navigate('Program')}
                 >
-                  <Text style={styles.viewWorkoutBtnText}>START WORKOUT →</Text>
+                  <Text style={styles.viewWorkoutBtnText}>LOG SESSION →</Text>
                 </TouchableOpacity>
               )}
             </View>

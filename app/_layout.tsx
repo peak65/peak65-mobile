@@ -267,7 +267,7 @@ async function resolveAppState(
 
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('first_name')
+    .select('first_name, role')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -279,6 +279,10 @@ async function resolveAppState(
   if (profileError) {
     await supabase.auth.signOut();
     return { state: 'unauthenticated', isCoach: false };
+  }
+
+  if (profile?.role === 'admin' || profile?.role === 'coach') {
+    return { state: 'authenticated', isCoach: profile.role === 'coach' };
   }
 
   if (!profile?.first_name) return { state: 'onboarding', isCoach: false };

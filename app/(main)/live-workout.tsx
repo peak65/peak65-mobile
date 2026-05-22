@@ -7,7 +7,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   Modal, Vibration, Alert, KeyboardAvoidingView,
   Platform, StatusBar, ActivityIndicator, AppState, Animated, Dimensions, Image,
 } from 'react-native';
@@ -26,6 +26,7 @@ import { Feather } from '@expo/vector-icons';
 import { Colors, Fonts } from '../../lib/theme';
 import Tooltip from '../components/Tooltip';
 import { startLiveActivity as laStart, updateLiveActivity as laUpdate, endLiveActivity as laEnd } from '../../modules/live-activity';
+import { LinearGradient } from 'expo-linear-gradient';
 
 // Optional keep-awake — requires: npx expo install expo-keep-awake
 function useKeepAwake() {
@@ -48,24 +49,23 @@ type Route = RouteProp<MainStackParamList, 'LiveWorkout'>;
 // ─── Step types ───────────────────────────────────────────────────────────────
 
 type StepKind =
-  | 'generic'       // warm-up / cool-down exercise, tap DONE
-  | 'run_interval'  // single run interval with pace target
-  | 'rest'          // timed rest
-  | 'transition'    // between run and strength phases
-  | 'strength'      // one set of a strength exercise
-  | 'metcon'        // full metcon block (AMRAP / EMOM / Rounds)
-  | 'z2_cardio';    // Z2 session with elapsed timer
+  | 'strength_exercise'  // all sets of one strength exercise
+  | 'timed_interval'     // cardio interval with countdown timer
+  | 'rest'               // timed rest
+  | 'generic'            // warm-up / cool-down exercise, tap DONE
+  | 'metcon'             // full metcon block (AMRAP / EMOM / Rounds)
+  | 'z2_cardio';         // Z2 session with elapsed timer
 
 type Step =
-  | { kind: 'generic';      exercise: ExerciseItem; blockName: string }
-  | { kind: 'run_interval'; exercise: ExerciseItem; intervalNum: number; totalIntervals: number; blockName: string }
-  | { kind: 'rest';         seconds: number; label: string }
-  | { kind: 'transition';   from: string; to: string; seconds: number }
-  | { kind: 'strength';     exercise: ExerciseItem; setNum: number; totalSets: number; blockName: string }
-  | { kind: 'metcon';       block: SessionBlock; format: 'amrap' | 'emom' | 'rounds'; timeCap: number }
-  | { kind: 'z2_cardio';    session: ProgramSession };
+  | { kind: 'strength_exercise'; exercise: ExerciseItem; totalSets: number; blockName: string }
+  | { kind: 'timed_interval';    exercise: ExerciseItem; intervalNum: number; totalIntervals: number; durationSecs: number; blockName: string }
+  | { kind: 'rest';              seconds: number; label: string }
+  | { kind: 'generic';           exercise: ExerciseItem; blockName: string }
+  | { kind: 'metcon';            block: SessionBlock; format: 'amrap' | 'emom' | 'rounds'; timeCap: number }
+  | { kind: 'z2_cardio';         session: ProgramSession };
 
 type LoggedSet = { exerciseName: string; set: number; weight: string; reps: string };
+type LoggedSetData = { setNum: number; weight: string; reps: string; rir: number | null };
 type MetconRound = { round: number; completedAt: number };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ function announceSpeech(text: string): void {
 
 function buildSpeechAnnouncement(step: Step): string | null {
   switch (step.kind) {
-    case 'run_interval': {
+    case 'timed_interval': {
       const pace = extractPaceTarget(step.exercise);
       let text = `Interval ${step.intervalNum} of ${step.totalIntervals}. ${step.exercise.reps ?? ''}`;
       if (pace) text += `. Target pace: ${pace}`;
@@ -198,6 +198,41 @@ function parseDurationSecs(reps: string | undefined): number | null {
   return t > 0 ? t : null;
 }
 
+function getExerciseDurationSecs(ex: ExerciseItem): number | null {
+  if ((ex as any).duration) return parseDurationSecs((ex as any).duration);
+  return parseDurationSecs(String(ex.reps ?? ''));
+}
+
+function getZoneColor(paceZone: string | undefined): string {
+  if (!paceZone) return Colors.accent;
+  if (/z1|zone\s*1|recovery|easy/i.test(paceZone)) return Colors.green;
+  if (/z2|zone\s*2/i.test(paceZone)) return Colors.green;
+  if (/z3|zone\s*3|tempo/i.test(paceZone)) return Colors.yellow;
+  if (/z4|zone\s*4|threshold/i.test(paceZone)) return Colors.accent;
+  if (/z5|zone\s*5|max/i.test(paceZone)) return Colors.red;
+  return Colors.accent;
+}
+
+function getZoneTint(paceZone: string | undefined): string {
+  if (!paceZone) return 'rgba(232,255,71,0.025)';
+  if (/z1|zone\s*1|recovery|easy/i.test(paceZone)) return 'rgba(0,212,170,0.025)';
+  if (/z2|zone\s*2/i.test(paceZone)) return 'rgba(0,212,170,0.025)';
+  if (/z3|zone\s*3|tempo/i.test(paceZone)) return 'rgba(232,255,71,0.025)';
+  if (/z4|zone\s*4|threshold/i.test(paceZone)) return 'rgba(232,255,71,0.035)';
+  if (/z5|zone\s*5|max/i.test(paceZone)) return 'rgba(255,59,59,0.025)';
+  return 'rgba(232,255,71,0.025)';
+}
+
+function isCardioExercise(ex: ExerciseItem): boolean {
+  if ((ex as any).type === 'cardio' || (ex as any).type === 'z2_cardio') return true;
+  return isRunExercise(ex);
+}
+
+function isStrengthExerciseNew(ex: ExerciseItem, blockName: string): boolean {
+  if ((ex as any).type === 'strength' || (ex as any).type === 'bodyweight') return true;
+  return isStrengthExercise(ex, blockName);
+}
+
 function isRunExercise(ex: ExerciseItem): boolean {
   const reps = String(ex.reps ?? '');
   if (/\d+\s*(km|m\b|800|400|200|1k|mile|min|sec)/i.test(reps)) return true;
@@ -238,10 +273,7 @@ function extractTimeCap(block: SessionBlock): number {
 }
 
 function isZ2Session(session: ProgramSession): boolean {
-  return /z2|zone\s*2|easy|aerobic/i.test(session.name) &&
-    (session.blocks ?? []).every(b =>
-      /warm|cool|z2|zone|easy|aerobic/i.test(b.block_name)
-    );
+  return /z2|zone\s*2|easy|aerobic/i.test(session.name);
 }
 
 function extractPaceTarget(exercise: ExerciseItem): string | null {
@@ -270,25 +302,23 @@ function isCooldownStep(step: Step): boolean {
 
 function nextStepLabel(step: Step | null | undefined): { name: string; detail: string } {
   if (!step) return { name: '', detail: '' };
-  if (step.kind === 'strength')     return { name: step.exercise.name, detail: `Set ${step.setNum} of ${step.totalSets}` };
-  if (step.kind === 'run_interval') return { name: step.exercise.name, detail: `Interval ${step.intervalNum}/${step.totalIntervals}` };
-  if (step.kind === 'generic')      return { name: step.exercise.name, detail: step.exercise.reps ? String(step.exercise.reps) : '' };
-  if (step.kind === 'metcon')       return { name: step.block.block_name, detail: step.format.toUpperCase() };
-  if (step.kind === 'transition')   return { name: `${step.to} Block`, detail: 'Transition' };
-  if (step.kind === 'rest')         return { name: 'Rest', detail: formatTime(step.seconds) };
+  if (step.kind === 'strength_exercise') return { name: step.exercise.name, detail: `${step.totalSets} sets` };
+  if (step.kind === 'timed_interval')    return { name: step.exercise.name, detail: `Interval ${step.intervalNum}/${step.totalIntervals}` };
+  if (step.kind === 'generic')           return { name: step.exercise.name, detail: step.exercise.reps ? String(step.exercise.reps) : '' };
+  if (step.kind === 'metcon')            return { name: step.block.block_name, detail: step.format.toUpperCase() };
+  if (step.kind === 'rest')              return { name: 'Rest', detail: formatTime(step.seconds) };
   return { name: '', detail: '' };
 }
 
 function getCategoryLabel(step: Step): string {
   switch (step.kind) {
-    case 'strength':     return step.blockName;
-    case 'generic':      return step.blockName;
-    case 'run_interval': return `${step.blockName} · ${step.intervalNum}/${step.totalIntervals}`;
-    case 'metcon':       return step.block.block_name;
-    case 'z2_cardio':    return 'ZONE 2';
-    case 'rest':         return 'REST';
-    case 'transition':   return `${step.from} → ${step.to}`;
-    default:             return '';
+    case 'strength_exercise': return step.blockName;
+    case 'generic':           return step.blockName;
+    case 'timed_interval':    return `${step.blockName} · ${step.intervalNum}/${step.totalIntervals}`;
+    case 'metcon':            return step.block.block_name;
+    case 'z2_cardio':         return 'ZONE 2';
+    case 'rest':              return 'REST';
+    default:                  return '';
   }
 }
 
@@ -301,11 +331,9 @@ function buildSteps(session: ProgramSession): Step[] {
   }
 
   const blocks = session.blocks ?? [];
-  let prevKind: string | null = null;
 
-  for (let bi = 0; bi < blocks.length; bi++) {
-    const block   = blocks[bi];
-    const bKind   = classifyBlock(block);
+  for (const block of blocks) {
+    const bKind = classifyBlock(block);
     const exercises = block.exercises ?? [];
 
     if (bKind === 'warmup' || bKind === 'cooldown') {
@@ -316,106 +344,30 @@ function buildSteps(session: ProgramSession): Step[] {
     }
 
     if (bKind === 'metcon') {
-      // Insert transition if coming from run or strength
-      if (prevKind === 'run' || prevKind === 'strength') {
-        steps.push({ kind: 'transition', from: prevKind === 'run' ? 'Run' : 'Strength', to: 'Metcon', seconds: 60 });
-      }
       steps.push({ kind: 'metcon', block, format: detectMetconFormat(block), timeCap: extractTimeCap(block) });
-      prevKind = 'metcon';
       continue;
     }
 
-    // For run or strength (or mixed), look at each exercise
-    let blockHadRun = false;
-    let blockHadStrength = false;
-
-    const strengthExes = exercises.filter(e => isStrengthExercise(e, block.block_name));
-    const hasCircuitId = exercises.some(e => e.circuit_id != null);
-    const hasSupersetId = exercises.some(e => e.superset_id != null);
-    const isCircuit = hasCircuitId || hasSupersetId || (/circuit|superset|complex/i.test(block.block_name) && strengthExes.length > 1);
-
-    if (isCircuit) {
-      if (blockHadRun || prevKind === 'run') {
-        steps.push({ kind: 'transition', from: 'Run', to: 'Strength', seconds: 90 });
-      }
-
-      // Group exercises by circuit_id or superset_id
-      // Exercises sharing the same id go together and interleave rounds
-      // Exercises with no id are solo — treated as their own group
-      const groups: ExerciseItem[][] = [];
-      const seen = new Map<string, ExerciseItem[]>();
-
-      for (const ex of exercises) {
-        const groupKey = ex.circuit_id ?? ex.superset_id ?? null;
-        if (groupKey) {
-          if (!seen.has(groupKey)) {
-            const g: ExerciseItem[] = [];
-            seen.set(groupKey, g);
-            groups.push(g);
+    for (const ex of exercises) {
+      if (isCardioExercise(ex)) {
+        const total = ex.sets ?? 1;
+        const durSecs = getExerciseDurationSecs(ex);
+        for (let i = 0; i < total; i++) {
+          if (durSecs) {
+            steps.push({ kind: 'timed_interval', exercise: ex, intervalNum: i + 1, totalIntervals: total, durationSecs: durSecs, blockName: block.block_name });
+          } else {
+            steps.push({ kind: 'generic', exercise: ex, blockName: block.block_name });
           }
-          seen.get(groupKey)!.push(ex);
-        } else {
-          groups.push([ex]);
-        }
-      }
-
-      // For each group, run rounds interleaved — all exercises in the group
-      // complete before rest fires. Solo exercises rest after each set.
-      for (const group of groups) {
-        const rounds = Math.max(...group.map(e => e.sets ?? 1));
-        const restLabel = group.length > 1 ? 'Circuit rest' : (group[0]?.rest ?? 'Rest');
-        const restSecs = parseRestSeconds(
-          group[0]?.circuit_rest ?? group[0]?.rest,
-          group.length > 1 ? 60 : 90
-        );
-        for (let round = 0; round < rounds; round++) {
-          for (const ex of group) {
-            if (round < (ex.sets ?? 1)) {
-              steps.push({ kind: 'strength', exercise: ex, setNum: round + 1, totalSets: ex.sets ?? 1, blockName: block.block_name });
-            }
-          }
-          if (round < rounds - 1) {
-            steps.push({ kind: 'rest', seconds: restSecs, label: restLabel });
+          if (i < total - 1) {
+            steps.push({ kind: 'rest', seconds: parseRestSeconds(ex.rest, 120), label: 'Recovery' });
           }
         }
-      }
-
-      blockHadStrength = true;
-    } else {
-      for (const ex of exercises) {
-        if (isRunExercise(ex)) {
-          if (prevKind === 'strength') {
-            steps.push({ kind: 'transition', from: 'Strength', to: 'Run', seconds: 60 });
-          }
-          const total = ex.sets ?? 1;
-          for (let i = 0; i < total; i++) {
-            steps.push({ kind: 'run_interval', exercise: ex, intervalNum: i + 1, totalIntervals: total, blockName: block.block_name });
-            if (i < total - 1) {
-              steps.push({ kind: 'rest', seconds: parseRestSeconds(ex.rest, 120), label: 'Recovery' });
-            }
-          }
-          blockHadRun = true;
-        } else if (isStrengthExercise(ex, block.block_name)) {
-          if (blockHadRun || prevKind === 'run') {
-            steps.push({ kind: 'transition', from: 'Run', to: 'Strength', seconds: 90 });
-            blockHadRun = false;
-          }
-          const total = ex.sets ?? 1;
-          for (let s = 0; s < total; s++) {
-            steps.push({ kind: 'strength', exercise: ex, setNum: s + 1, totalSets: total, blockName: block.block_name });
-            if (s < total - 1) {
-              steps.push({ kind: 'rest', seconds: parseRestSeconds(ex.rest, 90), label: ex.rest ?? 'Rest' });
-            }
-          }
-          blockHadStrength = true;
-        } else {
-          steps.push({ kind: 'generic', exercise: ex, blockName: block.block_name });
-        }
+      } else if (isStrengthExerciseNew(ex, block.block_name)) {
+        steps.push({ kind: 'strength_exercise', exercise: ex, totalSets: ex.sets ?? 1, blockName: block.block_name });
+      } else {
+        steps.push({ kind: 'generic', exercise: ex, blockName: block.block_name });
       }
     }
-
-    if (blockHadRun) prevKind = 'run';
-    else if (blockHadStrength) prevKind = 'strength';
   }
 
   return steps;
@@ -433,9 +385,24 @@ function formatTime(secs: number): string {
 
 function ProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total > 0 ? Math.min(done / total, 1) : 0;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const prevDone = useRef(done);
+
+  useEffect(() => {
+    if (done !== prevDone.current) {
+      prevDone.current = done;
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.4, duration: 80, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [done, pulseAnim]);
+
   return (
     <View style={pb.track}>
-      <View style={[pb.fill, { width: `${Math.round(pct * 100)}%` as unknown as number }]} />
+      <Animated.View
+        style={[pb.fill, { width: `${Math.round(pct * 100)}%` as unknown as number, opacity: pulseAnim }]}
+      />
     </View>
   );
 }
@@ -628,7 +595,6 @@ const sw = StyleSheet.create({
 function laGetExerciseName(step: Step): string {
   if ('exercise' in step) return (step as any).exercise.name;
   if (step.kind === 'rest') return 'REST';
-  if (step.kind === 'transition') return `${step.from} → ${step.to}`;
   if (step.kind === 'metcon') return step.block.block_name;
   if (step.kind === 'z2_cardio') return step.session.name;
   return '';
@@ -649,6 +615,141 @@ function laGetPace(step: Step): string {
   return '';
 }
 
+// ─── Session Preview Screen ───────────────────────────────────────────────────
+
+function SessionPreviewScreen({
+  session,
+  onStart,
+  onBack,
+}: {
+  session: ProgramSession;
+  onStart: () => void;
+  onBack: () => void;
+}) {
+  const sessionName = session.name ?? '';
+  const isEasy = /easy|z2|zone\s*2|recovery/i.test(sessionName);
+  const isHard = /threshold|tempo|interval|hard/i.test(sessionName);
+  const isStrength = /strength|squat|bench|deadlift|lift/i.test(sessionName);
+
+  let badgeText = 'TRAINING';
+  let badgeBg = 'transparent';
+  let badgeBorder = '#8a877f';
+  let badgeColor = '#8a877f';
+  if (isEasy) { badgeText = 'EASY'; badgeBg = 'rgba(0,212,170,0.15)'; badgeBorder = '#00d4aa'; badgeColor = '#00d4aa'; }
+  else if (isHard) { badgeText = 'HARD'; badgeBg = 'rgba(232,255,71,0.15)'; badgeBorder = '#e8ff47'; badgeColor = '#e8ff47'; }
+  else if (isStrength) { badgeText = 'STRENGTH'; badgeBg = 'rgba(240,237,232,0.08)'; badgeBorder = '#f0ede8'; badgeColor = '#f0ede8'; }
+
+  const blocks = session.blocks ?? [];
+  const blockNames = blocks
+    .map(b => b.block_name)
+    .filter(n => n && n.trim().length > 0);
+
+  const coachingLine = session.description
+    ? session.description.slice(0, 140)
+    : null;
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#080808' }} edges={['top', 'bottom']}>
+      <StatusBar barStyle="light-content" />
+      <TouchableOpacity
+        onPress={onBack}
+        style={{ position: 'absolute', top: 56, left: 20, zIndex: 10, padding: 8 }}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      >
+        <Feather name="x" color="#8a877f" size={22} />
+      </TouchableOpacity>
+
+      <View style={{ flex: 1, paddingHorizontal: 28, justifyContent: 'center' }}>
+        {/* Badge */}
+        <View style={{
+          alignSelf: 'flex-start',
+          borderWidth: 1,
+          borderColor: badgeBorder,
+          backgroundColor: badgeBg,
+          paddingHorizontal: 12,
+          paddingVertical: 4,
+          borderRadius: 4,
+          marginBottom: 20,
+        }}>
+          <Text style={{ color: badgeColor, fontSize: 11, fontWeight: '700', letterSpacing: 2 }}>
+            {badgeText}
+          </Text>
+        </View>
+
+        {/* Session name */}
+        <Text style={{
+          color: '#f0ede8',
+          fontSize: 48,
+          fontFamily: 'BarlowCondensed_900Black',
+          lineHeight: 52,
+          textTransform: 'uppercase',
+          marginBottom: 8,
+        }}>
+          {sessionName}
+        </Text>
+
+        {/* Duration */}
+        {!!session.duration_minutes && (
+          <Text style={{ color: '#8a877f', fontSize: 16, marginBottom: 28 }}>
+            {session.duration_minutes} MIN · {session.time ?? 'AM'}
+          </Text>
+        )}
+
+        {/* Block pills */}
+        {blockNames.length > 0 && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 28 }}>
+            {blockNames.map((name, i) => (
+              <View key={i} style={{
+                backgroundColor: '#111111',
+                borderRadius: 4,
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+              }}>
+                <Text style={{ color: '#8a877f', fontSize: 12, fontWeight: '600', letterSpacing: 0.5 }}>
+                  {name}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Coaching line */}
+        {!!coachingLine && (
+          <Text style={{
+            color: '#8a877f',
+            fontSize: 14,
+            fontStyle: 'italic',
+            lineHeight: 22,
+            marginBottom: 8,
+          }} numberOfLines={3}>
+            {coachingLine}
+          </Text>
+        )}
+      </View>
+
+      {/* Start button */}
+      <TouchableOpacity
+        onPress={onStart}
+        style={{
+          backgroundColor: '#e8ff47',
+          marginHorizontal: 0,
+          paddingVertical: 22,
+          alignItems: 'center',
+        }}
+      >
+        <Text style={{
+          color: '#080808',
+          fontSize: 18,
+          fontFamily: 'BarlowCondensed_700Bold',
+          letterSpacing: 1.5,
+        }}>
+          START SESSION →
+        </Text>
+      </TouchableOpacity>
+    </SafeAreaView>
+  );
+}
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function LiveWorkoutScreen() {
@@ -662,17 +763,12 @@ export default function LiveWorkoutScreen() {
 
   const steps      = useRef(buildSteps(session)).current;
   const totalSteps = steps.length;
-  const isCardioSession = steps.some(s => s.kind === 'run_interval' || s.kind === 'z2_cardio');
+  const isCardioSession = steps.some(s => s.kind === 'timed_interval' || s.kind === 'z2_cardio');
 
   const [stepIdx,     setStepIdx]     = useState(0);
-  const [phase,       setPhase]       = useState<'active' | 'rest' | 'transition' | 'complete'>('active');
+  const [phase,       setPhase]       = useState<'active' | 'rest' | 'complete'>('active');
   const [restSecs,    setRestSecs]    = useState(60);
   const [restLabel,   setRestLabel]   = useState('Rest');
-  const [transFrom,   setTransFrom]   = useState('');
-  const [transTo,     setTransTo]     = useState('');
-  const [transSecs,   setTransSecs]   = useState(90);
-  const [weightInput, setWeightInput] = useState('');
-  const [repsInput,   setRepsInput]   = useState('');
   const [loggedSets,  setLoggedSets]  = useState<LoggedSet[]>([]);
   const [elapsed,     setElapsed]     = useState(0);
   const [rpe,         setRpe]         = useState(7);
@@ -683,7 +779,10 @@ export default function LiveWorkoutScreen() {
   const [savedLogId,  setSavedLogId]  = useState<string | null>(null);
   const [hrZoneStep,  setHrZoneStep]  = useState<'none' | 'prompt' | 'debrief' | 'invalid' | 'network_error'>('none');
   const [debriefResult, setDebriefResult] = useState<any>(null);
-  const [lastLoggedSet, setLastLoggedSet] = useState<LoggedSet | null>(null);
+  const [showPreview, setShowPreview] = useState(true);
+  const [prExercise, setPrExercise] = useState<string | null>(null);
+  const [showPR, setShowPR] = useState(false);
+  const prAnimVal = useRef(new Animated.Value(0)).current;
 
   // Metcon state
   const [metconRounds,      setMetconRounds]      = useState(0);
@@ -703,7 +802,7 @@ export default function LiveWorkoutScreen() {
   const startTimeRef          = useRef(0);
   const currentTimerDuration  = useRef(0);
   const nextExerciseNameRef   = useRef('');
-  const phaseRef              = useRef<'active' | 'rest' | 'transition' | 'complete'>('active');
+  const phaseRef              = useRef<'active' | 'rest' | 'complete'>('active');
   const onRestDoneRef         = useRef<() => void>(() => {});
 
   // Live Activity per-second refs
@@ -773,6 +872,34 @@ export default function LiveWorkoutScreen() {
     supabase.auth.getSession().then(({ data: { session } }) => setUserId(session?.user?.id ?? null));
   }, []);
 
+  const [previousSessionData, setPreviousSessionData] = useState<Record<string, LoggedSetData[]>>({});
+
+  useEffect(() => {
+    if (!userId || !programId) return;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('session_logs')
+          .select('weights_used')
+          .eq('user_id', userId)
+          .eq('program_id', programId)
+          .eq('session_name', session.name)
+          .eq('completed', true)
+          .order('completed_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!data?.weights_used) return;
+        const sets: LoggedSet[] = JSON.parse(data.weights_used as string);
+        const byExercise: Record<string, LoggedSetData[]> = {};
+        for (const s of sets) {
+          if (!byExercise[s.exerciseName]) byExercise[s.exerciseName] = [];
+          byExercise[s.exerciseName].push({ setNum: s.set, weight: s.weight, reps: s.reps, rir: null });
+        }
+        setPreviousSessionData(byExercise);
+      } catch {}
+    })();
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Start Live Activity once userId resolves; end it when workout completes
   useEffect(() => { if (userId) startLiveActivity(); }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (phase === 'complete') endLiveActivity(); }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -786,7 +913,7 @@ export default function LiveWorkoutScreen() {
     setStepElapsed(0);
     const id = setInterval(() => setStepElapsed(e => e + 1), 1000);
     return () => clearInterval(id);
-  }, [stepIdx]);
+  }, [stepIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // AppState background/foreground handler for timer notifications (FIX 3)
   useEffect(() => {
@@ -812,13 +939,12 @@ export default function LiveWorkoutScreen() {
         if (startTimeRef.current > 0 && currentTimerDuration.current > 0) {
           const elapsed = (Date.now() - startTimeRef.current) / 1000;
           if (elapsed >= currentTimerDuration.current) {
-            if (phaseRef.current === 'rest' || phaseRef.current === 'transition') {
+            if (phaseRef.current === 'rest') {
               onRestDoneRef.current();
             }
           } else {
             const remaining = Math.max(1, Math.ceil(currentTimerDuration.current - elapsed));
             if (phaseRef.current === 'rest') setRestSecs(remaining);
-            else if (phaseRef.current === 'transition') setTransSecs(remaining);
           }
         }
       }
@@ -886,13 +1012,13 @@ export default function LiveWorkoutScreen() {
   }, [stepIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const advance = useCallback(() => {
+    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); } catch {}
+    playBeep(660, 80);
     const next = stepIdx + 1;
-    if (next >= totalSteps) { setPhase('complete'); }
+    if (next >= totalSteps) { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); } catch {} setPhase('complete'); }
     else {
       const nextStep = steps[next];
       setStepIdx(next);
-      setWeightInput('');
-      setRepsInput('');
       if (nextStep?.kind === 'rest') {
         const s = nextStep as Extract<Step, { kind: 'rest' }>;
         setRestSecs(s.seconds);
@@ -908,7 +1034,7 @@ export default function LiveWorkoutScreen() {
         announceSpeech(`Rest. ${durText}.`);
         afterRest.current = () => {
           const afterIdx = next + 1;
-          if (afterIdx >= totalSteps) { setPhase('complete'); }
+          if (afterIdx >= totalSteps) { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); } catch {} setPhase('complete'); }
           else {
             const afterStep = steps[afterIdx];
             setStepIdx(afterIdx);
@@ -922,33 +1048,6 @@ export default function LiveWorkoutScreen() {
           remainingSecs: s.seconds,
           nextExerciseName: afterStep ? laGetExerciseName(afterStep) : 'Complete',
           nextTargetDisplay: afterStep ? laGetTargetDisplay(afterStep) : '',
-          elapsedSecs: elapsed, stationIndex: next + 1, totalStations: totalSteps,
-          currentPace: '', isRest: true,
-        });
-      } else if (nextStep?.kind === 'transition') {
-        const s = nextStep as Extract<Step, { kind: 'transition' }>;
-        setTransFrom(s.from); setTransTo(s.to); setTransSecs(s.seconds);
-        setPhase('transition');
-        startTimeRef.current = Date.now();
-        currentTimerDuration.current = s.seconds;
-        const afterTransStep = steps[next + 1];
-        nextExerciseNameRef.current = afterTransStep && 'exercise' in afterTransStep ? (afterTransStep as any).exercise.name : s.to;
-        afterRest.current = () => {
-          const afterIdx = next + 1;
-          if (afterIdx >= totalSteps) { setPhase('complete'); }
-          else {
-            const afterStep = steps[afterIdx];
-            setStepIdx(afterIdx);
-            setPhase('active');
-            const speech = buildSpeechAnnouncement(afterStep);
-            if (speech) announceSpeech(speech);
-          }
-        };
-        pushLiveActivityUpdate({
-          exerciseName: `${s.from} → ${s.to}`, targetDisplay: '',
-          remainingSecs: s.seconds,
-          nextExerciseName: afterTransStep ? laGetExerciseName(afterTransStep) : 'Complete',
-          nextTargetDisplay: afterTransStep ? laGetTargetDisplay(afterTransStep) : '',
           elapsedSecs: elapsed, stationIndex: next + 1, totalStations: totalSteps,
           currentPace: '', isRest: true,
         });
@@ -978,71 +1077,42 @@ export default function LiveWorkoutScreen() {
     }
   }, [steps, stepIdx, totalSteps]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function triggerRest(secs: number, label: string) {
-    setRestSecs(secs);
-    setRestLabel(label);
-    setPhase('rest');
-    startTimeRef.current = Date.now();
-    currentTimerDuration.current = secs;
-    const nextStep = steps[stepIdx + 1];
-    nextExerciseNameRef.current = nextStep && 'exercise' in nextStep ? (nextStep as any).exercise.name : 'Next exercise';
-    afterRest.current = () => {
-      startTimeRef.current = 0;
-      Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
-      const nextIdx = stepIdx + 1;
-      if (nextIdx >= steps.length) {
-        setPhase('complete');
-      } else {
-        setStepIdx(nextIdx);
-        setWeightInput('');
-        setRepsInput('');
-        setPhase('active');
-      }
-    };
-    const trNext = steps[stepIdx + 1];
-    pushLiveActivityUpdate({
-      exerciseName: 'REST', targetDisplay: '',
-      remainingSecs: secs,
-      nextExerciseName: trNext ? laGetExerciseName(trNext) : 'Complete',
-      nextTargetDisplay: trNext ? laGetTargetDisplay(trNext) : '',
-      elapsedSecs: elapsed, stationIndex: stepIdx + 1, totalStations: totalSteps,
-      currentPace: '', isRest: true,
-    });
-  }
-
   const onRestDone = useCallback(() => {
+    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); } catch {}
     startTimeRef.current = 0;
     Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
     afterRest.current();
   }, []);
 
-  function logSet(step: Extract<Step, { kind: 'strength' }>) {
-    const ex = step.exercise;
-    const isBW = ex.type === 'bodyweight' || (ex.type === undefined && isBodyweightExercise(ex.name));
-    const prevForEx = loggedSets.filter(l => l.exerciseName === step.exercise.name);
-    const lastW = prevForEx.length > 0 ? prevForEx[prevForEx.length - 1].weight : null;
-    const numRepsDefault = String(step.exercise.reps ?? '').match(/\d+/)?.[0] ?? String(step.exercise.reps ?? '');
-    const newSet: LoggedSet = {
-      exerciseName: step.exercise.name,
-      set:          step.setNum,
-      weight:       isBW ? 'BW' : (weightInput || lastW || '0'),
-      reps:         repsInput || numRepsDefault,
-    };
-    setLoggedSets(prev => [...prev, newSet]);
-    setLastLoggedSet(newSet);
-    const restS = parseRestSeconds(step.exercise.rest, step.totalSets > 3 ? 180 : 90);
-    triggerRest(restS, step.exercise.rest ?? `${restS}s rest`);
-  }
-
-  function goBackToRelog() {
-    const last = loggedSets[loggedSets.length - 1];
-    setLoggedSets(prev => prev.slice(0, -1));
-    if (last) {
-      setWeightInput(last.weight === 'BW' ? '' : last.weight);
-      setRepsInput(last.reps);
-    }
-    startTimeRef.current = 0;
-    setPhase('active');
+  function handleStrengthComplete(exerciseName: string, sets: LoggedSetData[]) {
+    const newLoggedSets: LoggedSet[] = sets.map(s => ({
+      exerciseName,
+      set: s.setNum,
+      weight: s.weight,
+      reps: s.reps,
+    }));
+    setLoggedSets(prev => {
+      const prevBest = prev
+        .filter(l => l.exerciseName === exerciseName && l.weight && l.weight !== 'BW' && parseFloat(l.weight) > 0)
+        .reduce((max, l) => Math.max(max, parseFloat(l.weight)), 0);
+      const weightSets = sets.filter(s => s.weight && s.weight !== 'BW' && parseFloat(s.weight) > 0);
+      if (weightSets.length > 0 && prevBest > 0) {
+        const maxW = Math.max(...weightSets.map(s => parseFloat(s.weight)));
+        if (maxW > prevBest) {
+          setPrExercise(exerciseName);
+          setShowPR(true);
+          prAnimVal.setValue(0);
+          Animated.sequence([
+            Animated.timing(prAnimVal, { toValue: 1, duration: 200, useNativeDriver: true }),
+            Animated.delay(1200),
+            Animated.timing(prAnimVal, { toValue: 0, duration: 300, useNativeDriver: true }),
+          ]).start(() => { setShowPR(false); setPrExercise(null); });
+          try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); } catch {}
+        }
+      }
+      return [...prev, ...newLoggedSets];
+    });
+    advance();
   }
 
   async function saveSession(full: boolean): Promise<string | null> {
@@ -1225,6 +1295,24 @@ export default function LiveWorkoutScreen() {
     }
   }
 
+  const gradientColors: [string, string] = phase === 'rest'
+    ? ['#080808', 'rgba(100,160,255,0.018)']
+    : phase === 'complete'
+    ? ['#080808', 'rgba(0,212,170,0.03)']
+    : isCardioSession
+    ? ['#080808', 'rgba(232,255,71,0.025)']
+    : ['#080808', '#080808'];
+
+  if (showPreview) {
+    return (
+      <SessionPreviewScreen
+        session={session}
+        onStart={() => setShowPreview(false)}
+        onBack={() => navigation.goBack()}
+      />
+    );
+  }
+
   // ── COMPLETE ─────────────────────────────────────────────────────────────────
 
   if (phase === 'complete') {
@@ -1270,16 +1358,32 @@ export default function LiveWorkoutScreen() {
     }
 
     return (
-      <SafeAreaView style={s.container}>
+      <View style={[s.container, { position: 'relative' }]}>
+        <LinearGradient colors={gradientColors} style={StyleSheet.absoluteFill} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} />
+        <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
         <StatusBar barStyle="light-content" />
         <ProgressBar done={totalSteps} total={totalSteps} />
         <ScrollView contentContainerStyle={s.centerPad}>
+          <TouchableOpacity
+            onPress={confirmDiscard}
+            style={{ alignSelf: 'flex-end', padding: 8, marginBottom: 8 }}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Text style={{ color: '#3a3a3a', fontSize: 13 }}>✕ Discard</Text>
+          </TouchableOpacity>
           <Text style={s.completeTitle}>SESSION{'\n'}COMPLETE.</Text>
           <Text style={s.completeSub}>{session.name}</Text>
           <View style={s.statRow}>
             <View style={s.stat}><Text style={s.statVal}>{formatTime(elapsed)}</Text><Text style={s.statLbl}>ELAPSED</Text></View>
             <View style={s.stat}><Text style={s.statVal}>{loggedSets.length}</Text><Text style={s.statLbl}>SETS LOGGED</Text></View>
           </View>
+          <Text style={{ color: '#8a877f', fontSize: 14, fontStyle: 'italic', textAlign: 'center', marginBottom: 32, paddingHorizontal: 32 }}>
+            {loggedSets.length >= 5
+              ? `${loggedSets.length} sets logged. Strong work.`
+              : elapsed > 3600
+              ? 'Over an hour of work. Recovery starts now.'
+              : 'Session complete. Recovery starts now.'}
+          </Text>
           <Text style={s.rpeLabel}>HOW HARD WAS IT?</Text>
           <View style={s.rpeRow}>
             {[1,2,3,4,5,6,7,8,9,10].map(n => (
@@ -1294,11 +1398,9 @@ export default function LiveWorkoutScreen() {
           <TouchableOpacity style={[s.primaryBtn, saving && s.btnOff]} onPress={saveAndExit} disabled={saving}>
             <Text style={s.primaryBtnTxt}>{saving ? 'SAVING...' : 'SAVE & EXIT'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={{ marginTop: 16, alignItems: 'center' }} onPress={confirmDiscard}>
-            <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Discard workout</Text>
-          </TouchableOpacity>
         </ScrollView>
-      </SafeAreaView>
+        </SafeAreaView>
+      </View>
     );
   }
 
@@ -1307,7 +1409,7 @@ export default function LiveWorkoutScreen() {
   if (phase === 'rest') {
     const restNextStep = steps[stepIdx + 1] ?? null;
     const restNext = nextStepLabel(restNextStep);
-    const canGoBack = steps[stepIdx]?.kind === 'strength' && lastLoggedSet != null;
+    const canGoBack = false;
     const restExitModal = (
       <Modal visible={exitModalVisible} transparent animationType="slide" onRequestClose={() => setExitModalVisible(false)}>
         <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} activeOpacity={1} onPress={() => setExitModalVisible(false)} />
@@ -1324,7 +1426,9 @@ export default function LiveWorkoutScreen() {
       </Modal>
     );
     return (
-      <SafeAreaView style={s.container}>
+      <View style={[s.container, { position: 'relative' }]}>
+        <LinearGradient colors={gradientColors} style={StyleSheet.absoluteFill} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} />
+        <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
         <StatusBar barStyle="light-content" />
         <WorkoutTopBar categoryLabel="REST" elapsed={elapsed} onExit={() => setExitModalVisible(true)} />
         <ProgressBar done={stepIdx} total={totalSteps} />
@@ -1332,34 +1436,14 @@ export default function LiveWorkoutScreen() {
           seconds={restSecs}
           label={restLabel}
           onSkip={onRestDone}
-          lastLoggedSet={canGoBack ? lastLoggedSet : null}
-          onGoBack={canGoBack ? goBackToRelog : undefined}
+          lastLoggedSet={null}
+          onGoBack={undefined}
           nextName={restNext.name}
           nextDetail={restNext.detail}
         />
         {restExitModal}
-      </SafeAreaView>
-    );
-  }
-
-  // ── TRANSITION ────────────────────────────────────────────────────────────────
-
-  if (phase === 'transition') {
-    return (
-      <SafeAreaView style={s.container}>
-        <StatusBar barStyle="light-content" />
-        <WorkoutTopBar categoryLabel={`${transFrom} → ${transTo}`} elapsed={elapsed} onExit={() => setExitModalVisible(true)} />
-        <ProgressBar done={stepIdx} total={totalSteps} />
-        <View style={s.transContainer}>
-          <Text style={s.transTag}>{transFrom.toUpperCase()} COMPLETE</Text>
-          <Text style={s.transTitle}>{transFrom} Complete.</Text>
-          <Text style={s.transSub}>
-            Take a moment to transition.{'\n'}
-            {transTo === 'Strength' ? 'Set up your equipment, grab water, reset.' : 'Shake out, get your pace target ready.'}
-          </Text>
-          <TransitionTimer seconds={transSecs} onDone={onRestDone} />
-        </View>
-      </SafeAreaView>
+        </SafeAreaView>
+      </View>
     );
   }
 
@@ -1411,7 +1495,9 @@ export default function LiveWorkoutScreen() {
 
   if (isHyroxStation) {
     return (
-      <SafeAreaView style={s.container}>
+      <View style={[s.container, { position: 'relative' }]}>
+        <LinearGradient colors={gradientColors} style={StyleSheet.absoluteFill} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} />
+        <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
         <StatusBar barStyle="light-content" />
         <WorkoutTopBar categoryLabel={getCategoryLabel(currentStep)} elapsed={elapsed} onExit={() => setExitModalVisible(true)} />
         <ProgressBar done={stepIdx} total={totalSteps} />
@@ -1422,12 +1508,15 @@ export default function LiveWorkoutScreen() {
           onDone={advance}
         />
         {exitModalEl}
-      </SafeAreaView>
+        </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={s.container}>
+    <View style={[s.container, { position: 'relative' }]}>
+      <LinearGradient colors={gradientColors} style={StyleSheet.absoluteFill} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} />
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
       <StatusBar barStyle="light-content" />
       <WorkoutTopBar categoryLabel={getCategoryLabel(currentStep)} elapsed={elapsed} onExit={() => setExitModalVisible(true)} />
       <ProgressBar done={stepIdx} total={totalSteps} />
@@ -1462,8 +1551,8 @@ export default function LiveWorkoutScreen() {
         />
       )}
 
-      {currentStep.kind === 'run_interval' && (
-        <RunIntervalPhase
+      {currentStep.kind === 'timed_interval' && (
+        <TimedIntervalPhase
           key={stepIdx}
           step={currentStep}
           swapLabel={swapLabel}
@@ -1473,17 +1562,12 @@ export default function LiveWorkoutScreen() {
         />
       )}
 
-      {currentStep.kind === 'strength' && (
-        <StrengthPhase
-          key={stepIdx}
+      {currentStep.kind === 'strength_exercise' && (
+        <StrengthExercisePhase
+          key={currentStep.exercise.name}
           step={currentStep}
-          weightInput={weightInput}
-          repsInput={repsInput}
-          prevSets={loggedSets.filter(l => l.exerciseName === currentStep.exercise.name)}
-          nextStep={activeNextStep}
-          onWeightChange={setWeightInput}
-          onRepsChange={setRepsInput}
-          onLogSet={() => logSet(currentStep)}
+          previousSets={previousSessionData[currentStep.exercise.name] ?? []}
+          onAllSetsComplete={(sets) => handleStrengthComplete(currentStep.exercise.name, sets)}
         />
       )}
 
@@ -1493,7 +1577,39 @@ export default function LiveWorkoutScreen() {
         onSelect={setSwapLabel}
       />
       {exitModalEl}
-    </SafeAreaView>
+      <Modal visible={showPR} transparent animationType="none" statusBarTranslucent>
+        <Animated.View style={{
+          flex: 1,
+          backgroundColor: '#e8ff47',
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: prAnimVal,
+        }}>
+          <Text style={{
+            color: '#080808',
+            fontSize: 96,
+            fontFamily: 'BarlowCondensed_900Black',
+            letterSpacing: 4,
+            lineHeight: 100,
+          }}>
+            NEW PR
+          </Text>
+          {prExercise && (
+            <Text style={{
+              color: '#080808',
+              fontSize: 22,
+              fontWeight: '600',
+              marginTop: 8,
+              textAlign: 'center',
+              paddingHorizontal: 40,
+            }}>
+              {prExercise}
+            </Text>
+          )}
+        </Animated.View>
+      </Modal>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -1536,30 +1652,86 @@ function Z2Phase({
   elapsed: number;
   onEnd: () => void;
 }) {
-  const paceTarget = step.session.description?.match(/Target:\s*[\d:]+\/k[m]?/i)?.[0] ?? null;
+  const targetSecs = step.session.duration_minutes ? step.session.duration_minutes * 60 : 0;
+  const pct = targetSecs > 0 ? Math.min(elapsed / targetSecs, 1) : 0;
+  const ringSize = Math.min(Dimensions.get('window').width * 0.72, 280);
+  const ringR = ringSize * 0.4;
+  const ringCirc = 2 * Math.PI * ringR;
+  const ringOffset = ringCirc * (1 - pct);
+
   return (
-    <View style={z2.container}>
-      <Text style={z2.sessionName}>{step.session.name}</Text>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+      {/* Ring + timer */}
+      <View style={{ alignItems: 'center', justifyContent: 'center', width: ringSize, height: ringSize }}>
+        {targetSecs > 0 && (
+          <Svg width={ringSize} height={ringSize} style={{ position: 'absolute' }}>
+            <SvgCircle cx={ringSize/2} cy={ringSize/2} r={ringR} stroke="rgba(232,255,71,0.12)" strokeWidth={3} fill="none" />
+            <SvgCircle
+              cx={ringSize/2} cy={ringSize/2} r={ringR}
+              stroke="#e8ff47" strokeWidth={3} fill="none"
+              strokeDasharray={ringCirc}
+              strokeDashoffset={ringOffset}
+              strokeLinecap="butt"
+              transform={`rotate(-90, ${ringSize/2}, ${ringSize/2})`}
+            />
+          </Svg>
+        )}
+        <View style={{ alignItems: 'center' }}>
+          <Text style={{
+            color: '#e8ff47',
+            fontSize: 72,
+            fontFamily: 'BarlowCondensed_900Black',
+            fontVariant: ['tabular-nums'],
+            lineHeight: 80,
+          }}>
+            {formatTime(elapsed)}
+          </Text>
+          <Text style={{ color: '#8a877f', fontSize: 11, fontWeight: '700', letterSpacing: 2, marginTop: 4 }}>
+            ELAPSED
+          </Text>
+          {targetSecs > 0 && (
+            <Text style={{ color: '#8a877f', fontSize: 13, marginTop: 6 }}>
+              TARGET: {step.session.duration_minutes} MIN
+            </Text>
+          )}
+        </View>
+      </View>
+
+      {/* Session name and description */}
+      <Text style={{ color: '#8a877f', fontSize: 12, fontWeight: '700', letterSpacing: 2, marginTop: 32, textAlign: 'center' }}>
+        {step.session.name.toUpperCase()}
+      </Text>
       {!!step.session.description && (
-        <Text style={z2.desc}>{step.session.description}</Text>
+        <Text style={{ color: '#8a877f', fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 8, maxWidth: 300 }}>
+          {step.session.description}
+        </Text>
       )}
-      {paceTarget && <Text style={z2.pace}>{paceTarget}</Text>}
-      <Text style={z2.timer}>{formatTime(elapsed)}</Text>
-      <Text style={z2.timerLabel}>ELAPSED</Text>
-      <TouchableOpacity style={[s.primaryBtn, { marginTop: 48 }]} onPress={onEnd}>
-        <Text style={s.primaryBtnTxt}>END SESSION →</Text>
+
+      <View style={{ flex: 1 }} />
+
+      {/* End button */}
+      <TouchableOpacity
+        onPress={onEnd}
+        style={{
+          backgroundColor: '#e8ff47',
+          width: '100%',
+          paddingVertical: 20,
+          alignItems: 'center',
+          borderRadius: 0,
+        }}
+      >
+        <Text style={{
+          color: '#080808',
+          fontSize: 18,
+          fontFamily: 'BarlowCondensed_700Bold',
+          letterSpacing: 1.5,
+        }}>
+          END SESSION →
+        </Text>
       </TouchableOpacity>
     </View>
   );
 }
-const z2 = StyleSheet.create({
-  container:   { flex: 1, padding: 28, justifyContent: 'center' },
-  sessionName: { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: 12 },
-  desc:        { color: Colors.textPrimary, fontSize: 16, lineHeight: 22, marginBottom: 20 },
-  pace:        { color: Colors.accent, fontSize: 18, fontWeight: '700', marginBottom: 32 },
-  timer:       { color: Colors.textPrimary, fontSize: 72, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const], textAlign: 'center' },
-  timerLabel:  { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 2, textAlign: 'center' },
-});
 
 // ─── Metcon Phase ─────────────────────────────────────────────────────────────
 
@@ -1736,18 +1908,19 @@ const gp = StyleSheet.create({
   skipBtn:    { color: Colors.textSecondary, fontSize: 11, fontWeight: '600', letterSpacing: 1, textDecorationLine: 'underline' },
 });
 
-// ─── Run Interval Phase ───────────────────────────────────────────────────────
+// ─── Timed Interval Phase ─────────────────────────────────────────────────────
 
-function RunIntervalPhase({
+function TimedIntervalPhase({
   step, swapLabel, isLast, onDone, onOpenSwap,
 }: {
-  step: Extract<Step, { kind: 'run_interval' }>;
+  step: Extract<Step, { kind: 'timed_interval' }>;
   swapLabel: string | null;
   isLast: boolean;
   onDone: () => void;
   onOpenSwap: () => void;
 }) {
-  const ex         = step.exercise;
+  const ex = step.exercise;
+  const zoneColor = getZoneColor((ex as any).pace_zone);
   const paceTarget = extractPaceTarget(ex);
   function applySwapLabel(original: string, swap: string): string {
     const s = swap.toLowerCase();
@@ -1758,184 +1931,418 @@ function RunIntervalPhase({
   const displayName = swapLabel ? applySwapLabel(ex.name, swapLabel) : ex.name;
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={rp.container}>
-        <View style={rp.header}>
-          <Text style={rp.blockLabel}>{step.blockName.toUpperCase()} · INTERVAL {step.intervalNum} OF {step.totalIntervals}</Text>
-        </View>
-
-        <Text style={rp.name}>{displayName}</Text>
-        <Text style={rp.distance}>{ex.reps ?? ''}</Text>
-
-        {paceTarget ? (
-          <Text style={rp.pace}>{paceTarget}</Text>
-        ) : null}
-
-        {!!(ex.notes || ex.note) && (
-          <Text style={rp.note}>{ex.notes || ex.note}</Text>
-        )}
-
-        <TouchableOpacity style={rp.swapBtn} onPress={onOpenSwap}>
-          <Text style={rp.swapTxt}>SWAP RUN →</Text>
-        </TouchableOpacity>
-
-        {(() => {
-          const durationSecs = parseDurationSecs(String(ex.reps ?? ''));
-          if (durationSecs) {
-            return <IntervalCountdown seconds={durationSecs} onDone={onDone} exerciseName={ex.name} announceWarnings={true} />;
-          }
-          return (
-            <TouchableOpacity style={[s.primaryBtn, { marginTop: 32 }]} onPress={onDone}>
-              <Text style={s.primaryBtnTxt}>{isLast ? 'FINISH' : step.intervalNum === step.totalIntervals ? 'DONE →' : 'NEXT INTERVAL →'}</Text>
-            </TouchableOpacity>
-          );
-        })()}
-      </ScrollView>
-    </KeyboardAvoidingView>
+    <ScrollView contentContainerStyle={ti.container}>
+      <View style={ti.header}>
+        <Text style={ti.blockLabel}>{step.blockName.toUpperCase()} · INTERVAL {step.intervalNum} OF {step.totalIntervals}</Text>
+      </View>
+      <Text style={[ti.name, { color: zoneColor }]}>{displayName}</Text>
+      <Text style={ti.distance}>{ex.reps ?? ''}</Text>
+      {paceTarget ? <Text style={[ti.pace, { color: zoneColor }]}>{paceTarget}</Text> : null}
+      {!!(ex.notes || ex.note) && <Text style={ti.note}>{ex.notes || ex.note}</Text>}
+      <TouchableOpacity style={ti.swapBtn} onPress={onOpenSwap}>
+        <Text style={ti.swapTxt}>SWAP →</Text>
+      </TouchableOpacity>
+      <View style={{ alignItems: 'center', marginTop: 24 }}>
+        <IntervalCountdown
+          seconds={step.durationSecs}
+          onDone={onDone}
+          exerciseName={displayName}
+          announceWarnings
+        />
+      </View>
+    </ScrollView>
   );
 }
-const rp = StyleSheet.create({
+const ti = StyleSheet.create({
   container:  { padding: 28, paddingBottom: 60, flexGrow: 1 },
   header:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 28 },
   blockLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, flex: 1 },
-  elapsed:    { color: Colors.textSecondary, fontSize: 13, fontVariant: ['tabular-nums' as const] },
-  name:       { color: Colors.textPrimary, fontSize: 32, fontWeight: '800', lineHeight: 38, marginBottom: 6 },
+  name:       { fontSize: 32, fontWeight: '800', lineHeight: 38, marginBottom: 6 },
   distance:   { color: Colors.textSecondary, fontSize: 18, marginBottom: 16 },
-  pace:       { color: Colors.accent, fontSize: 28, fontFamily: Fonts.metric, marginBottom: 8 },
+  pace:       { fontSize: 28, fontFamily: Fonts.metric, marginBottom: 8 },
   note:       { color: Colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 12 },
   swapBtn:    { marginTop: 4 },
   swapTxt:    { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 1 },
 });
 
-// ─── Strength Phase ───────────────────────────────────────────────────────────
+// ─── Strength Exercise Phase ──────────────────────────────────────────────────
 
-function StrengthPhase({
-  step, weightInput, repsInput, prevSets, nextStep, onWeightChange, onRepsChange, onLogSet,
+function StrengthExercisePhase({
+  step,
+  previousSets,
+  onAllSetsComplete,
 }: {
-  step: Extract<Step, { kind: 'strength' }>;
-  weightInput: string;
-  repsInput: string;
-  prevSets: LoggedSet[];
-  nextStep: Step | null;
-  onWeightChange: (v: string) => void;
-  onRepsChange: (v: string) => void;
-  onLogSet: () => void;
+  step: Extract<Step, { kind: 'strength_exercise' }>;
+  previousSets: LoggedSetData[];
+  onAllSetsComplete: (sets: LoggedSetData[]) => void;
 }) {
   const ex = step.exercise;
   const prescribedReps = parseInt(String(ex.reps ?? '').match(/\d+/)?.[0] ?? '0') || 0;
-  const lastWeight = prevSets.length > 0 ? prevSets[prevSets.length - 1].weight : null;
-  // Check type field first (set by AI), fall back to name matching for legacy programs
-  const isBW = ex.type === 'bodyweight' || (
-    ex.type === undefined && isBodyweightExercise(ex.name)
-  );
+  const isBW = (ex as any).type === 'bodyweight' || ((ex as any).type === undefined && isBodyweightExercise(ex.name));
+  const restSecs = parseRestSeconds(ex.rest, step.totalSets > 3 ? 180 : 90);
 
-  const displayWeight = weightInput !== '' ? (parseFloat(weightInput) || 0) : (lastWeight ? (parseFloat(lastWeight) || 0) : 0);
-  const displayReps   = repsInput   !== '' ? (parseInt(repsInput)    || 0) : prescribedReps;
+  const [loggedSets, setLoggedSets] = useState<LoggedSetData[]>([]);
+  const loggedSetsRef = useRef<LoggedSetData[]>([]);
+  const [activeSet, setActiveSet] = useState(1);
+  const [weightInput, setWeightInput] = useState('');
+  const [repsInput, setRepsInput] = useState('');
+  const [showRIR, setShowRIR] = useState(false);
+  const [pendingSetNum, setPendingSetNum] = useState<number | null>(null);
+  const pendingSetNumRef = useRef<number | null>(null);
+  const [rirBySet, setRirBySet] = useState<Record<number, number>>({});
+  const rirBySetRef = useRef<Record<number, number>>({});
+  const [restingAfterSet, setRestingAfterSet] = useState(false);
+  const [restRem, setRestRem] = useState(0);
+  const logBtnScale = useRef(new Animated.Value(1)).current;
+  const rowFlashAnim = useRef(new Animated.Value(0)).current;
+  const rirSlideAnim = useRef(new Animated.Value(300)).current;
+  const suggestionScale = useRef(new Animated.Value(1)).current;
+  const headerSlideAnim = useRef(new Animated.Value(-20)).current;
+  const headerFadeAnim = useRef(new Animated.Value(0)).current;
+  const activeRowPulse = useRef(new Animated.Value(1)).current;
 
-  function adjustWeight(delta: number) {
-    const cur  = weightInput !== '' ? (parseFloat(weightInput) || 0) : (lastWeight ? (parseFloat(lastWeight) || 0) : 0);
-    const next = Math.max(0, Math.round((cur + delta) * 10) / 10);
-    onWeightChange(Number.isInteger(next) ? String(next) : next.toFixed(1));
+  const nameParts = ex.name.split(/\s[—–-]\s/);
+  const baseName = nameParts[0] ?? ex.name;
+  const modifier = nameParts[1] ?? null;
+  const [noteExpanded, setNoteExpanded] = useState(false);
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(headerSlideAnim, { toValue: 0, useNativeDriver: true, speed: 14, bounciness: 0 }),
+      Animated.timing(headerFadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  useEffect(() => {
+    if (!restingAfterSet || restRem > 0) {
+      if (restingAfterSet && restRem <= 0) {
+        try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); } catch {}
+        playBeep(880, 400);
+        Vibration.vibrate([0, 200, 100, 200]);
+        setRestingAfterSet(false);
+      }
+      return;
+    }
+  }, [restingAfterSet, restRem]);
+
+  useEffect(() => {
+    if (!restingAfterSet) return;
+    if (restRem <= 0) {
+      try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); } catch {}
+      playBeep(880, 400);
+      Vibration.vibrate([0, 200, 100, 200]);
+      setRestingAfterSet(false);
+      Animated.sequence([
+        Animated.spring(activeRowPulse, { toValue: 1.02, useNativeDriver: true, speed: 40, bounciness: 0 }),
+        Animated.spring(activeRowPulse, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 6 }),
+      ]).start();
+      return;
+    }
+    if (restRem === 3) {
+      try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); } catch {}
+      playBeep(440, 150);
+    }
+    const id = setTimeout(() => setRestRem(r => r - 1), 1000);
+    return () => clearTimeout(id);
+  }, [restRem, restingAfterSet]);
+
+  // RIR auto-dismiss after 5s
+  useEffect(() => {
+    if (!showRIR) return;
+    const t = setTimeout(() => {
+      setShowRIR(false);
+      finishAfterRIR(null);
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [showRIR]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function updateLoggedSets(sets: LoggedSetData[]) {
+    loggedSetsRef.current = sets;
+    setLoggedSets(sets);
   }
 
-  function adjustReps(delta: number) {
-    const cur  = repsInput !== '' ? (parseInt(repsInput) || 0) : prescribedReps;
-    const next = Math.max(0, cur + delta);
-    onRepsChange(String(next));
+  function updateRirBySet(r: Record<number, number>) {
+    rirBySetRef.current = r;
+    setRirBySet(r);
   }
 
-  let nextLabel = '';
-  if (nextStep) {
-    if (nextStep.kind === 'strength')        nextLabel = `${nextStep.exercise.name} · Set ${nextStep.setNum}`;
-    else if (nextStep.kind === 'rest')        nextLabel = `Rest · ${formatTime(nextStep.seconds)}`;
-    else if ('exercise' in nextStep)          nextLabel = (nextStep as any).exercise.name;
-    else if (nextStep.kind === 'transition')  nextLabel = `${nextStep.to} block`;
+  function finishAfterRIR(pickedRIR: number | null) {
+    const setNum = pendingSetNumRef.current;
+    if (setNum === null) return;
+    const newRir = pickedRIR !== null
+      ? { ...rirBySetRef.current, [setNum]: pickedRIR }
+      : rirBySetRef.current;
+    if (pickedRIR !== null) updateRirBySet(newRir);
+
+    if (setNum >= step.totalSets) {
+      const finalSets = loggedSetsRef.current.map(s => ({
+        ...s,
+        rir: newRir[s.setNum] ?? null,
+      }));
+      onAllSetsComplete(finalSets);
+    } else {
+      setActiveSet(s => s + 1);
+      setWeightInput('');
+      setRepsInput('');
+      setRestRem(restSecs);
+      setRestingAfterSet(true);
+    }
   }
+
+  function computeSuggestion(): string | null {
+    if (isBW) return null;
+    if (/taper|maintenance/i.test(step.blockName)) return null;
+    if (loggedSets.length === 0) {
+      if (previousSets.length === 0) return null;
+      const last = previousSets[previousSets.length - 1];
+      const lastW = parseFloat(last.weight);
+      if (!lastW || isNaN(lastW)) return null;
+      let raw = lastW;
+      if (last.rir !== null) {
+        if (last.rir >= 3) raw = lastW + 5;
+        else if (last.rir === 2) raw = lastW + 2.5;
+        else if (last.rir === 1) raw = lastW;
+        else raw = lastW - 5;
+      }
+      raw = Math.round(raw / 2.5) * 2.5;
+      raw = Math.max(0, raw);
+      return Number.isInteger(raw) ? String(raw) : raw.toFixed(1);
+    }
+    const lastSet = loggedSets[loggedSets.length - 1];
+    const lastW = parseFloat(lastSet.weight ?? '0');
+    const lastR = parseInt(lastSet.reps ?? '0');
+    const lastRIR = rirBySet[lastSet.setNum] ?? null;
+    let raw: number;
+    if (lastRIR !== null) {
+      if (lastRIR >= 3) raw = lastW + 5;
+      else if (lastRIR === 2) raw = lastW + 2.5;
+      else if (lastRIR === 1) raw = lastW;
+      else raw = lastW - 5;
+    } else {
+      if (lastR > prescribedReps + 2) raw = lastW + 2.5;
+      else if (lastR >= prescribedReps) raw = lastW;
+      else raw = lastW - 5;
+    }
+    raw = Math.round(raw / 2.5) * 2.5;
+    raw = Math.max(0, raw);
+    return Number.isInteger(raw) ? String(raw) : raw.toFixed(1);
+  }
+
+  function handleLogSet() {
+    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {}); } catch {}
+    Animated.sequence([
+      Animated.spring(logBtnScale, { toValue: 0.96, useNativeDriver: true, speed: 50, bounciness: 0 }),
+      Animated.spring(logBtnScale, { toValue: 1, useNativeDriver: true, speed: 30, bounciness: 4 }),
+    ]).start();
+    rowFlashAnim.setValue(0);
+    Animated.timing(rowFlashAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+    rirSlideAnim.setValue(300);
+    Animated.spring(rirSlideAnim, { toValue: 0, useNativeDriver: true, speed: 16, bounciness: 4 }).start();
+    const numRepsDefault = String(ex.reps ?? '').match(/\d+/)?.[0] ?? String(ex.reps ?? '');
+    const weightVal = isBW ? 'BW' : (weightInput || '0');
+    const repsVal = repsInput || numRepsDefault;
+    const newSet: LoggedSetData = { setNum: activeSet, weight: weightVal, reps: repsVal, rir: null };
+    updateLoggedSets([...loggedSetsRef.current, newSet]);
+    pendingSetNumRef.current = activeSet;
+    setPendingSetNum(activeSet);
+    setShowRIR(true);
+  }
+
+  const prevBestWeight = previousSets.length > 0
+    ? previousSets.filter(s => s.weight && s.weight !== 'BW' && parseFloat(s.weight) > 0)
+        .sort((a, b) => parseFloat(b.weight) - parseFloat(a.weight))[0]?.weight
+    : undefined;
+
+  const sessionBestWeight = loggedSets.filter(s => s.weight && s.weight !== 'BW' && parseFloat(s.weight) > 0)
+    .sort((a, b) => parseFloat(b.weight) - parseFloat(a.weight))[0]?.weight;
+
+  const weightValue = weightInput !== '' ? weightInput
+    : sessionBestWeight ?? (prevBestWeight && prevBestWeight !== 'BW' ? prevBestWeight : '0');
+  const repsValue = repsInput !== '' ? repsInput : String(prescribedReps);
+  const suggestedWeight = computeSuggestion();
+
+  useEffect(() => {
+    if (!suggestedWeight || parseFloat(suggestedWeight) <= 0) return;
+    Animated.sequence([
+      Animated.spring(suggestionScale, { toValue: 1.08, useNativeDriver: true, speed: 50, bounciness: 0 }),
+      Animated.spring(suggestionScale, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 8 }),
+    ]).start();
+  }, [suggestedWeight]);
 
   return (
-    <View style={{ flex: 1 }}>
-      {/* Exercise header */}
-      <View style={sp.header}>
-        <Text style={sp.setCounter}>SET {step.setNum} OF {step.totalSets}</Text>
-        <Text style={sp.name}>{ex.name}</Text>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#080808' }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* Header */}
+      <Animated.View style={[sp.header, { opacity: headerFadeAnim, transform: [{ translateY: headerSlideAnim }] }]}>
+        <Text style={sp.setCounter}>{step.blockName.toUpperCase()} · {step.totalSets} SETS</Text>
+        <Text style={sp.name}>{baseName}</Text>
+        {!!modifier && <Text style={sp.modifier}>{modifier}</Text>}
         <Text style={sp.prescribed}>{ex.sets} × {ex.reps}{ex.rest ? ` · ${ex.rest} rest` : ''}</Text>
-        {!!(ex.notes || ex.note) && <Text style={sp.note}>{ex.notes || ex.note}</Text>}
-      </View>
+        {!!prevBestWeight && prevBestWeight !== '0' && (
+          <Text style={sp.lastBest}>LAST SESSION: {prevBestWeight} LBS</Text>
+        )}
+        {!!(ex.notes || ex.note) && (
+          <TouchableOpacity onPress={() => setNoteExpanded(v => !v)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            {noteExpanded ? (
+              <Text style={sp.note}>{ex.notes || ex.note}{'\n'}<Text style={sp.coachToggle}>↑ hide</Text></Text>
+            ) : (
+              <Text style={sp.coachToggle}>Coach note ↓</Text>
+            )}
+          </TouchableOpacity>
+        )}
+      </Animated.View>
 
-      {/* Stepper inputs */}
-      <View style={sp.stepperRow}>
-        {!isBW && (
-          <View style={sp.stepperGroup}>
-            <Text style={sp.stepperLabel}>WEIGHT</Text>
-            <View style={sp.stepperControls}>
-              <TouchableOpacity style={sp.stepperBtn} onPress={() => adjustWeight(-2.5)}>
-                <Feather name="minus" color="#8a877f" size={20} />
-              </TouchableOpacity>
-              <Text style={sp.stepperValue}>{Number.isInteger(displayWeight) ? displayWeight : displayWeight.toFixed(1)}</Text>
-              <TouchableOpacity style={sp.stepperBtn} onPress={() => adjustWeight(2.5)}>
-                <Feather name="plus" color="#8a877f" size={20} />
-              </TouchableOpacity>
+      {/* Set log table */}
+      <ScrollView style={{ flex: 1, backgroundColor: '#080808' }} keyboardShouldPersistTaps="handled">
+        {loggedSets.filter(ls => ls.setNum < activeSet).map((ls, i, arr) => (
+          <Animated.View key={i} style={[sp.setRow, sp.setRowDone, i === arr.length - 1 && { opacity: rowFlashAnim }]}>
+            <Text style={[sp.setLabel, sp.setLabelDone]}>SET {ls.setNum}</Text>
+            <View style={sp.setValues}>
+              {ls.weight && ls.weight !== 'BW' ? (
+                <>
+                  <Text style={sp.setValue}>{ls.weight} lbs</Text>
+                  <Text style={sp.setSep}>×</Text>
+                  <Text style={sp.setValue}>{ls.reps} reps</Text>
+                </>
+              ) : (
+                <Text style={sp.setValue}>{ls.reps} reps</Text>
+              )}
+              {rirBySet[ls.setNum] !== undefined && (
+                <View style={sp.rirPill}>
+                  <Text style={sp.rirPillTxt}>RIR {rirBySet[ls.setNum]}</Text>
+                </View>
+              )}
             </View>
-            <Text style={sp.stepperUnit}>LBS</Text>
+          </Animated.View>
+        ))}
+
+        {/* Inline rest OR active set row */}
+        {restingAfterSet ? (
+          <View style={sp.restRow}>
+            <Text style={sp.restLabel}>REST</Text>
+            <Text style={sp.restCountdown}>{formatTime(restRem)}</Text>
+            <TouchableOpacity onPress={() => { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); } catch {} setRestingAfterSet(false); setRestRem(0); }}>
+              <Text style={sp.restSkip}>Skip →</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Animated.View style={[sp.setRow, sp.setRowActive, { transform: [{ scale: activeRowPulse }] }]}>
+            <Text style={[sp.setLabel, sp.setLabelActive]}>SET {activeSet}</Text>
+            <View style={sp.setValues}>
+              {!isBW && (
+                <>
+                  <TextInput
+                    style={sp.inputWeight}
+                    value={weightInput === '0' ? '' : weightInput}
+                    placeholder="— lbs"
+                    placeholderTextColor="rgba(240,237,232,0.25)"
+                    onChangeText={setWeightInput}
+                    keyboardType="decimal-pad"
+                    selectTextOnFocus
+                  />
+                  <Text style={sp.setSep}>×</Text>
+                </>
+              )}
+              <TextInput
+                style={sp.inputReps}
+                value={repsValue}
+                onChangeText={setRepsInput}
+                keyboardType="number-pad"
+                selectTextOnFocus
+              />
+            </View>
+          </Animated.View>
+        )}
+
+        {!!suggestedWeight && suggestedWeight !== '0' && parseFloat(suggestedWeight) > 0 && !isBW && !restingAfterSet && (
+          <Animated.Text style={[sp.suggestion, { transform: [{ scale: suggestionScale }] }]}>SUGGESTED: {suggestedWeight} lbs</Animated.Text>
+        )}
+
+        {previousSets.length > 0 && (
+          <View style={sp.prevSection}>
+            <Text style={sp.prevLabel}>LAST SESSION</Text>
+            {previousSets.map((ps, i) => (
+              <View key={i} style={sp.prevRow}>
+                <Text style={sp.prevSetNum}>SET {ps.setNum}</Text>
+                <Text style={sp.prevValue}>
+                  {ps.weight && ps.weight !== 'BW' ? `${ps.weight} lbs × ${ps.reps} reps` : `${ps.reps} reps`}
+                </Text>
+              </View>
+            ))}
           </View>
         )}
-        <View style={sp.stepperGroup}>
-          <Text style={sp.stepperLabel}>REPS</Text>
-          <View style={sp.stepperControls}>
-            <TouchableOpacity style={sp.stepperBtn} onPress={() => adjustReps(-1)}>
-              <Feather name="minus" color="#8a877f" size={20} />
-            </TouchableOpacity>
-            <Text style={sp.stepperValue}>{displayReps}</Text>
-            <TouchableOpacity style={sp.stepperBtn} onPress={() => adjustReps(1)}>
-              <Feather name="plus" color="#8a877f" size={20} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+      </ScrollView>
 
-      <View style={{ flex: 1 }} />
-
-      {/* Previous sets */}
-      {prevSets.length > 0 && (
-        <View style={sp.prevSets}>
-          {prevSets.map((ls, i) => (
-            <Text key={i} style={sp.prevRow}>Set {ls.set} · {ls.reps} reps{ls.weight && ls.weight !== 'BW' ? ` · ${ls.weight} lbs` : ''}</Text>
-          ))}
-        </View>
+      {/* LOG SET button */}
+      {!restingAfterSet && (
+        <TouchableOpacity onPress={handleLogSet} activeOpacity={1} disabled={showRIR}>
+          <Animated.View style={[sp.logBtn, showRIR && { opacity: 0.5 }, { transform: [{ scale: logBtnScale }] }]}>
+            <Text style={sp.logBtnTxt}>LOG SET {activeSet}</Text>
+          </Animated.View>
+        </TouchableOpacity>
       )}
 
-      {/* Next Up card */}
-      {nextLabel ? (
-        <View style={s.nextCard}>
-          <Text style={s.nextCardLabel}>NEXT</Text>
-          <Text style={s.nextCardName}>{nextLabel}</Text>
-        </View>
-      ) : null}
-
-      {/* Log button */}
-      <TouchableOpacity style={sp.logBtn} onPress={onLogSet}>
-        <Text style={sp.logBtnTxt}>LOG SET {step.setNum}</Text>
-      </TouchableOpacity>
-    </View>
+      {/* Inline RIR picker */}
+      <Modal visible={showRIR} transparent animationType="none" statusBarTranslucent>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => { setShowRIR(false); finishAfterRIR(null); }} />
+        <Animated.View style={{ backgroundColor: '#111111', paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)', transform: [{ translateY: rirSlideAnim }] }}>
+          <Text style={{ color: '#8a877f', fontSize: 11, fontWeight: '700', letterSpacing: 2, textAlign: 'center', marginBottom: 16 }}>REPS IN RESERVE</Text>
+          <Text style={{ color: '#f0ede8', fontSize: 15, textAlign: 'center', marginBottom: 20 }}>How many more reps could you have done?</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+            {[0, 1, 2, 3, 4, 5].map(rir => (
+              <TouchableOpacity
+                key={rir}
+                onPress={() => { setShowRIR(false); finishAfterRIR(rir); try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); } catch {} }}
+                style={{ flex: 1, backgroundColor: '#1a1a1a', borderRadius: 0, paddingVertical: 16, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}
+              >
+                <Text style={{ color: rir === 0 ? '#ff3b3b' : rir <= 1 ? '#e8ff47' : '#f0ede8', fontSize: 22, fontFamily: 'BarlowCondensed_900Black' }}>{rir}</Text>
+                <Text style={{ color: '#8a877f', fontSize: 9, letterSpacing: 1, marginTop: 2 }}>
+                  {rir === 0 ? 'FAIL' : rir === 1 ? 'LIMIT' : rir >= 4 ? 'EASY' : 'RIR'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity onPress={() => { setShowRIR(false); finishAfterRIR(null); }} style={{ marginTop: 16, alignItems: 'center', paddingVertical: 8 }}>
+            <Text style={{ color: '#3a3a3a', fontSize: 13 }}>Skip</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </Modal>
+    </KeyboardAvoidingView>
   );
 }
 const sp = StyleSheet.create({
-  header:          { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 12 },
-  setCounter:      { color: '#8a877f', fontSize: 11, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
-  name:            { color: '#f0ede8', fontSize: 38, fontFamily: Fonts.metricHeavy, lineHeight: 42, marginBottom: 6 },
-  prescribed:      { color: '#8a877f', fontSize: 13, marginBottom: 4 },
-  note:            { color: '#8a877f', fontSize: 13, fontStyle: 'italic', lineHeight: 18 },
-  stepperRow:      { flexDirection: 'row', paddingHorizontal: 24, gap: 16, marginTop: 24 },
-  stepperGroup:    { flex: 1, alignItems: 'center' },
-  stepperLabel:    { color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 12 },
-  stepperControls: { flexDirection: 'row', alignItems: 'center', gap: 20 },
-  stepperBtn:      { width: 48, height: 48, borderRadius: 24, backgroundColor: '#1a1a1a', alignItems: 'center', justifyContent: 'center' },
-  stepperValue:    { color: '#f0ede8', fontSize: 48, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const], minWidth: 80, textAlign: 'center' },
-  stepperUnit:     { color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginTop: 8 },
-  prevSets:        { paddingHorizontal: 24, gap: 4, marginBottom: 8 },
-  prevRow:         { color: '#3a3a3a', fontSize: 13 },
-  logBtn:          { backgroundColor: '#e8ff47', margin: 16, borderRadius: 14, padding: 20, alignItems: 'center' },
-  logBtnTxt:       { color: '#080808', fontSize: 20, fontFamily: Fonts.metricHeavy, letterSpacing: 1 },
+  header:        { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  setCounter:    { color: '#8a877f', fontSize: 11, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
+  name:          { color: '#f0ede8', fontSize: 44, fontFamily: Fonts.metricHeavy, lineHeight: 48, marginBottom: 2 },
+  modifier:      { color: '#8a877f', fontSize: 14, marginBottom: 4 },
+  prescribed:    { color: '#8a877f', fontSize: 13, marginBottom: 4 },
+  lastBest:      { color: '#e8ff47', fontSize: 12, fontWeight: '700', letterSpacing: 1, marginBottom: 4 },
+  note:          { color: '#8a877f', fontSize: 13, fontStyle: 'italic', lineHeight: 18, marginTop: 4 },
+  coachToggle:   { color: '#8a877f', fontSize: 12, letterSpacing: 0.5, marginTop: 2 },
+  setRow:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14, marginBottom: 2 },
+  setRowDone:    { backgroundColor: '#111111', borderLeftWidth: 3, borderLeftColor: '#00d4aa' },
+  setRowActive:  { backgroundColor: '#1a1a1a', borderLeftWidth: 3, borderLeftColor: '#e8ff47', paddingVertical: 16 },
+  setLabel:      { fontSize: 11, letterSpacing: 1, fontWeight: '700' },
+  setLabelDone:  { color: '#8a877f' },
+  setLabelActive: { color: '#e8ff47' },
+  setValues:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  setValue:      { color: '#f0ede8', fontSize: 17, fontWeight: '700' },
+  setSep:        { color: '#8a877f', fontSize: 13 },
+  inputWeight:   { fontSize: 26, fontFamily: Fonts.metricHeavy, color: '#f0ede8', textAlign: 'center', width: 80, borderBottomWidth: 1, borderBottomColor: 'rgba(232,255,71,0.4)', paddingBottom: 2 },
+  inputReps:     { fontSize: 26, fontFamily: Fonts.metricHeavy, color: '#f0ede8', textAlign: 'center', width: 60, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.2)', paddingBottom: 2 },
+  rirPill:       { backgroundColor: '#1a1a1a', paddingHorizontal: 6, paddingVertical: 2, marginLeft: 4 },
+  rirPillTxt:    { color: '#8a877f', fontSize: 10 },
+  suggestion:    { color: '#e8ff47', fontSize: 12, letterSpacing: 1, fontWeight: '700', paddingHorizontal: 20, paddingVertical: 8 },
+  restRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 20, backgroundColor: '#0d0d0d', borderLeftWidth: 3, borderLeftColor: 'rgba(100,160,255,0.4)', gap: 16 },
+  restLabel:     { color: '#8a877f', fontSize: 11, fontWeight: '700', letterSpacing: 2 },
+  restCountdown: { color: '#e8ff47', fontSize: 32, fontFamily: Fonts.metricHeavy, fontVariant: ['tabular-nums' as const], flex: 1 },
+  restSkip:      { color: '#8a877f', fontSize: 13 },
+  prevSection:   { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 },
+  prevLabel:     { color: '#3a3a3a', fontSize: 10, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
+  prevRow:       { flexDirection: 'row', gap: 12, paddingVertical: 4 },
+  prevSetNum:    { color: '#3a3a3a', fontSize: 12, width: 48 },
+  prevValue:     { color: '#3a3a3a', fontSize: 12 },
+  logBtn:        { backgroundColor: '#e8ff47', paddingVertical: 22, alignItems: 'center', borderRadius: 0, width: '100%' },
+  logBtnTxt:     { color: '#080808', fontSize: 20, fontFamily: Fonts.metricHeavy, letterSpacing: 1 },
 });
 
 // ─── Hyrox Tap Zone ───────────────────────────────────────────────────────────
@@ -2499,7 +2906,7 @@ const s = StyleSheet.create({
 
   rpeLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 2, marginBottom: 16 },
   rpeRow:   { flexDirection: 'row', gap: 6, marginBottom: 12, flexWrap: 'wrap', justifyContent: 'center' },
-  rpeDot:   { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.nested, alignItems: 'center', justifyContent: 'center' },
+  rpeDot:   { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.nested, alignItems: 'center', justifyContent: 'center' },
   rpeDotOn: { backgroundColor: Colors.accent },
   rpeTxt:   { color: Colors.textSecondary, fontSize: 14, fontWeight: '700' },
   rpeTxtOn: { color: Colors.background },

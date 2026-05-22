@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, RefreshControl,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, Modal,
@@ -9,7 +8,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
-import type { Program, ProgramDay, ProgramSession, MainStackParamList, ExerciseItem } from '../_layout';
+import type { Program, ProgramDay, ProgramSession, ExerciseItem } from '../_layout';
 import {
   matchTimeTrial, getWorkoutHRDetail,
   type WorkoutSample,
@@ -27,10 +26,6 @@ type TimeTrialProfile = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function exerciseSlug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-}
-
 function isSwappableRun(name: string): boolean {
   if (!/run/i.test(name)) return false;
   const lower = name.toLowerCase();
@@ -40,11 +35,6 @@ function isSwappableRun(name: string): boolean {
 function applySwapName(name: string, swap: 'ski' | 'row'): string {
   const to = swap === 'ski' ? 'Ski Erg' : 'Row Erg';
   return name.replace(/\brunning\b/gi, to).replace(/\brun\b/gi, to);
-}
-
-function isStrengthBlock(blockName: string): boolean {
-  const lower = blockName.toLowerCase();
-  return !lower.includes('warm') && !lower.includes('cool');
 }
 
 function isStrengthSession(session: ProgramSession): boolean {
@@ -143,440 +133,199 @@ function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
   return groups;
 }
 
-// ─── Circuit group component ──────────────────────────────────────────────────
+// ─── Session document (flat text view) ───────────────────────────────────────
 
-function CircuitBlock({ members, rounds, rest }: {
-  members: { ex: ExerciseItem; origIdx: number }[];
-  rounds: number;
-  rest: string | null;
-}) {
-  return (
-    <View style={styles.circuitGroup}>
-      <Text style={styles.circuitLabel}>CIRCUIT · {rounds} ROUNDS</Text>
-      <View style={styles.circuitBody}>
-        {members.map(({ ex, origIdx }, mi) => {
-          const note = ex.notes || ex.note;
-          const isLast = mi === members.length - 1;
-          return (
-            <View key={origIdx} style={[styles.circuitExRow, isLast && { marginBottom: 0 }]}>
-              <Text style={styles.exName}>{ex.name}</Text>
-              {!!ex.reps && <Text style={styles.exDetail}>{ex.reps}</Text>}
-              {!!note    && <Text style={styles.exDetail}>{note}</Text>}
-            </View>
-          );
-        })}
-        {!!rest && (
-          <Text style={styles.circuitRestText}>Rest {rest} between rounds</Text>
-        )}
-      </View>
-    </View>
-  );
-}
+function SessionDocument({ session }: { session: ProgramSession }) {
+  const blocks = session.blocks ?? [];
 
-// ─── Block group component ────────────────────────────────────────────────────
-
-function BlockGroupSection({ blockName, members }: {
-  blockName: string;
-  members: { ex: ExerciseItem; origIdx: number }[];
-}) {
-  return (
-    <View style={styles.blockGroup}>
-      <Text style={styles.blockGroupName}>{blockName}</Text>
-      {members.map(({ ex, origIdx }, mi) => {
-        let detail = '';
-        if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
-        else if (ex.reps) detail = ex.reps;
-        const note = ex.notes || ex.note;
-        const isLast = mi === members.length - 1;
-        return (
-          <View key={origIdx}>
-            <View style={styles.blockExRow}>
-              <Text style={styles.exName}>{ex.name}</Text>
-              {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
-              {!!note   && <Text style={styles.exDetail}>{note}</Text>}
-            </View>
-            {!isLast && <View style={styles.blockDivider} />}
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-// ─── Exercise renderer (non-strength sessions) ───────────────────────────────
-
-function ExerciseSection({
-  session, onStart,
-}: {
-  session: ProgramSession;
-  onStart?: () => void;
-}) {
-  const [swapOverrides,   setSwapOverrides]   = useState<Record<string, 'ski' | 'row'>>({});
-  const [swapSheetVisible, setSwapSheetVisible] = useState(false);
-  const [swapTarget, setSwapTarget] = useState<{ key: string; ex: ExerciseItem } | null>(null);
-  const [preferredSwap, setPreferredSwap] = useState<'ski' | 'row' | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-
-  useEffect(() => {
-    AsyncStorage.getItem('preferred_run_swap').then(val => {
-      if (val === 'ski' || val === 'row') setPreferredSwap(val as 'ski' | 'row');
-    });
-    supabase.auth.getSession().then(({ data: { session: s } }) => setUserId(s?.user?.id ?? null));
-  }, []);
-
-  async function applySwap(choice: 'run' | 'ski' | 'row') {
-    if (!swapTarget) return;
-    setSwapSheetVisible(false);
-    if (choice === 'run') {
-      setSwapOverrides(prev => { const n = { ...prev }; delete n[swapTarget.key]; return n; });
-      return;
+  function renderExerciseLine(ex: ExerciseItem, index: number, prefix?: string): React.ReactNode {
+    const name = prefix ? `${prefix} ${ex.name}` : ex.name;
+    const detail: string[] = [];
+    const duration = (ex as any).duration as string | undefined;
+    if (ex.sets && ex.reps && ex.reps !== '1') detail.push(`${ex.sets}×${ex.reps}`);
+    else if (ex.reps && ex.reps !== '1') detail.push(String(ex.reps));
+    if (duration) detail.push(duration);
+    if (ex.rest && ex.rest !== 'none' && ex.rest !== '0 min') detail.push(`${ex.rest} rest`);
+    const note = ex.notes || (ex as any).note;
+    if (note) {
+      const firstSentence = note.split(/[.!?]/)[0]?.trim();
+      if (firstSentence) detail.push(firstSentence);
     }
-    setPreferredSwap(choice);
-    AsyncStorage.setItem('preferred_run_swap', choice).catch(() => {});
-    setSwapOverrides(prev => ({ ...prev, [swapTarget!.key]: choice }));
-    if (userId) {
-      fetch('https://peak65.vercel.app/api/recalculate-run-swap', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          originalExercise: { name: swapTarget.ex.name, reps: swapTarget.ex.reps, sets: swapTarget.ex.sets, coaching_cue: swapTarget.ex.notes || (swapTarget.ex as any).note },
-          swapTo: choice,
-        }),
-      }).catch(() => {});
-    }
+    const detailStr = detail.join(' · ');
+    return (
+      <Text key={`ex-${index}-${prefix ?? ''}`} style={pd.exerciseLine}>
+        <Text style={pd.exerciseName}>{name}</Text>
+        {detailStr ? <Text style={pd.exerciseDetail}>{'  '}{detailStr}</Text> : null}
+      </Text>
+    );
   }
 
-  const currentSwapChoice = swapTarget ? (swapOverrides[swapTarget.key] ?? 'run') : 'run';
+  function renderBlock(block: { block_name: string; exercises?: ExerciseItem[] }, bi: number): React.ReactNode {
+    const exercises = block.exercises ?? [];
+    const groups = groupBySuperset(exercises);
+    const isWarmCool = /warm|cool/i.test(block.block_name);
 
-  return (
-    <>
-    <View style={styles.sessionBlock}>
-      <View style={styles.sessionHeaderRow}>
-        <Text style={styles.sessionName}>{session.name}</Text>
-        <Text style={styles.sessionMeta}>{session.time} · {session.duration_minutes} min</Text>
-      </View>
-      {!!session.description && (
-        <Text style={styles.sessionDesc}>{session.description}</Text>
-      )}
-      {(session.blocks ?? []).map((block, bi) => (
-        <View key={bi} style={styles.section}>
-          <Text style={styles.sectionLabel}>{block.block_name}</Text>
-          {groupBySuperset(block.exercises ?? []).map((group, gi) => {
-            if (group.kind === 'block') {
-              return <BlockGroupSection key={gi} blockName={group.blockName} members={group.members} />;
-            }
-            if (group.kind === 'part-circuit') {
-              return (
-                <View key={gi} style={styles.partWrapper}>
-                  <View style={styles.partDivider} />
-                  <Text style={styles.partName}>{group.blockName}</Text>
-                  <CircuitBlock members={group.members} rounds={group.rounds} rest={group.rest} />
-                </View>
-              );
-            }
-            if (group.kind === 'part-superset') {
-              return (
-                <View key={gi} style={styles.partWrapper}>
-                  <View style={styles.partDivider} />
-                  <Text style={styles.partName}>{group.blockName}</Text>
-                  <View style={styles.supersetGroup}>
-                    <Text style={styles.supersetLabel}>Superset</Text>
-                    {group.members.map(({ ex, origIdx }) => {
-                      let detail = '';
-                      if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
-                      else if (ex.reps) detail = ex.reps;
-                      const note = ex.notes || ex.note;
-                      return (
-                        <View key={origIdx} style={[styles.exRow, { borderWidth: 0, padding: 0, marginBottom: 6 }]}>
-                          <Text style={styles.exName}>{ex.name}</Text>
-                          {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
-                          {!!note   && <Text style={styles.exDetail}>{note}</Text>}
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
-              );
-            }
-            if (group.kind === 'circuit') {
-              return <CircuitBlock key={gi} members={group.members} rounds={group.rounds} rest={group.rest} />;
-            }
-            if (group.kind === 'superset') {
-              return (
-                <View key={gi} style={styles.supersetGroup}>
-                  <Text style={styles.supersetLabel}>Superset</Text>
-                  {group.members.map(({ ex, origIdx }) => {
-                    let detail = '';
-                    if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
-                    else if (ex.reps) detail = ex.reps;
-                    const note = ex.notes || ex.note;
-                    return (
-                      <View key={origIdx} style={[styles.exRow, { borderWidth: 0, padding: 0, marginBottom: 6 }]}>
-                        <Text style={styles.exName}>{ex.name}</Text>
-                        {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
-                        {!!note   && <Text style={styles.exDetail}>{note}</Text>}
-                      </View>
-                    );
-                  })}
-                </View>
-              );
-            }
-            const { ex, origIdx } = group;
-            const exKey = `${bi}-${gi}`;
-            const swapOverride = swapOverrides[exKey];
-            const displayName = swapOverride ? applySwapName(ex.name, swapOverride) : ex.name;
-            let detail = '';
-            if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
-            else if (ex.reps) detail = ex.reps;
-            const note = ex.notes || ex.note;
-            const canSwap = isSwappableRun(ex.name);
+    return (
+      <View key={bi} style={pd.blockSection}>
+        {!isWarmCool && (
+          <Text style={pd.blockLabel}>{block.block_name}</Text>
+        )}
+        {groups.map((group, gi) => {
+          if (group.kind === 'circuit' || group.kind === 'part-circuit') {
+            const members = group.members;
+            const rounds = group.kind === 'circuit' ? group.rounds : group.rounds;
+            const rest = group.kind === 'circuit' ? group.rest : group.rest;
             return (
-              <View key={origIdx} style={styles.exRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={styles.exName}>{displayName}</Text>
-                  {canSwap && (
-                    <TouchableOpacity
-                      style={styles.swapBtn}
-                      onPress={() => { setSwapTarget({ key: exKey, ex }); setSwapSheetVisible(true); }}
-                    >
-                      <Text style={styles.swapBtnTxt}>Swap</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
-                {!!note   && <Text style={styles.exDetail}>{note}</Text>}
+              <View key={gi} style={pd.circuitSection}>
+                <Text style={pd.circuitRounds}>{rounds} Rounds:</Text>
+                {members.map(({ ex }, mi) => renderExerciseLine(ex, mi, undefined))}
+                {!!rest && (
+                  <Text style={pd.exerciseDetail}>{'  '}{rest} rest between rounds</Text>
+                )}
               </View>
             );
-          })}
-        </View>
-      ))}
-      {onStart && (
-        <TouchableOpacity style={styles.startWorkoutBtn} onPress={onStart}>
-          <Text style={styles.startWorkoutText}>START WORKOUT →</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-
-    <Modal
-      visible={swapSheetVisible}
-      transparent
-      animationType="slide"
-      onRequestClose={() => setSwapSheetVisible(false)}
-    >
-      <TouchableOpacity
-        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }}
-        activeOpacity={1}
-        onPress={() => setSwapSheetVisible(false)}
-      />
-      <View style={styles.swapSheet}>
-        <Text style={styles.swapSheetTitle}>SWAP EXERCISE</Text>
-        {(['run', 'ski', 'row'] as const).map(option => {
-          const label = option === 'run' ? 'Run' : option === 'ski' ? 'Ski Erg' : 'Row Erg';
-          const isSelected = option === currentSwapChoice;
-          const isPref = option !== 'run' && option === preferredSwap && !swapTarget?.key;
-          return (
-            <TouchableOpacity
-              key={option}
-              style={[styles.swapOption, isSelected && styles.swapOptionSelected]}
-              onPress={() => applySwap(option)}
-            >
-              <Text style={[styles.swapOptionText, isSelected && styles.swapOptionTextSelected]}>
-                {label}{isPref ? '  ·  preferred' : ''}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-        <TouchableOpacity style={styles.swapCancelBtn} onPress={() => setSwapSheetVisible(false)}>
-          <Text style={styles.swapCancelText}>Cancel</Text>
-        </TouchableOpacity>
-      </View>
-    </Modal>
-    </>
-  );
-}
-
-function StrengthSessionSection({
-  session, onStart,
-}: {
-  session: ProgramSession;
-  onStart?: () => void;
-}) {
-  const renderStrExCard = (ex: ExerciseItem, origIdx: number) => {
-    const note = ex.notes || ex.note;
-    return (
-      <View key={origIdx} style={styles.strExCard}>
-        <Text style={styles.strExName}>{ex.name}</Text>
-        {!!(ex.sets && ex.reps) && (
-          <Text style={styles.strExPrescribed}>{ex.sets} × {ex.reps}</Text>
-        )}
-        {!!note && <Text style={styles.strExNote}>{note}</Text>}
-      </View>
-    );
-  };
-
-  return (
-    <View style={styles.sessionBlock}>
-      <View style={styles.sessionHeaderRow}>
-        <Text style={styles.sessionName}>{session.name}</Text>
-        <Text style={styles.sessionMeta}>{session.time} · {session.duration_minutes} min</Text>
-      </View>
-      {!!session.description && (
-        <Text style={styles.sessionDesc}>{session.description}</Text>
-      )}
-
-      {(session.blocks ?? []).map((block, bi) => {
-        const isStrBlock = isStrengthBlock(block.block_name);
-        return (
-          <View key={bi} style={isStrBlock ? styles.strBlock : styles.section}>
-            <Text style={isStrBlock ? styles.strBlockLabel : styles.sectionLabel}>
-              {block.block_name}
-            </Text>
-
-            {isStrBlock ? (
-              <View style={styles.strExList}>
-                {groupBySuperset(block.exercises ?? []).map((group, gi) => {
-                  if (group.kind === 'block') {
-                    return <BlockGroupSection key={gi} blockName={group.blockName} members={group.members} />;
-                  }
-                  if (group.kind === 'part-circuit') {
-                    return (
-                      <View key={gi} style={styles.partWrapper}>
-                        <View style={styles.partDivider} />
-                        <Text style={styles.partName}>{group.blockName}</Text>
-                        <View style={styles.circuitGroup}>
-                          <Text style={styles.circuitLabel}>CIRCUIT · {group.rounds} ROUNDS</Text>
-                          <View style={styles.circuitBody}>
-                            {group.members.map(({ ex, origIdx }) => renderStrExCard(ex, origIdx))}
-                            {!!group.rest && <Text style={styles.circuitRestText}>Rest {group.rest} between rounds</Text>}
-                          </View>
-                        </View>
-                      </View>
-                    );
-                  }
-                  if (group.kind === 'part-superset') {
-                    return (
-                      <View key={gi} style={styles.partWrapper}>
-                        <View style={styles.partDivider} />
-                        <Text style={styles.partName}>{group.blockName}</Text>
-                        <View style={styles.supersetGroup}>
-                          <Text style={styles.supersetLabel}>Superset</Text>
-                          {group.members.map(({ ex, origIdx }) => renderStrExCard(ex, origIdx))}
-                        </View>
-                      </View>
-                    );
-                  }
-                  if (group.kind === 'circuit') {
-                    return (
-                      <View key={gi} style={styles.circuitGroup}>
-                        <Text style={styles.circuitLabel}>CIRCUIT · {group.rounds} ROUNDS</Text>
-                        <View style={styles.circuitBody}>
-                          {group.members.map(({ ex, origIdx }) => renderStrExCard(ex, origIdx))}
-                          {!!group.rest && (
-                            <Text style={styles.circuitRestText}>Rest {group.rest} between rounds</Text>
-                          )}
-                        </View>
-                      </View>
-                    );
-                  }
-                  if (group.kind === 'superset') {
-                    return (
-                      <View key={gi} style={styles.supersetGroup}>
-                        <Text style={styles.supersetLabel}>Superset</Text>
-                        {group.members.map(({ ex, origIdx }) => renderStrExCard(ex, origIdx))}
-                      </View>
-                    );
-                  }
-                  return renderStrExCard(group.ex, group.origIdx);
+          }
+          if (group.kind === 'superset' || group.kind === 'part-superset') {
+            const members = group.members;
+            return (
+              <View key={gi}>
+                {members.map(({ ex }, mi) => {
+                  const letter = String.fromCharCode(65 + mi);
+                  const setNum = Math.floor(gi) + 1;
+                  const prefix = `${setNum}${letter})`;
+                  return renderExerciseLine(ex, mi, prefix);
                 })}
               </View>
-            ) : (
-              groupBySuperset(block.exercises ?? []).map((group, gi) => {
-                if (group.kind === 'block') {
-                  return <BlockGroupSection key={gi} blockName={group.blockName} members={group.members} />;
-                }
-                if (group.kind === 'part-circuit') {
-                  return (
-                    <View key={gi} style={styles.partWrapper}>
-                      <View style={styles.partDivider} />
-                      <Text style={styles.partName}>{group.blockName}</Text>
-                      <CircuitBlock members={group.members} rounds={group.rounds} rest={group.rest} />
-                    </View>
-                  );
-                }
-                if (group.kind === 'part-superset') {
-                  return (
-                    <View key={gi} style={styles.partWrapper}>
-                      <View style={styles.partDivider} />
-                      <Text style={styles.partName}>{group.blockName}</Text>
-                      <View style={styles.supersetGroup}>
-                        <Text style={styles.supersetLabel}>Superset</Text>
-                        {group.members.map(({ ex, origIdx }) => {
-                          let detail = '';
-                          if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
-                          else if (ex.reps) detail = ex.reps;
-                          const note = ex.notes || ex.note;
-                          return (
-                            <View key={origIdx} style={[styles.exRow, { borderWidth: 0, padding: 0, marginBottom: 6 }]}>
-                              <Text style={styles.exName}>{ex.name}</Text>
-                              {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
-                              {!!note   && <Text style={styles.exDetail}>{note}</Text>}
-                            </View>
-                          );
-                        })}
-                      </View>
-                    </View>
-                  );
-                }
-                if (group.kind === 'circuit') {
-                  return <CircuitBlock key={gi} members={group.members} rounds={group.rounds} rest={group.rest} />;
-                }
-                if (group.kind === 'superset') {
-                  return (
-                    <View key={gi} style={styles.supersetGroup}>
-                      <Text style={styles.supersetLabel}>Superset</Text>
-                      {group.members.map(({ ex, origIdx }) => {
-                        let detail = '';
-                        if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
-                        else if (ex.reps) detail = ex.reps;
-                        const note = ex.notes || ex.note;
-                        return (
-                          <View key={origIdx} style={[styles.exRow, { borderWidth: 0, padding: 0, marginBottom: 6 }]}>
-                            <Text style={styles.exName}>{ex.name}</Text>
-                            {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
-                            {!!note   && <Text style={styles.exDetail}>{note}</Text>}
-                          </View>
-                        );
-                      })}
-                    </View>
-                  );
-                }
-                const { ex, origIdx } = group;
-                let detail = '';
-                if (ex.sets && ex.reps) detail = `${ex.sets} × ${ex.reps}`;
-                else if (ex.reps) detail = ex.reps;
-                const note = ex.notes || ex.note;
-                return (
-                  <View key={origIdx} style={styles.exRow}>
-                    <Text style={styles.exName}>{ex.name}</Text>
-                    {!!detail && <Text style={styles.exDetail}>{detail}</Text>}
-                    {!!note   && <Text style={styles.exDetail}>{note}</Text>}
-                  </View>
-                );
-              })
-            )}
-          </View>
-        );
-      })}
+            );
+          }
+          if (group.kind === 'block') {
+            return (
+              <View key={gi}>
+                <Text style={pd.subBlockLabel}>{group.blockName}</Text>
+                {group.members.map(({ ex }, mi) => renderExerciseLine(ex, mi))}
+              </View>
+            );
+          }
+          // single
+          return renderExerciseLine(group.ex, gi);
+        })}
+      </View>
+    );
+  }
 
-      {onStart && (
-        <TouchableOpacity style={styles.startWorkoutBtn} onPress={onStart}>
-          <Text style={styles.startWorkoutText}>START WORKOUT →</Text>
-        </TouchableOpacity>
+  return (
+    <View style={pd.sessionDoc}>
+      <View style={pd.sessionHeader}>
+        <Text style={pd.sessionName}>{session.name}</Text>
+        <Text style={pd.sessionMeta}>
+          {[session.time, session.duration_minutes ? `${session.duration_minutes} min` : null]
+            .filter(Boolean).join(' · ')}
+        </Text>
+      </View>
+      {!!session.description && (
+        <Text style={pd.sessionDesc}>{session.description}</Text>
       )}
+      {blocks.map((block, bi) => renderBlock(block, bi))}
     </View>
   );
 }
+
+const pd = StyleSheet.create({
+  sessionDoc: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 4,
+  },
+  sessionHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  sessionName: {
+    color: '#f0ede8',
+    fontSize: 17,
+    fontWeight: '700',
+    flex: 1,
+    paddingRight: 8,
+  },
+  sessionMeta: {
+    color: '#8a877f',
+    fontSize: 13,
+  },
+  sessionDesc: {
+    color: '#8a877f',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  blockSection: {
+    marginBottom: 12,
+  },
+  blockLabel: {
+    color: '#8a877f',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  subBlockLabel: {
+    color: '#8a877f',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginBottom: 6,
+    marginTop: 8,
+  },
+  exerciseLine: {
+    color: '#f0ede8',
+    fontSize: 15,
+    lineHeight: 24,
+    marginBottom: 2,
+  },
+  exerciseName: {
+    color: '#f0ede8',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  exerciseDetail: {
+    color: '#8a877f',
+    fontSize: 14,
+  },
+  circuitSection: {
+    marginBottom: 8,
+  },
+  circuitRounds: {
+    color: '#f0ede8',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  dayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  dayName: {
+    color: '#f0ede8',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  dayType: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+});
 
 // ─── Single-value trial log card (e.g. 8K time) ──────────────────────────────
 
@@ -655,7 +404,7 @@ function MarkCompleteCard({
 function DayCard({
   day, isToday, isComplete,
   userId, programId, weekNumber, savedTrials,
-  expandAll, collapseToken, profile,
+  profile,
 }: {
   day: ProgramDay;
   isToday: boolean;
@@ -664,26 +413,8 @@ function DayCard({
   programId: string;
   weekNumber: number;
   savedTrials: Set<string>;
-  expandAll: boolean;
-  collapseToken: number;
   profile: TimeTrialProfile | null;
 }) {
-  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
-
-  function startLiveWorkout(session: ProgramSession) {
-    navigation.getParent()?.navigate('LiveWorkout', {
-      sessionJson: JSON.stringify(session),
-      programId,
-      weekNumber,
-      dayName: day.day,
-    });
-  }
-  const [expanded, setExpanded] = useState(isToday);
-
-  // Expand all days when VIEW FULL WEEK is pressed
-  useEffect(() => { setExpanded(expandAll); }, [expandAll]);
-  // Reset to default (today expanded, others collapsed) when COLLAPSE is pressed
-  useEffect(() => { if (collapseToken > 0) setExpanded(isToday); }, [collapseToken]); // eslint-disable-line react-hooks/exhaustive-deps
   const isRest = day.type === 'rest' || !day.sessions?.length;
 
   // ── Trial state (single-value sessions) ─────────────────────────────────────
@@ -976,114 +707,94 @@ function DayCard({
   return (
     <>
     <View style={[styles.dayCard, isToday && styles.dayCardToday]}>
-      <TouchableOpacity
-        activeOpacity={0.7}
-        onPress={() => setExpanded(e => !e)}
-        style={styles.dayCardHeader}
-      >
-        <View style={styles.dayCardLeft}>
-          <Text style={[styles.dayName, isToday && { color: Colors.accent }]}>{day.day}</Text>
-          {isComplete && <Feather name="check" color={Colors.green} size={14} style={{ marginLeft: 6 }} />}
-        </View>
-        <View style={styles.dayCardRight}>
-          <Text style={styles.sessionType}>{day.type}</Text>
-          {expanded
-            ? <Feather name="chevron-up" color={Colors.textSecondary} size={16} />
-            : <Feather name="chevron-down" color={Colors.textSecondary} size={16} />}
-        </View>
-      </TouchableOpacity>
+      <View style={pd.dayHeader}>
+        <Text style={pd.dayName}>{day.day.toUpperCase()}</Text>
+        <Text style={[pd.dayType, {
+          color: day.type === 'hard' ? '#e8ff47' : day.type === 'easy' ? '#00d4aa' : '#3a3a3a'
+        }]}>
+          {(day.type ?? 'rest').toUpperCase()}
+        </Text>
+      </View>
 
-      {expanded && (
-        <View style={styles.expandedContent}>
-          {isRest ? (
-            <Text style={styles.restNote}>Rest — recover well.</Text>
-          ) : (
-            (day.sessions ?? []).map((session, si) =>
-              isStrengthSession(session) ? (
-                <StrengthSessionSection
-                  key={si}
-                  session={session}
-                  onStart={() => startLiveWorkout(session)}
-                />
-              ) : (
-                <View key={si} style={styles.sessionWrapper}>
-                  <ExerciseSection session={session} onStart={() => startLiveWorkout(session)} />
-                  {session.log_result ? (
-                    <>
-                      <TrialLogCard
-                        label={session.log_label}
-                        value={trialValues[si] ?? ''}
-                        saved={trialSaved[si] ?? false}
-                        saving={trialSaving}
-                        onChange={v => setTrialValues(prev => ({ ...prev, [si]: v }))}
-                        onSave={() => saveTrialResult(si, session)}
-                      />
-                      {weekNumber === 1 && !isStrengthSession(session) && trialSaved[si] && ttStatus !== 'idle' && (
-                        <View style={styles.ttStatusCard}>
-                          {(ttStatus === 'matching' || ttStatus === 'matched') && (
-                            <View style={styles.ttRow}>
-                              <ActivityIndicator color={Colors.accent} size="small" />
-                              <Text style={styles.ttStatusText}>
-                                {ttStatus === 'matching' ? 'Searching Apple Health...' : 'Matched · Deriving zones...'}
-                              </Text>
-                            </View>
-                          )}
-                          {ttStatus === 'zonesSet' && (
-                            <Text style={styles.ttSuccessText}>Training zones set</Text>
-                          )}
-                          {ttStatus === 'multiple' && (
-                            <TouchableOpacity style={styles.ttRow} onPress={() => setTtModalVisible(true)}>
-                              <Text style={styles.ttStatusText}>{ttWorkouts.length} runs found — tap to choose ›</Text>
-                            </TouchableOpacity>
-                          )}
-                          {ttStatus === 'notFound' && (
-                            <View style={styles.ttManualEntry}>
-                              <Text style={styles.ttStatusText}>No matching run in Health. Enter manually:</Text>
-                              <View style={styles.ttManualRow}>
-                                <TextInput
-                                  style={styles.ttManualInput}
-                                  placeholder={profile?.preferred_units === 'imperial' ? 'mi' : 'km'}
-                                  placeholderTextColor={Colors.textSecondary}
-                                  value={ttManualDist}
-                                  onChangeText={setTtManualDist}
-                                  keyboardType="decimal-pad"
-                                  selectionColor={Colors.accent}
-                                />
-                                <TextInput
-                                  style={styles.ttManualInput}
-                                  placeholder="mm:ss"
-                                  placeholderTextColor={Colors.textSecondary}
-                                  value={ttManualDuration}
-                                  onChangeText={setTtManualDuration}
-                                  keyboardType="numbers-and-punctuation"
-                                  selectionColor={Colors.accent}
-                                />
-                              </View>
-                              <TouchableOpacity
-                                style={[styles.ttManualBtn, (!ttManualDist || !ttManualDuration || ttDeriving) && styles.trialBtnDisabled]}
-                                onPress={() => ttTrialType && saveManualZones(ttTrialType)}
-                                disabled={!ttManualDist || !ttManualDuration || ttDeriving}
-                              >
-                                <Text style={styles.trialBtnText}>{ttDeriving ? 'SETTING ZONES...' : 'SET ZONES'}</Text>
-                              </TouchableOpacity>
-                            </View>
-                          )}
+      {!isRest && (day.sessions ?? []).map((session, si) => (
+        <View key={si}>
+          <SessionDocument session={session} />
+          {!isStrengthSession(session) && (
+            <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+              {session.log_result ? (
+                <>
+                  <TrialLogCard
+                    label={session.log_label}
+                    value={trialValues[si] ?? ''}
+                    saved={trialSaved[si] ?? false}
+                    saving={trialSaving}
+                    onChange={v => setTrialValues(prev => ({ ...prev, [si]: v }))}
+                    onSave={() => saveTrialResult(si, session)}
+                  />
+                  {weekNumber === 1 && trialSaved[si] && ttStatus !== 'idle' && (
+                    <View style={styles.ttStatusCard}>
+                      {(ttStatus === 'matching' || ttStatus === 'matched') && (
+                        <View style={styles.ttRow}>
+                          <ActivityIndicator color={Colors.accent} size="small" />
+                          <Text style={styles.ttStatusText}>
+                            {ttStatus === 'matching' ? 'Searching Apple Health...' : 'Matched · Deriving zones...'}
+                          </Text>
                         </View>
                       )}
-                    </>
-                  ) : (
-                    <MarkCompleteCard
-                      saved={completeSaved[si] ?? false}
-                      saving={completeSaving}
-                      onSave={() => markSessionComplete(si, session.name)}
-                    />
+                      {ttStatus === 'zonesSet' && (
+                        <Text style={styles.ttSuccessText}>Training zones set</Text>
+                      )}
+                      {ttStatus === 'multiple' && (
+                        <TouchableOpacity style={styles.ttRow} onPress={() => setTtModalVisible(true)}>
+                          <Text style={styles.ttStatusText}>{ttWorkouts.length} runs found — tap to choose ›</Text>
+                        </TouchableOpacity>
+                      )}
+                      {ttStatus === 'notFound' && (
+                        <View style={styles.ttManualEntry}>
+                          <Text style={styles.ttStatusText}>No matching run in Health. Enter manually:</Text>
+                          <View style={styles.ttManualRow}>
+                            <TextInput
+                              style={styles.ttManualInput}
+                              placeholder={profile?.preferred_units === 'imperial' ? 'mi' : 'km'}
+                              placeholderTextColor={Colors.textSecondary}
+                              value={ttManualDist}
+                              onChangeText={setTtManualDist}
+                              keyboardType="decimal-pad"
+                              selectionColor={Colors.accent}
+                            />
+                            <TextInput
+                              style={styles.ttManualInput}
+                              placeholder="mm:ss"
+                              placeholderTextColor={Colors.textSecondary}
+                              value={ttManualDuration}
+                              onChangeText={setTtManualDuration}
+                              keyboardType="numbers-and-punctuation"
+                              selectionColor={Colors.accent}
+                            />
+                          </View>
+                          <TouchableOpacity
+                            style={[styles.ttManualBtn, (!ttManualDist || !ttManualDuration || ttDeriving) && styles.trialBtnDisabled]}
+                            onPress={() => ttTrialType && saveManualZones(ttTrialType)}
+                            disabled={!ttManualDist || !ttManualDuration || ttDeriving}
+                          >
+                            <Text style={styles.trialBtnText}>{ttDeriving ? 'SETTING ZONES...' : 'SET ZONES'}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
                   )}
-                </View>
-              )
-            )
+                </>
+              ) : (
+                <MarkCompleteCard
+                  saved={completeSaved[si] ?? false}
+                  saving={completeSaving}
+                  onSave={() => markSessionComplete(si, session.name)}
+                />
+              )}
+            </View>
           )}
         </View>
-      )}
+      ))}
     </View>
 
     <Modal
@@ -1135,10 +846,10 @@ export default function ProgramScreen() {
   const [userId, setUserId]               = useState<string | null>(null);
   const [todayName, setTodayName]         = useState('');
   const [loading, setLoading]             = useState(true);
-  const [expandAll, setExpandAll]         = useState(false);
-  const [collapseToken, setCollapseToken] = useState(0);
   const [ttProfile, setTtProfile]         = useState<TimeTrialProfile | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const dayListY      = useRef(0);
+  const dayYOffsets   = useRef<Record<string, number>>({});
   const [refreshing, setRefreshing] = useState(false);
 
   const [activeProgram, setActiveProgram]       = useState<Program | null>(null);
@@ -1320,14 +1031,16 @@ export default function ProgramScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // Scroll to today's card after loading completes
+  // Scroll to today's card after loading completes using measured layout positions
   useEffect(() => {
     if (loading || !isViewingCurrentWeek) return;
     const todayIdx = days.findIndex(d => d.day === todayName);
-    if (todayIdx <= 0) return;
-    // Approximate offset: heading ~56px + weekRow ~65px + button ~52px + (collapsed cards above × ~70px)
-    const offset = Math.max(0, 173 + todayIdx * 70 - 60);
-    setTimeout(() => scrollViewRef.current?.scrollTo({ y: offset, animated: true }), 300);
+    if (todayIdx < 0) return;
+    setTimeout(() => {
+      const cardY = dayYOffsets.current[todayName] ?? 0;
+      const offset = Math.max(0, dayListY.current + cardY - 20);
+      scrollViewRef.current?.scrollTo({ y: offset, animated: true });
+    }, 400);
   }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
@@ -1416,45 +1129,31 @@ export default function ProgramScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* VIEW FULL WEEK / COLLAPSE toggle */}
-          {days.length > 0 && (
-            <TouchableOpacity
-              style={styles.expandAllBtn}
-              onPress={() => {
-                if (!expandAll) {
-                  setExpandAll(true);
-                } else {
-                  setExpandAll(false);
-                  setCollapseToken(t => t + 1);
-                }
-              }}
-            >
-              <Text style={styles.expandAllText}>
-                {expandAll ? 'COLLAPSE' : 'VIEW FULL WEEK'}
-              </Text>
-            </TouchableOpacity>
-          )}
-
           {allPrograms.length === 0 ? (
             <Text style={styles.emptyText}>No program found.</Text>
           ) : days.length === 0 ? (
             <Text style={styles.emptyText}>No days in this week.</Text>
           ) : (
-            <View style={styles.dayList}>
+            <View
+              style={styles.dayList}
+              onLayout={e => { dayListY.current = e.nativeEvent.layout.y; }}
+            >
               {days.map(day => (
-                <DayCard
+                <View
                   key={day.day}
-                  day={day}
-                  isToday={isViewingCurrentWeek && day.day === todayName}
-                  isComplete={completedDays.has(day.day)}
-                  userId={userId}
-                  programId={currentProgram?.id ?? ''}
-                  weekNumber={displayWeekNum}
-                  savedTrials={savedTrials}
-                  expandAll={expandAll}
-                  collapseToken={collapseToken}
-                  profile={ttProfile}
-                />
+                  onLayout={e => { dayYOffsets.current[day.day] = e.nativeEvent.layout.y; }}
+                >
+                  <DayCard
+                    day={day}
+                    isToday={isViewingCurrentWeek && day.day === todayName}
+                    isComplete={completedDays.has(day.day)}
+                    userId={userId}
+                    programId={currentProgram?.id ?? ''}
+                    weekNumber={displayWeekNum}
+                    savedTrials={savedTrials}
+                    profile={ttProfile}
+                  />
+                </View>
               ))}
             </View>
           )}
@@ -1489,45 +1188,11 @@ const styles = StyleSheet.create({
   weekArrow: { padding: 8 },
   weekLabel: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700', minWidth: 80, textAlign: 'center' },
 
-  expandAllBtn: {
-    marginHorizontal: 16, marginBottom: 12, paddingVertical: 11,
-    borderRadius: 10, borderWidth: 1, borderColor: Colors.accent,
-    alignItems: 'center',
-  },
-  expandAllText: { color: Colors.accent, fontSize: 12, fontWeight: '700', letterSpacing: 1.2 },
-
   dayList:      { paddingHorizontal: 16, gap: 10 },
   dayCard:      { backgroundColor: Colors.card, borderRadius: 14, overflow: 'hidden' },
   dayCardToday: { borderLeftWidth: 3, borderLeftColor: Colors.accent },
 
-  dayCardHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    padding: 16,
-  },
-  dayCardLeft:  { flexDirection: 'row', alignItems: 'center' },
-  dayCardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   dayName:      { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  sessionType:  { color: Colors.textSecondary, fontSize: 13 },
-
-  expandedContent: { paddingHorizontal: 16, paddingBottom: 16, gap: 16 },
-  sessionWrapper:  { gap: 12 },
-
-  sessionBlock:     { gap: 12 },
-  sessionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  sessionName:      { color: Colors.textPrimary, fontSize: 14, fontWeight: '700', flex: 1 },
-  sessionMeta:      { color: Colors.textSecondary, fontSize: 12 },
-  sessionDesc:      { color: Colors.textSecondary, fontSize: 13, lineHeight: 18 },
-
-  section:      { gap: 12 },
-  sectionLabel: {
-    color: Colors.textSecondary, fontSize: 10, fontWeight: '700',
-    letterSpacing: 3, textTransform: 'uppercase',
-  },
-
-  // Non-strength exercise rows
-  exRow:    { borderWidth: 2, borderColor: 'rgba(255,255,255,0.08)', padding: 10, gap: 2 },
-  exName:   { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
-  exDetail: { color: Colors.textSecondary, fontSize: 13 },
 
   // Run swap button
   swapBtn:    { borderWidth: 1, borderColor: '#333', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
@@ -1542,184 +1207,6 @@ const styles = StyleSheet.create({
   swapOptionTextSelected: { color: Colors.accent },
   swapCancelBtn:        { alignItems: 'center' as const, paddingVertical: 12, marginTop: 4 },
   swapCancelText:       { color: Colors.textSecondary, fontSize: 14 },
-
-  // Superset grouping — 3px accent at 50% opacity
-  supersetGroup: {
-    borderLeftWidth: 3,
-    borderLeftColor: 'rgba(232,255,71,0.5)',
-    paddingLeft: 10,
-    gap: 6,
-    marginBottom: 4,
-  },
-  supersetLabel: {
-    color: 'rgba(232,255,71,0.7)',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: 2,
-  },
-
-  // Circuit grouping — 3px accent
-  circuitGroup: {
-    marginBottom: 8,
-  },
-  circuitLabel: {
-    color: Colors.accent,
-    fontFamily: Fonts.metric,
-    fontSize: 15,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  circuitBody: {
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.accent,
-    paddingLeft: 12,
-    gap: 6,
-  },
-  circuitRestText: {
-    color: Colors.textSecondary,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  circuitExRow: {
-    gap: 2,
-    marginBottom: 4,
-  },
-
-  // Block group (named sub-group within a session block)
-  blockGroup:     { gap: 0, marginBottom: 4 },
-  blockGroupName: { color: Colors.textPrimary, fontSize: 16, fontFamily: Fonts.metric, marginBottom: 8 },
-  blockExRow:     { paddingVertical: 6, gap: 2 },
-  blockDivider:   { height: 0.5, backgroundColor: 'rgba(255,255,255,0.08)' },
-
-  // Part wrapper (Part wrapping a Circuit or Superset)
-  partWrapper:    { marginBottom: 4 },
-  partDivider:    { height: 0.5, backgroundColor: 'rgba(255,255,255,0.08)', marginBottom: 8 },
-  partName:       { color: Colors.textPrimary, fontSize: 16, fontFamily: Fonts.metric, marginBottom: 8 },
-
-  // Start Workout button
-  startWorkoutBtn: {
-    marginTop: 14, paddingVertical: 12, borderRadius: 10,
-    backgroundColor: Colors.accent, alignItems: 'center',
-  },
-  startWorkoutText: { color: Colors.background, fontSize: 12, fontWeight: '800', letterSpacing: 1.5 },
-
-  // Strength block section header
-  strBlock:      { gap: 0 },
-  strBlockLabel: {
-    color: Colors.textSecondary, fontSize: 11, fontWeight: '700',
-    letterSpacing: 2, textTransform: 'uppercase', marginBottom: 16,
-  },
-
-  // Exercise card list spacing
-  strExList: { gap: 20 },
-
-  // Individual exercise card
-  strExCard: {
-    backgroundColor: Colors.card,
-    borderRadius: 16,
-    padding: 20,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.accent,
-  },
-  strExName:       { color: Colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 4 },
-  strExPrescribed: { color: Colors.textSecondary, fontSize: 13, marginBottom: 4 },
-  strExNote:       { color: Colors.textSecondary, fontSize: 13, fontStyle: 'italic' },
-  strDivider:      { height: 1, backgroundColor: Colors.nested, marginBottom: 12 },
-
-  // Set row containers
-  setRowContainer: {
-    backgroundColor: Colors.nested,
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  setRowActive: {
-    backgroundColor: '#222222',
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.accent,
-    paddingLeft: 13,
-  },
-  setRowSaved: { backgroundColor: '#1a2a00' },
-  setRowDim:   { opacity: 0.55 },
-
-  setColHeaders: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 12, marginBottom: 4,
-  },
-  setColSpacer: { width: 44 },
-  setColHeader: {
-    flex: 1, color: Colors.textSecondary, fontSize: 10, fontWeight: '600',
-    letterSpacing: 1.5, textTransform: 'uppercase', textAlign: 'center',
-  },
-
-  setLabelText: {
-    color: '#b0ada6', fontSize: 11, fontWeight: '700',
-    letterSpacing: 1, textTransform: 'uppercase', width: 44,
-  },
-  setValuesRow: { flex: 1, flexDirection: 'row', alignItems: 'baseline' },
-  setSavedNum:  { color: Colors.accent, fontFamily: Fonts.metric, fontSize: 22 },
-  setSavedUnit: { color: Colors.textSecondary, fontSize: 12 },
-  setCheck:     { color: Colors.green, fontSize: 14, fontWeight: '700', marginLeft: 8 },
-
-  setRepsInput: {
-    width: 70,
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-    borderRadius: 8,
-    paddingVertical: 6,
-    color: Colors.textPrimary,
-    fontFamily: Fonts.metric,
-    fontSize: 22,
-    textAlign: 'center',
-  },
-  setWeightRow: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end',
-  },
-  setWeightInput: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-    borderRadius: 8,
-    paddingVertical: 6,
-    color: Colors.textPrimary,
-    fontFamily: Fonts.metric,
-    fontSize: 22,
-    textAlign: 'center',
-  },
-  setWeightSuffix: { color: '#b0ada6', fontSize: 12, marginLeft: 4, width: 24 },
-  setInputFocused: { borderColor: Colors.accent },
-
-  // LOG ALL LIFTS button
-  logAllBtn: {
-    backgroundColor: Colors.accent,
-    borderRadius: 14,
-    paddingVertical: 18,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  logAllBtnDisabled: { opacity: 0.35 },
-  logAllBtnText: {
-    color: Colors.background, fontSize: 15, fontWeight: '800', letterSpacing: 1.5,
-  },
-  logAllBtnDone: {
-    backgroundColor: '#1a2a00',
-    borderRadius: 14,
-    paddingVertical: 18,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  logAllBtnDoneText: {
-    color: Colors.accent, fontSize: 15, fontWeight: '800', letterSpacing: 1.5,
-  },
 
   // Trial / cardio log
   trialCard: {

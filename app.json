@@ -47,7 +47,8 @@
           "healthSharePermission": "Peak 65 reads your Apple Health data to personalize your training and track recovery.",
           "healthUpdatePermission": "Peak 65 may write workout data to Apple Health."
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }
