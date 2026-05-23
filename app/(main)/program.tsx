@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, RefreshControl,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, Modal,
@@ -8,14 +9,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
-import type { Program, ProgramDay, ProgramSession, ExerciseItem } from '../_layout';
+import type { Program, ProgramDay, ProgramSession, ExerciseItem, MainStackParamList } from '../_layout';
 import {
   matchTimeTrial, getWorkoutHRDetail,
   type WorkoutSample,
 } from '../../lib/healthKit';
 import { deriveZonesFromTimeTrial, type TrainingZones } from '../../lib/zoneDerivation';
 import { Colors, Fonts } from '../../lib/theme';
-import HRUploadPrompt from '../../components/HRUploadPrompt';
 
 type TimeTrialProfile = {
   goal: string | null;
@@ -145,7 +145,9 @@ function SessionDocument({ session }: { session: ProgramSession }) {
     const type = (ex as any).type as string | undefined;
     const loadNote = (ex as any).load_note as string | undefined;
     const note = ex.notes || (ex as any).note as string | undefined;
-    const firstSentence = note ? (note.split(/[.!?]/)[0]?.trim() ?? '') : '';
+    const firstSentence = note
+      ? (note.split(/[.!?]/)[0]?.trim() ?? '').slice(0, 60)
+      : '';
 
     const parts: string[] = [];
 
@@ -161,9 +163,7 @@ function SessionDocument({ session }: { session: ProgramSession }) {
       parts.push(String(ex.reps));
     }
 
-    if (loadNote) parts.push(`(${loadNote})`);
-
-    if (ex.rest && ex.rest !== 'none' && ex.rest !== '0 min' && ex.rest !== '0:00') {
+    if (ex.rest && !['none','0 min','0:00','0','00:00'].includes(ex.rest.trim())) {
       parts.push(`${ex.rest} rest`);
     }
 
@@ -182,13 +182,10 @@ function SessionDocument({ session }: { session: ProgramSession }) {
   function renderBlock(block: { block_name: string; exercises?: ExerciseItem[] }, bi: number): React.ReactNode {
     const exercises = block.exercises ?? [];
     const groups = groupBySuperset(exercises);
-    const isWarmCool = /warm|cool/i.test(block.block_name);
 
     return (
       <View key={bi} style={pd.blockSection}>
-        {!isWarmCool && (
-          <Text style={pd.blockLabel}>{block.block_name}</Text>
-        )}
+        <Text style={pd.blockLabel}>{block.block_name}</Text>
         {groups.map((group, gi) => {
           if (group.kind === 'circuit' || group.kind === 'part-circuit') {
             const members = group.members;
@@ -286,21 +283,24 @@ const pd = StyleSheet.create({
     marginBottom: 12,
   },
   blockLabel: {
-    color: '#8a877f',
+    color: '#e8ff47',
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 1.5,
+    letterSpacing: 2,
     textTransform: 'uppercase',
-    marginBottom: 8,
-    marginTop: 4,
+    marginBottom: 10,
+    marginTop: 12,
+    textAlign: 'center',
   },
   subBlockLabel: {
-    color: '#8a877f',
-    fontSize: 12,
+    color: '#e8ff47',
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 1,
-    marginBottom: 6,
-    marginTop: 8,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    marginTop: 10,
+    textAlign: 'center',
   },
   exerciseLine: {
     color: '#f0ede8',
@@ -345,6 +345,20 @@ const pd = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 2,
+  },
+  logBtn: {
+    marginHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 8,
+    backgroundColor: Colors.accent,
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  logBtnTxt: {
+    color: Colors.background,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
 });
 
@@ -462,9 +476,7 @@ function DayCard({
   });
   const [completeSaving, setCompleteSaving] = useState(false);
 
-  // ── HR upload state ──────────────────────────────────────────────────────────
-  const [showHRUpload, setShowHRUpload]   = useState(false);
-  const [sessionLogId, setSessionLogId]   = useState<string | null>(null);
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
 
   // ── Time trial state ─────────────────────────────────────────────────────────
   const [ttStatus, setTtStatus]               = useState<'idle'|'matching'|'matched'|'multiple'|'notFound'|'zonesSet'>('idle');
@@ -552,7 +564,7 @@ function DayCard({
   async function saveTrialResult(si: number, session: ProgramSession) {
     if (!userId || !trialValues[si]?.trim()) return;
     setTrialSaving(true);
-    const { data: insertedLog, error } = await supabase.from('session_logs').insert({
+    const { error } = await supabase.from('session_logs').insert({
       user_id:      userId,
       program_id:   programId,
       day_name:     day.day,
@@ -562,9 +574,8 @@ function DayCard({
       log_value:    trialValues[si].trim(),
       completed:    true,
       completed_at: new Date().toISOString(),
-    }).select('id').single();
+    });
     if (error) console.log('[program] saveTrialResult error:', error.message);
-    if (insertedLog?.id) setSessionLogId(insertedLog.id);
 
     // Hard 3 detection — triggers next week program generation
     try {
@@ -610,7 +621,6 @@ function DayCard({
 
     setTrialSaved(prev => ({ ...prev, [si]: true }));
     setTrialSaving(false);
-    setShowHRUpload(true);
 
     // Trigger zone derivation only for the Week 1 run time trial, not conditioning
     const sessionIsRunTrial =
@@ -673,7 +683,7 @@ function DayCard({
   async function markSessionComplete(si: number, sessionName: string) {
     if (!userId) return;
     setCompleteSaving(true);
-    const { data: insertedComplete, error } = await supabase.from('session_logs').insert({
+    const { error } = await supabase.from('session_logs').insert({
       user_id:      userId,
       program_id:   programId,
       day_name:     day.day,
@@ -682,9 +692,8 @@ function DayCard({
       log_field:    'session_complete',
       completed:    true,
       completed_at: new Date().toISOString(),
-    }).select('id').single();
+    });
     if (error) console.log('[program] markSessionComplete error:', error.message);
-    if (insertedComplete?.id) setSessionLogId(insertedComplete.id);
 
     // Hard 3 detection — triggers next week program generation
     try {
@@ -730,7 +739,6 @@ function DayCard({
 
     setCompleteSaved(prev => ({ ...prev, [si]: true }));
     setCompleteSaving(false);
-    setShowHRUpload(true);
   }
 
   return (
@@ -748,112 +756,22 @@ function DayCard({
       {!isRest && (day.sessions ?? []).map((session, si) => (
         <View key={si}>
           <SessionDocument session={session} />
-          {!isStrengthSession(session) && (
-            <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
-              {session.log_result ? (
-                <>
-                  <TrialLogCard
-                    label={session.log_label}
-                    value={trialValues[si] ?? ''}
-                    saved={trialSaved[si] ?? false}
-                    saving={trialSaving}
-                    onChange={v => setTrialValues(prev => ({ ...prev, [si]: v }))}
-                    onSave={() => saveTrialResult(si, session)}
-                  />
-                  {weekNumber === 1 && trialSaved[si] && ttStatus !== 'idle' && (
-                    <View style={styles.ttStatusCard}>
-                      {(ttStatus === 'matching' || ttStatus === 'matched') && (
-                        <View style={styles.ttRow}>
-                          <ActivityIndicator color={Colors.accent} size="small" />
-                          <Text style={styles.ttStatusText}>
-                            {ttStatus === 'matching' ? 'Searching Apple Health...' : 'Matched · Deriving zones...'}
-                          </Text>
-                        </View>
-                      )}
-                      {ttStatus === 'zonesSet' && (
-                        <Text style={styles.ttSuccessText}>Training zones set</Text>
-                      )}
-                      {ttStatus === 'multiple' && (
-                        <TouchableOpacity style={styles.ttRow} onPress={() => setTtModalVisible(true)}>
-                          <Text style={styles.ttStatusText}>{ttWorkouts.length} runs found — tap to choose ›</Text>
-                        </TouchableOpacity>
-                      )}
-                      {ttStatus === 'notFound' && (
-                        <View style={styles.ttManualEntry}>
-                          <Text style={styles.ttStatusText}>No matching run in Health. Enter manually:</Text>
-                          <View style={styles.ttManualRow}>
-                            <TextInput
-                              style={styles.ttManualInput}
-                              placeholder={profile?.preferred_units === 'imperial' ? 'mi' : 'km'}
-                              placeholderTextColor={Colors.textSecondary}
-                              value={ttManualDist}
-                              onChangeText={setTtManualDist}
-                              keyboardType="decimal-pad"
-                              selectionColor={Colors.accent}
-                            />
-                            <TextInput
-                              style={styles.ttManualInput}
-                              placeholder="mm:ss"
-                              placeholderTextColor={Colors.textSecondary}
-                              value={ttManualDuration}
-                              onChangeText={setTtManualDuration}
-                              keyboardType="numbers-and-punctuation"
-                              selectionColor={Colors.accent}
-                            />
-                          </View>
-                          <TouchableOpacity
-                            style={[styles.ttManualBtn, (!ttManualDist || !ttManualDuration || ttDeriving) && styles.trialBtnDisabled]}
-                            onPress={() => ttTrialType && saveManualZones(ttTrialType)}
-                            disabled={!ttManualDist || !ttManualDuration || ttDeriving}
-                          >
-                            <Text style={styles.trialBtnText}>{ttDeriving ? 'SETTING ZONES...' : 'SET ZONES'}</Text>
-                          </TouchableOpacity>
-                        </View>
-                      )}
-                    </View>
-                  )}
-                </>
-              ) : (
-                <MarkCompleteCard
-                  saved={completeSaved[si] ?? false}
-                  saving={completeSaving}
-                  onSave={() => markSessionComplete(si, session.name)}
-                />
-              )}
-            </View>
+          {(session.log_result !== false) && (
+            <TouchableOpacity
+              style={pd.logBtn}
+              onPress={() => navigation.navigate('LogSession', {
+                sessionJson: JSON.stringify(session),
+                programId,
+                weekNumber,
+                dayName: day.day,
+              })}
+            >
+              <Text style={pd.logBtnTxt}>LOG SESSION →</Text>
+            </TouchableOpacity>
           )}
         </View>
       ))}
     </View>
-
-    <Modal
-      visible={showHRUpload}
-      animationType="slide"
-      transparent
-      onRequestClose={() => setShowHRUpload(false)}
-    >
-      <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' }}>
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowHRUpload(false)} />
-        <View style={{ backgroundColor: '#111111', paddingBottom: 48, paddingTop: 16 }}>
-          <View style={{ paddingHorizontal: 24, paddingTop: 12, paddingBottom: 16 }}>
-            <Text style={{ color: '#00d4aa', fontSize: 13, fontWeight: '700', letterSpacing: 1, fontFamily: 'BarlowCondensed_700Bold' }}>
-              SESSION LOGGED ✓
-            </Text>
-            <Text style={{ color: '#8a877f', fontSize: 14, marginTop: 4 }}>
-              Upload your heart rate data for a coach debrief.
-            </Text>
-          </View>
-          <HRUploadPrompt
-            sessionLogId={sessionLogId}
-            userId={userId}
-            onDebrief={() => setShowHRUpload(false)}
-            onInvalid={() => setShowHRUpload(false)}
-            onNetworkError={() => setShowHRUpload(false)}
-            onSkip={() => setShowHRUpload(false)}
-          />
-        </View>
-      </View>
-    </Modal>
 
     <Modal
       visible={ttModalVisible}

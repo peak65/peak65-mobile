@@ -42,6 +42,7 @@ import CoachScreen from './(main)/coach';
 import CoachAthleteScreen from './(main)/coach-athlete';
 import UpdateProgramScreen from './(main)/update-program';
 import MessagesScreen from './(main)/messages';
+import LogSessionScreen from './(main)/log-session';
 
 // ─── Shared types used across screens ────────────────────────────────────────
 
@@ -118,6 +119,7 @@ export type MainStackParamList = {
   Generating: undefined;
   Tabs: undefined;
   LiveWorkout: { sessionJson: string; programId: string; weekNumber: number; dayName: string };
+  LogSession: { sessionJson: string; programId: string; weekNumber: number; dayName: string };
   Waiting: undefined;
   CoachAthleteDetail: { athleteId: string };
   UpdateProgram: undefined;
@@ -215,6 +217,7 @@ function MainNavigator({ initialRoute }: { initialRoute: keyof MainStackParamLis
       <MainStack.Screen name="Generating"        component={GeneratingScreen} />
       <MainStack.Screen name="Tabs"              component={MainTabs} />
       <MainStack.Screen name="LiveWorkout"       component={LiveWorkoutScreen} />
+      <MainStack.Screen name="LogSession"        component={LogSessionScreen} options={{ headerShown: false }} />
       <MainStack.Screen name="Waiting"           component={WaitingScreen} />
       <MainStack.Screen name="CoachAthleteDetail" component={CoachAthleteScreen} />
       <MainStack.Screen name="UpdateProgram"     component={UpdateProgramScreen} />

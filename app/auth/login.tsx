@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Linking,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -86,8 +87,11 @@ export default function LoginScreen({ navigation }: Props) {
           <Text style={styles.buttonText}>{loading ? 'Logging in…' : 'Log In'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-          <Text style={styles.link}>Don't have an account? Sign up</Text>
+        <TouchableOpacity onPress={() => Linking.openURL('https://getpeak65.com/start')}>
+          <Text style={styles.link}>
+            {"Don't have an account? "}
+            <Text style={{ color: '#e8ff47' }}>Get started →</Text>
+          </Text>
         </TouchableOpacity>
           </View>
         </View>

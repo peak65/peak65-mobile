@@ -91,23 +91,23 @@ function HRUploadPrompt({
   const hasImage = !!(zoneChart || hrCurve);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#080808' }} edges={['top', 'bottom']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#080808' }} edges={['bottom']}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
         {/* Top */}
-        <View style={{ alignItems: 'center', paddingTop: 60, paddingHorizontal: 24 }}>
-          <Feather name="activity" size={52} color="#e8ff47" />
-          <Text style={{ fontSize: 34, fontWeight: '800', color: '#f0ede8', textAlign: 'center', marginTop: 16, fontFamily: 'BarlowCondensed_700Bold' }}>
-            Your debrief is ready.
+        <View style={{ paddingHorizontal: 24, alignItems: 'center' }}>
+          <Feather name="activity" size={36} color="#e8ff47" style={{ marginBottom: 8 }} />
+          <Text style={{ fontSize: 24, fontWeight: '800', color: '#e8ff47', textAlign: 'center', fontFamily: 'BarlowCondensed_700Bold' }}>
+            Upload your HR data.
           </Text>
-          <Text style={{ fontSize: 17, color: '#8a877f', textAlign: 'center', maxWidth: 280, marginTop: 8, lineHeight: 26 }}>
-            Upload your heart rate data and get instant coaching feedback from your coach — specific to what your body just did.
+          <Text style={{ fontSize: 15, color: '#8a877f', marginTop: 8, lineHeight: 22, textAlign: 'center' }}>
+            Your coach reviews your heart rate after every session. One screenshot tells them more than any summary.
           </Text>
         </View>
 
         {/* Instruction card */}
-        <View style={{ backgroundColor: '#111111', borderRadius: 12, margin: 24, padding: 20 }}>
+        <View style={{ backgroundColor: '#111111', borderRadius: 12, marginTop: 16, marginHorizontal: 24, marginBottom: 24, padding: 20 }}>
           <Text style={{ color: '#e8ff47', fontSize: 13, fontWeight: '700', letterSpacing: 1, fontFamily: 'BarlowCondensed_700Bold' }}>
             WHAT TO UPLOAD
           </Text>

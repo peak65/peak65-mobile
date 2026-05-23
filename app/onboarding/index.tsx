@@ -11,8 +11,6 @@ import { supabase } from '../../lib/supabase';
 import type { MainStackParamList } from '../_layout';
 import { Colors, Fonts } from '../../lib/theme';
 import { Feather } from '@expo/vector-icons';
-import RadarChart from '../components/RadarChart';
-import type { StationValues } from '../components/RadarChart';
 import {
   fetchDivisionStats, searchAthletes, fetchAthleteResults,
   weeksFromToday, getDivisionPresets, parseTimeToSecs,
@@ -53,7 +51,7 @@ type OnboardingData = {
   hyrox_weaknesses: string[];
   hyrox_equipment: string;
   hyrox_has_raced: string;
-  equipment_access: string;
+  equipment_access: string[];
   hyrox_equipment_list: string[];
   training_days: string[];
   training_days_count: number;
@@ -72,12 +70,12 @@ type OnboardingData = {
 type StepKey =
   | 'goal'
   | 'hyroxRace' | 'hyroxFormat' | 'hyroxGoalTime' | 'hyroxHistory'
-  | 'hyroxResultsImport' | 'hyroxStationConf' | 'hyroxRadarChart' | 'hyroxRaceDay'
+  | 'hyroxResultsImport' | 'hyroxStationConf'
   | 'hyroxBackground'
   | 'gfBackground' | 'gfPrimaryGoals' | 'gfBodyFat'
   | 'aboutYou' | 'injuries'
   | 'trainingSetup' | 'gfEquipment'
-  | 'trainingDays' | 'sessionDetails' | 'wearable' | 'referral'
+  | 'trainingDays' | 'hyroxAvailability' | 'hyroxDoubles' | 'wearable' | 'referral'
   | 'gfClosing' | 'onboardingSummary';
 
 type ClosingPhase = null | 'loading' | 'assessment' | 'startdate';
@@ -114,6 +112,13 @@ const CHECKLIST_ITEMS = [
   'Individualizing your program...',
 ];
 
+const GENERATING_TIPS = [
+  'Threshold sessions are programmed before strength — always.',
+  'Your weakest station gets extra attention in week one.',
+  'Every run in your program traces back to your time trial.',
+  'Recovery days are part of the program, not a break from it.',
+];
+
 
 // ─── Step Logic ───────────────────────────────────────────────────────────────
 
@@ -123,14 +128,14 @@ function getSteps(data: OnboardingData): StepKey[] {
     if (data.hyrox_has_raced === 'yes') steps.push('hyroxResultsImport');
     const hasRealSplits = (data.race_data_source === 'api' || data.race_data_source === 'manual') && data.station_splits !== null;
     if (!hasRealSplits) steps.push('hyroxStationConf');
-    steps.push('hyroxRadarChart', 'hyroxGoalTime', 'hyroxRaceDay');
-    steps.push('injuries', 'trainingSetup', 'trainingDays', 'sessionDetails', 'wearable', 'referral', 'onboardingSummary');
+    steps.push('hyroxGoalTime');
+    steps.push('injuries', 'trainingSetup', 'trainingDays', 'hyroxAvailability', 'hyroxDoubles', 'wearable', 'referral', 'onboardingSummary');
     return steps;
   }
   if (data.goal === 'general_fitness') {
     const steps: StepKey[] = ['goal', 'aboutYou', 'gfBackground', 'gfPrimaryGoals'];
     if (data.primary_goals.some(g => ['lose_weight', 'look_better', 'all'].includes(g))) steps.push('gfBodyFat');
-    steps.push('injuries', 'gfEquipment', 'trainingDays', 'sessionDetails', 'wearable', 'referral', 'gfClosing', 'onboardingSummary');
+    steps.push('injuries', 'gfEquipment', 'trainingDays', 'hyroxAvailability', 'hyroxDoubles', 'wearable', 'referral', 'gfClosing', 'onboardingSummary');
     return steps;
   }
   return ['goal'];
@@ -145,24 +150,17 @@ function isStepComplete(key: StepKey, d: OnboardingData): boolean {
     case 'hyroxHistory':      return d.hyrox_has_raced !== '';
     case 'hyroxResultsImport':return d.race_data_source !== '';
     case 'hyroxStationConf':  return true;
-    case 'hyroxRadarChart':   return true;
-    case 'hyroxRaceDay':      return true;
     case 'hyroxBackground':   return d.training_background !== '';
     case 'gfBackground':      return d.training_background !== '';
     case 'gfPrimaryGoals':    return d.primary_goals.length > 0;
     case 'gfBodyFat':         return d.body_fat !== '';
     case 'aboutYou':          return d.gender !== '' && d.height_cm > 0 && d.weight_kg > 0 && d.date_of_birth !== '' && d.date_of_birth !== '1990-01-01';
     case 'injuries':          return true;
-    case 'trainingSetup':     return d.equipment_access !== '';
-    case 'gfEquipment':       return d.equipment_access !== '';
-    case 'trainingDays':      return d.training_days.length >= 2;
-    case 'sessionDetails':
-      if (!d.training_availability || !d.session_length) return false;
-      if (d.training_availability === 'both') {
-        if (d.doubles_eligible === null) return false;
-        if (d.doubles_eligible === true) return d.doubles_days.length > 0;
-      }
-      return true;
+    case 'trainingSetup':     return true;
+    case 'gfEquipment':       return true;
+    case 'trainingDays':      return d.training_days.length >= 4;
+    case 'hyroxAvailability': return d.training_availability !== '' && d.session_length !== '';
+    case 'hyroxDoubles':      return d.doubles_eligible !== null;
     case 'wearable':          return d.wearable.length > 0;
     case 'referral':          return true;
     case 'gfClosing':         return true;
@@ -200,70 +198,6 @@ function deriveWhatMattersMost(goals: string[]): string {
   if (goals.includes('lose_weight') || goals.includes('look_better')) return 'aesthetics';
   if (goals.includes('build_muscle')) return 'aesthetics';
   return 'performance';
-}
-
-function secsToMMSS(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m}:${String(sec).padStart(2, '0')}`;
-}
-
-function weaknessesToRadarValues(weaknesses: string[]): StationValues {
-  const result: StationValues = {};
-  if (weaknesses.length === 0) {
-    STATION_KEYS.forEach(k => { result[k] = 3 / 5; });
-  } else {
-    STATION_KEYS.forEach(k => {
-      result[k] = weaknesses.includes(k) ? 2 / 5 : 4 / 5;
-    });
-  }
-  return result;
-}
-
-function getDivisionBenchmarks(division: string, goalTimeMinutes: number, currentProfile?: StationValues): StationValues {
-  let benchmark: number;
-  if (goalTimeMinutes < 60) benchmark = 1.0;
-  else if (goalTimeMinutes < 70) benchmark = 0.9;
-  else if (goalTimeMinutes < 80) benchmark = 0.8;
-  else if (goalTimeMinutes < 90) benchmark = 0.7;
-  else if (goalTimeMinutes < 100) benchmark = 0.6;
-  else benchmark = 0.5;
-
-  const result: StationValues = {};
-  STATION_KEYS.forEach(k => {
-    if (currentProfile && currentProfile[k] !== undefined) {
-      const current = currentProfile[k] as number;
-      if (current < benchmark) {
-        // Weak station — pull it up 70% of the way toward benchmark
-        result[k] = current + (benchmark - current) * 0.7;
-      } else {
-        // Strong station — nudge it up slightly, cap at 1.0
-        result[k] = Math.min(Math.max(current, current + 0.03), 1.0);
-      }
-    } else {
-      result[k] = benchmark;
-    }
-  });
-  return result;
-}
-
-function splitsToRadarValues(splits: Record<string, string>): StationValues {
-  const secsMap: Record<string, number> = {};
-  STATION_KEYS.forEach(k => {
-    const t = splits[k];
-    if (t) secsMap[k] = parseTimeToSecs(t);
-  });
-  const times = STATION_KEYS.map(k => secsMap[k]).filter(v => v && v > 0) as number[];
-  if (times.length === 0) return weaknessesToRadarValues([]);
-  const maxSecs = Math.max(...times);
-  const minSecs = Math.min(...times);
-  const range = maxSecs - minSecs || 1;
-  const result: StationValues = {};
-  STATION_KEYS.forEach(k => {
-    const s = secsMap[k];
-    result[k] = s ? 0.2 + 0.8 * ((maxSecs - s) / range) : 0.5;
-  });
-  return result;
 }
 
 // ─── DrumRollPicker (unchanged from original) ─────────────────────────────────
@@ -322,7 +256,7 @@ const INITIAL: OnboardingData = {
   hyrox_format: '', hyrox_division: '', hyrox_goal_time: '', hyrox_goal_percentile: '',
   race_data_source: '', previous_race_id: '', previous_race_name: '', previous_race_time: '',
   station_splits: null, station_confidence: null, hyrox_weaknesses: [], hyrox_equipment: '', hyrox_has_raced: '',
-  equipment_access: '', hyrox_equipment_list: [], training_days: [], training_days_count: 0,
+  equipment_access: [], hyrox_equipment_list: [], training_days: [], training_days_count: 0,
   training_availability: '', doubles_eligible: null, doubles_days: [], session_length: '',
   has_injuries: false, injury_notes: '', wearable: [], referral_source: '',
 };
@@ -356,6 +290,9 @@ export default function OnboardingScreen({ navigation }: Props) {
   const [dobDayIdx, setDobDayIdx] = useState(0);
   const [dobYearIdx, setDobYearIdx] = useState(23); // 1990
   const [goalPickerKey, setGoalPickerKey] = useState(0);
+  const [referralOther, setReferralOther] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatingTipIdx, setGeneratingTipIdx] = useState(0);
 
   const stepOpacity = useRef(new Animated.Value(1)).current;
 
@@ -411,6 +348,13 @@ export default function OnboardingScreen({ navigation }: Props) {
     const t = setInterval(() => setCardIdx(i => (i + 1) % COACHING_CARDS.length), 3000);
     return () => clearInterval(t);
   }, [closingPhase]);
+
+  // Generating tip rotator
+  useEffect(() => {
+    if (!isGenerating) return;
+    const t = setInterval(() => setGeneratingTipIdx(i => (i + 1) % GENERATING_TIPS.length), 2000);
+    return () => clearInterval(t);
+  }, [isGenerating]);
 
   // Default selectedStartDate to first training day in next 7 days
   useEffect(() => {
@@ -496,10 +440,10 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   function toggleEquipment(item: string) {
     setData(prev => {
-      const next = prev.hyrox_equipment_list.includes(item)
-        ? prev.hyrox_equipment_list.filter(v => v !== item)
-        : [...prev.hyrox_equipment_list, item];
-      return { ...prev, hyrox_equipment_list: next };
+      const next = prev.equipment_access.includes(item)
+        ? prev.equipment_access.filter(v => v !== item)
+        : [...prev.equipment_access, item];
+      return { ...prev, equipment_access: next };
     });
   }
 
@@ -633,7 +577,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       hyrox_weaknesses: data.hyrox_weaknesses.length > 0 ? data.hyrox_weaknesses : null,
       hyrox_equipment: data.hyrox_equipment || null,
       fitness_level: determineFitnessLevel(data),
-      equipment_access: (data.equipment_access === 'dumbbells' ? 'home' : data.equipment_access) || null,
+      equipment_access: data.equipment_access.length > 0 ? data.equipment_access : null,
       training_days: data.training_days.length > 0 ? data.training_days : null,
       training_days_count: data.training_days_count || null,
       training_availability: data.training_availability || null,
@@ -1044,158 +988,6 @@ export default function OnboardingScreen({ navigation }: Props) {
     );
   }
 
-  function renderHyroxRadarChart() {
-    const hasRealSplits = (data.race_data_source === 'api' || data.race_data_source === 'manual') && data.station_splits !== null;
-    const weaknesses = data.hyrox_weaknesses ?? [];
-    const day1 = hasRealSplits ? splitsToRadarValues(data.station_splits!) : weaknessesToRadarValues(weaknesses);
-    const firstWeakness = weaknesses[0];
-
-    return (
-      <View style={[styles.stepContent, { alignItems: 'center' }]}>
-        <Text style={[styles.label, { textAlign: 'center' }]}>Here's what your data shows.</Text>
-        <Text style={[styles.sublabel, { textAlign: 'center', marginBottom: 16 }]}>
-          {hasRealSplits ? 'Based on your race data' : 'Based on your station selections'}
-        </Text>
-        <RadarChart day1={day1} size={280} />
-        <View style={styles.coachingCard}>
-          <Text style={styles.coachingText}>
-            {(() => {
-              if (hasRealSplits && data.station_splits) {
-                const toSecs = (t: string) => {
-                  const parts = t.split(':').map(Number);
-                  return parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0];
-                };
-                const entries = Object.entries(data.station_splits);
-                const weakestEntry = entries.reduce((worst, curr) =>
-                  toSecs(curr[1]) > toSecs(worst[1]) ? curr : worst
-                );
-                const weakestSecs = toSecs(weakestEntry[1]);
-                const avgSecs = entries.reduce((sum, e) => sum + toSecs(e[1]), 0) / entries.length;
-                const weakestKey = weakestEntry[0];
-                const weakestLabel = STATION_LABELS[weakestKey] ?? weakestKey;
-
-                if (weakestSecs < avgSecs * 1.15) {
-                  return 'Your stations are balanced. Your run pace is where your race time is built or lost — and that\'s exactly what your program targets.';
-                }
-                return `Your ${weakestLabel} are costing you the most time. Set your goal and see exactly how much ground your program needs to close.`;
-              }
-              if (firstWeakness) {
-                const label = STATION_LABELS[firstWeakness] ?? firstWeakness;
-                return `You flagged ${label} as a weakness. Set your goal time and we\'ll show you what closing that gap looks like.`;
-              }
-              return 'Assessment week will map your station profile. Every session after that has a reason.';
-            })()}
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  function renderHyroxRaceDay() {
-    const hasRealSplits = (data.race_data_source === 'api' || data.race_data_source === 'manual') && data.station_splits !== null;
-    const weaknesses = data.hyrox_weaknesses ?? [];
-    const day1 = hasRealSplits ? splitsToRadarValues(data.station_splits!) : weaknessesToRadarValues(weaknesses);
-    const [h, m] = (data.hyrox_goal_time || '1:30').split(':').map(Number);
-    const goalMinsTotal = (h || 0) * 60 + (m || 0);
-    const raceDay = getDivisionBenchmarks(data.hyrox_division || 'men-open', goalMinsTotal, day1);
-
-    const prevTimeSecs = data.previous_race_time ? parseTimeToSecs(data.previous_race_time) : 0;
-    const goalTimeSecs = parseTimeToSecs(data.hyrox_goal_time || '1:30');
-    const prevTimeMins = prevTimeSecs / 60;
-    const goalTimeMins = goalTimeSecs / 60;
-    const readiness = prevTimeSecs > 0 ? Math.min(99, Math.round((goalTimeMins / prevTimeMins) * 100)) : 0;
-    const improvementMins = prevTimeSecs > 0 ? Math.round(prevTimeMins - goalTimeMins) : 0;
-
-    // Run splits are always MM:SS — bypass parseTimeToSecs H:MM ambiguity logic
-    const parseMMSS = (t: string): number => {
-      const p = t.split(':').map(Number);
-      return p.length === 2 ? p[0] * 60 + p[1] : 0;
-    };
-    const formatFinishTime = (mmss: string): string => {
-      const totalMins = parseMMSS(mmss) / 60;
-      if (totalMins < 60) return mmss;
-      const h = Math.floor(totalMins / 60);
-      const m = Math.round(totalMins % 60);
-      return `${h}:${String(m).padStart(2, '0')}`;
-    };
-    const RUN_KEYS = ['run1','run2','run3','run4','run5','run6','run7','run8'];
-    const totalRunSecs = data.run_splits
-      ? RUN_KEYS.reduce((sum, k) => {
-          const raw = data.run_splits![k];
-          const secs = raw ? parseMMSS(raw) : 0;
-          console.log(`[runSplit] ${k}: "${raw}" → ${secs}s`);
-          return sum + secs;
-        }, 0)
-      : 0;
-    const roxzoneSecs = data.roxzone_time ? parseMMSS(data.roxzone_time) : 0;
-    console.log(`[runSplit] roxzone: "${data.roxzone_time}" → ${roxzoneSecs}s | total: ${totalRunSecs + roxzoneSecs}s`);
-    const totalRunningTimeSecs = totalRunSecs + roxzoneSecs;
-
-    return (
-      <View style={[styles.stepContent, { alignItems: 'center' }]}>
-        <Text style={[styles.label, { textAlign: 'center' }]}>Here's your gap.</Text>
-        <Text style={[styles.sublabel, { textAlign: 'center' }]}>Your projected station profile with training</Text>
-
-        {readiness > 0 && (
-          <View style={{ alignItems: 'center', marginTop: 4 }}>
-            <Text style={{ color: Colors.accent, fontSize: 52, fontWeight: '700', letterSpacing: -2, lineHeight: 56 }}>{readiness}%</Text>
-            <Text style={{ color: Colors.textSecondary, fontSize: 12, letterSpacing: 1 }}>RACE READINESS</Text>
-          </View>
-        )}
-
-        {data.previous_race_time && data.hyrox_goal_time && (
-          <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch' }}>
-            <View style={{ flex: 1, backgroundColor: Colors.nested, borderRadius: 12, padding: 14, alignItems: 'center' }}>
-              <Text style={{ color: Colors.textSecondary, fontSize: 10, fontWeight: '600', letterSpacing: 1.5, marginBottom: 4 }}>YOU NOW</Text>
-              <Text style={{ color: Colors.textSecondary, fontSize: 26, fontWeight: '700' }}>{formatFinishTime(data.previous_race_time)}</Text>
-            </View>
-            <View style={{ flex: 1, backgroundColor: Colors.card, borderRadius: 12, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(232,255,71,0.3)' }}>
-              <Text style={{ color: Colors.accent, fontSize: 10, fontWeight: '600', letterSpacing: 1.5, marginBottom: 4 }}>WITH TRAINING</Text>
-              <Text style={{ color: Colors.accent, fontSize: 26, fontWeight: '700' }}>{data.hyrox_goal_time}</Text>
-            </View>
-          </View>
-        )}
-
-        {improvementMins > 0 && (
-          <Text style={{ color: Colors.textSecondary, fontSize: 13, textAlign: 'center' }}>
-            {improvementMins} minute{improvementMins !== 1 ? 's' : ''} to find through training
-          </Text>
-        )}
-
-        {data.run_splits && totalRunningTimeSecs > 0 && (
-          <View style={{ alignItems: 'center', gap: 2 }}>
-            <Text style={{ color: Colors.textSecondary, fontSize: 20, fontWeight: '700' }}>{secsToMMSS(Math.round(totalRunningTimeSecs / 8.7))}</Text>
-            <Text style={{ color: Colors.textSecondary, fontSize: 10, letterSpacing: 1.5, fontWeight: '600' }}>AVG 1K PACE</Text>
-          </View>
-        )}
-
-        <View style={{ marginTop: -40 }}>
-          <RadarChart day1={day1} raceDay={raceDay} size={260} />
-        </View>
-
-        <View style={[styles.coachingCard, { alignSelf: 'stretch', marginTop: -20 }]}>
-          <Text style={styles.coachingText}>{(() => {
-            const splits = data.station_splits;
-            if (!splits) return improvementMins > 0 ? `${improvementMins} minutes between you and your goal. Your program is built around closing that gap — starting with your weakest station.` : 'Your program is built around your goal time. Every session has a reason — and it starts at your weakest station.';
-            const STATION_NAMES: Record<string, string> = {
-              ski_erg: 'Ski Erg', sled_push: 'Sled Push', sled_pull: 'Sled Pull',
-              burpee_broad_jump: 'Burpee Broad Jumps', burpee_broad_jumps: 'Burpee Broad Jumps',
-              row_erg: 'Row Erg', farmers_carry: 'Farmers Carry',
-              sandbag_lunges: 'Sandbag Lunges', wall_balls: 'Wall Balls',
-            };
-            const weakest = Object.entries(splits).reduce<[string, number]>(
-              ([wk, wt], [k, v]) => { const s = parseMMSS(v); return s > wt ? [k, s] : [wk, wt]; },
-              ['', 0]
-            );
-            const name = STATION_NAMES[weakest[0]] ?? weakest[0];
-            const verb = ['Wall Balls','Sandbag Lunges','Burpee Broad Jumps'].includes(name) ? 'are' : 'is';
-            return `Your ${name} ${verb} costing you the most time right now. Every session in your program has a reason — and it starts here.`;
-          })()}</Text>
-        </View>
-      </View>
-    );
-  }
-
   function renderBackground(isHyrox: boolean) {
     const opts = isHyrox
       ? [
@@ -1396,80 +1188,58 @@ export default function OnboardingScreen({ navigation }: Props) {
     );
   }
 
-  function renderTrainingSetup() {
-    const envOpts = [
-      { label: 'Full Gym Access', sub: 'Commercial gym with HYROX equipment', value: 'full', icon: 'layers' as const },
-      { label: 'Home Gym', sub: 'Some equipment at home', value: 'home', icon: 'home' as const },
-      { label: 'Minimal Equipment', sub: 'Bodyweight + running only', value: 'minimal', icon: 'user' as const },
+  function renderEquipmentChecklist() {
+    const EQUIP_ITEMS = [
+      'Ski Erg', 'Row Erg', 'Sled Push/Pull', 'Pull-up Bar',
+      'Barbell', 'Cables', 'Dumbbells', 'Kettlebells',
+      'Sandbag', 'Wall Ball', 'Assault Bike', 'Treadmill',
     ];
-    const equipmentItems = [
-      'Ski Erg', 'Row Erg', 'Sled', 'Dumbbells', 'Barbell & Plates',
-      'Kettlebells', 'Sandbags', 'Wall Balls', 'Assault / Echo Bike', 'Pull-up Bar',
-    ];
+    const allSelected = EQUIP_ITEMS.every(i => data.equipment_access.includes(i));
     return (
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 16 }}>
-        <Text style={styles.label}>Quick Setup</Text>
-        <Text style={styles.sublabel}>We'll adapt workouts to your situation</Text>
-        <View style={{ gap: 10 }}>
-          {envOpts.map(o => (
-            <TouchableOpacity key={o.value} style={[styles.descOption, data.equipment_access === o.value && styles.descOptionSelected]}
-              onPress={() => set('equipment_access', o.value)}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <Feather name={o.icon} size={20} color={Colors.accent} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.descOptionTitle, data.equipment_access === o.value && { color: '#e8ff47' }]}>{o.label}</Text>
-                  <Text style={styles.descOptionSub}>{o.sub}</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
+        <Text style={styles.label}>What equipment do you have access to?</Text>
+        <Text style={styles.sublabel}>Select everything available to you</Text>
+        <TouchableOpacity style={{ alignSelf: 'flex-end' }}
+          onPress={() => setData(prev => ({ ...prev, equipment_access: allSelected ? [] : EQUIP_ITEMS }))}>
+          <Text style={{ color: '#e8ff47', fontSize: 13, fontWeight: '600' }}>
+            {allSelected ? 'Deselect All' : 'Select All'}
+          </Text>
+        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          {EQUIP_ITEMS.map(item => {
+            const selected = data.equipment_access.includes(item);
+            return (
+              <TouchableOpacity
+                key={item}
+                style={{
+                  width: '48%',
+                  backgroundColor: selected ? '#1a1a1a' : '#111111',
+                  borderWidth: selected ? 1.5 : 0,
+                  borderColor: '#e8ff47',
+                  borderRadius: 10,
+                  paddingVertical: 20,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onPress={() => toggleEquipment(item)}
+              >
+                <Text style={{ color: selected ? '#e8ff47' : '#f0ede8', fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
+                  {item}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
-        {data.equipment_access !== '' && data.equipment_access !== 'full' && (
-          <View style={{ gap: 8, marginTop: 4 }}>
-            <Text style={styles.sectionHeader}>WHAT DO YOU HAVE ACCESS TO?</Text>
-            {equipmentItems.map(item => {
-              const selected = data.hyrox_equipment_list.includes(item);
-              return (
-                <TouchableOpacity key={item} style={[styles.weaknessCard, selected && styles.weaknessCardSelected]}
-                  onPress={() => toggleEquipment(item)}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Text style={[styles.weaknessName, selected && styles.weaknessNameSelected, { flex: 1 }]}>{item}</Text>
-                    {selected && <Feather name="check" size={16} color="#e8ff47" />}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
       </ScrollView>
     );
   }
 
+  function renderTrainingSetup() {
+    return renderEquipmentChecklist();
+  }
+
   function renderGfEquipment() {
-    const opts = [
-      { label: 'Full gym', sub: 'Barbells, dumbbells, machines, pull-up bar', value: 'full', icon: 'layers' as const },
-      { label: 'Home setup', sub: 'Some equipment at home', value: 'home', icon: 'home' as const },
-      { label: 'No equipment', sub: 'Bodyweight and running only', value: 'none', icon: 'user' as const },
-    ];
-    return (
-      <View style={styles.stepContent}>
-        <Text style={styles.label}>What equipment do you have access to?</Text>
-        <View style={{ gap: 10 }}>
-          {opts.map(o => (
-            <TouchableOpacity key={o.value} style={[styles.descOption, data.equipment_access === o.value && styles.descOptionSelected]}
-              onPress={() => set('equipment_access', o.value)}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <Feather name={o.icon} size={20} color={Colors.accent} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.descOptionTitle, data.equipment_access === o.value && { color: '#e8ff47' }]}>{o.label}</Text>
-                  <Text style={styles.descOptionSub}>{o.sub}</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-    );
+    return renderEquipmentChecklist();
   }
 
   function renderTrainingDays() {
@@ -1502,17 +1272,18 @@ export default function OnboardingScreen({ navigation }: Props) {
           </View>
         ) : (
           <View style={styles.coachingCard}>
-            <Text style={styles.coachingText}>Recommended: 3–5 days — Most athletes see best results with 3–5 training days per week, allowing for adequate recovery.</Text>
+            <Text style={styles.coachingText}>Recommended: 4–6 days — Most Hyrox athletes train 4–6 days per week for best results.</Text>
           </View>
         )}
       </View>
     );
   }
 
-  function renderSessionDetails() {
+  function renderHyroxAvailability() {
     return (
       <View style={styles.stepContent}>
-        <Text style={styles.label}>When are you available to train?</Text>
+        <Text style={styles.label}>When do you train?</Text>
+        <Text style={styles.sublabel}>Select your availability and session length</Text>
         <View style={{ gap: 10 }}>
           {[
             { label: 'Mornings (AM)', sub: 'Early sessions, before work or school', value: 'am' },
@@ -1536,50 +1307,53 @@ export default function OnboardingScreen({ navigation }: Props) {
             </TouchableOpacity>
           ))}
         </View>
+      </View>
+    );
+  }
 
-        {data.training_availability === 'both' && (
-          <View style={styles.doublesCard}>
-            <Text style={styles.doublesQuestion}>On training days, can you train in BOTH the AM and PM on the same day?</Text>
-            <View style={{ gap: 8, marginTop: 10 }}>
-              {[
-                { label: 'Yes — I can do AM + PM sessions', value: true },
-                { label: 'No — I alternate, not both same day', value: false },
-              ].map(o => (
-                <TouchableOpacity key={String(o.value)} style={[styles.option, data.doubles_eligible === o.value && styles.optionSelected]}
-                  onPress={() => {
-                    set('doubles_eligible', o.value);
-                    if (!o.value) set('doubles_days', []);
-                  }}>
-                  <Text style={[styles.optionText, data.doubles_eligible === o.value && styles.optionTextSelected]}>{o.label}</Text>
-                </TouchableOpacity>
-              ))}
+  function renderHyroxDoubles() {
+    return (
+      <View style={styles.stepContent}>
+        <Text style={styles.label}>Can you train twice in a day?</Text>
+        <Text style={styles.sublabel}>This unlocks AM + PM sessions for advanced programming</Text>
+        <View style={{ gap: 10 }}>
+          {[
+            { label: 'Yes — I can do AM + PM sessions', value: true },
+            { label: 'No — one session per day', value: false },
+          ].map(o => (
+            <TouchableOpacity key={String(o.value)} style={[styles.option, data.doubles_eligible === o.value && styles.optionSelected]}
+              onPress={() => {
+                set('doubles_eligible', o.value);
+                if (!o.value) set('doubles_days', []);
+              }}>
+              <Text style={[styles.optionText, data.doubles_eligible === o.value && styles.optionTextSelected]}>{o.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {data.doubles_eligible === true && (
+          <View style={{ marginTop: 16 }}>
+            <Text style={styles.sectionHeader}>WHICH DAYS CAN YOU DOUBLE?</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              {data.training_days.map(day => {
+                const idx = WEEK_DAYS.indexOf(day);
+                const label = idx >= 0 ? WEEK_LABELS[idx] : day.slice(0, 1).toUpperCase();
+                const selected = data.doubles_days.includes(day);
+                return (
+                  <TouchableOpacity
+                    key={day}
+                    style={[styles.dayBtn, selected && styles.dayBtnSelected]}
+                    onPress={() => {
+                      const next = selected
+                        ? data.doubles_days.filter(d => d !== day)
+                        : [...data.doubles_days, day];
+                      set('doubles_days', next);
+                    }}>
+                    <Text style={[styles.dayBtnText, selected && styles.dayBtnTextSelected]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-
-            {data.doubles_eligible === true && (
-              <View style={{ marginTop: 16 }}>
-                <Text style={styles.sectionHeader}>WHICH DAYS CAN YOU DOUBLE?</Text>
-                <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                  {data.training_days.map(day => {
-                    const idx = WEEK_DAYS.indexOf(day);
-                    const label = idx >= 0 ? WEEK_LABELS[idx] : day.slice(0, 1).toUpperCase();
-                    const selected = data.doubles_days.includes(day);
-                    return (
-                      <TouchableOpacity
-                        key={day}
-                        style={[styles.dayBtn, selected && styles.dayBtnSelected]}
-                        onPress={() => {
-                          const next = selected
-                            ? data.doubles_days.filter(d => d !== day)
-                            : [...data.doubles_days, day];
-                          set('doubles_days', next);
-                        }}>
-                        <Text style={[styles.dayBtnText, selected && styles.dayBtnTextSelected]}>{label}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
           </View>
         )}
       </View>
@@ -1589,6 +1363,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   function renderWearable() {
     const opts = [
       { label: 'Whoop', sub: 'Direct API connection', value: 'whoop', icon: 'activity' as const },
+      { label: 'Garmin', sub: 'Via Apple Health or Google Fit', value: 'garmin', icon: 'watch' as const },
       { label: 'Apple Watch', sub: 'Via Apple Health', value: 'apple-watch', icon: 'watch' as const },
       { label: 'Amazfit / Zepp', sub: 'Via Apple Health or Google Fit', value: 'amazfit', icon: 'watch' as const },
       { label: 'Polar', sub: 'Via Apple Health or Google Fit', value: 'polar', icon: 'activity' as const },
@@ -1634,17 +1409,49 @@ export default function OnboardingScreen({ navigation }: Props) {
   }
 
   function renderReferral() {
+    const opts = [
+      { label: 'Instagram', value: 'Instagram' },
+      { label: 'TikTok', value: 'TikTok' },
+      { label: 'Friend or Family', value: 'Friend or Family' },
+      { label: 'Athlete Referral', value: 'Athlete Referral', sub: 'A friend who uses Peak 65' },
+      { label: 'App Store', value: 'App Store' },
+      { label: 'YouTube', value: 'YouTube' },
+      { label: 'Other', value: 'Other' },
+    ];
+    const isOtherSelected = data.referral_source === 'Other' || data.referral_source.startsWith('Other: ');
     return (
       <View style={styles.stepContent}>
         <Text style={styles.label}>How did you hear about Peak 65?</Text>
         <Text style={styles.sublabel}>Help us understand how athletes like you find us</Text>
         <View style={{ gap: 10 }}>
-          {['Instagram','TikTok','Friend or Family','App Store','YouTube','Other'].map(v => (
-            <TouchableOpacity key={v} style={[styles.option, data.referral_source === v && styles.optionSelected]}
-              onPress={() => set('referral_source', v)}>
-              <Text style={[styles.optionText, data.referral_source === v && styles.optionTextSelected]}>{v}</Text>
-            </TouchableOpacity>
-          ))}
+          {opts.map(o => {
+            const selected = o.value === 'Other' ? isOtherSelected : data.referral_source === o.value;
+            return (
+              <TouchableOpacity key={o.value} style={[styles.option, selected && styles.optionSelected]}
+                onPress={() => {
+                  if (o.value === 'Other') {
+                    set('referral_source', referralOther ? `Other: ${referralOther}` : 'Other');
+                  } else {
+                    set('referral_source', o.value);
+                  }
+                }}>
+                <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{o.label}</Text>
+                {o.sub && <Text style={[styles.optionText, { fontSize: 13, color: '#8a877f', marginTop: 2 }]}>{o.sub}</Text>}
+              </TouchableOpacity>
+            );
+          })}
+          {isOtherSelected && (
+            <TextInput
+              style={{ backgroundColor: '#1a1a1a', color: '#f0ede8', padding: 12, borderRadius: 8 }}
+              placeholder="Tell us where you heard about us"
+              placeholderTextColor="#8a877f"
+              value={referralOther}
+              onChangeText={text => {
+                setReferralOther(text);
+                set('referral_source', text ? `Other: ${text}` : 'Other');
+              }}
+            />
+          )}
         </View>
       </View>
     );
@@ -1741,7 +1548,7 @@ export default function OnboardingScreen({ navigation }: Props) {
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Equipment</Text>
-            <Text style={styles.summaryValue}>{data.equipment_access || '—'}</Text>
+            <Text style={styles.summaryValue}>{data.equipment_access.length > 0 ? `${data.equipment_access.length} items` : '—'}</Text>
           </View>
         </View>
       </View>
@@ -1757,8 +1564,6 @@ export default function OnboardingScreen({ navigation }: Props) {
       case 'hyroxHistory':      return renderHyroxHistory();
       case 'hyroxResultsImport':return renderHyroxResultsImport();
       case 'hyroxStationConf':  return renderHyroxStationConf();
-      case 'hyroxRadarChart':   return renderHyroxRadarChart();
-      case 'hyroxRaceDay':      return renderHyroxRaceDay();
       case 'hyroxBackground':   return renderBackground(true);
       case 'gfBackground':      return renderBackground(false);
       case 'gfPrimaryGoals':    return renderGfPrimaryGoals();
@@ -1768,7 +1573,8 @@ export default function OnboardingScreen({ navigation }: Props) {
       case 'trainingSetup':     return renderTrainingSetup();
       case 'gfEquipment':       return renderGfEquipment();
       case 'trainingDays':      return renderTrainingDays();
-      case 'sessionDetails':    return renderSessionDetails();
+      case 'hyroxAvailability': return renderHyroxAvailability();
+      case 'hyroxDoubles':      return renderHyroxDoubles();
       case 'wearable':          return renderWearable();
       case 'referral':          return renderReferral();
       case 'gfClosing':         return renderGfClosing();
@@ -1780,13 +1586,11 @@ export default function OnboardingScreen({ navigation }: Props) {
   function continueLabel(): string {
     if (currentKey === 'onboardingSummary') return 'Build My Plan';
     if (currentKey === 'gfClosing') return 'Build My Plan';
-    if (currentKey === 'hyroxRadarChart') return 'Set Your Race Day Goal';
-    if (currentKey === 'hyroxRaceDay') return 'Lock In My Plan';
     return 'Continue';
   }
 
   const noFooterSteps: StepKey[] = ['goal', 'hyroxHistory', ...(showManualSplits ? ['hyroxResultsImport' as StepKey] : [])];
-  const scrollableSteps: StepKey[] = ['hyroxRace', 'hyroxResultsImport', 'hyroxStationConf', 'wearable', 'trainingSetup'];
+  const scrollableSteps: StepKey[] = ['hyroxRace', 'hyroxResultsImport', 'hyroxStationConf', 'wearable', 'trainingSetup', 'gfEquipment'];
 
   // ── Closing phase renders ─────────────────────────────────────────────────────
 
@@ -1986,7 +1790,7 @@ export default function OnboardingScreen({ navigation }: Props) {
                   color: '#f0ede8',
                   marginBottom: 6,
                   fontFamily: 'BarlowCondensed_700Bold',
-                }}>Work Capacity AMRAP</Text>
+                }}>Conditioning Test</Text>
                 <Text style={{
                   fontSize: 13,
                   color: '#8a877f',
@@ -2029,7 +1833,7 @@ export default function OnboardingScreen({ navigation }: Props) {
                   fontSize: 13,
                   color: '#8a877f',
                   lineHeight: 19,
-                }}>Your full erg profile locked in. Now the AI has everything it needs.</Text>
+                }}>Your full erg profile locked in. Now your coach has everything they need.</Text>
               </View>
             </>
           ) : (
@@ -2119,7 +1923,7 @@ export default function OnboardingScreen({ navigation }: Props) {
                   color: '#f0ede8',
                   marginBottom: 6,
                   fontFamily: 'BarlowCondensed_700Bold',
-                }}>Work Capacity AMRAP</Text>
+                }}>Conditioning Test</Text>
                 <Text style={{
                   fontSize: 13,
                   color: '#8a877f',
@@ -2175,6 +1979,7 @@ export default function OnboardingScreen({ navigation }: Props) {
 
     const handleBuildProgram = async () => {
       if (!selectedStartDate) return;
+      setIsGenerating(true);
       const { data: auth } = await supabase.auth.getUser();
       if (!auth?.user) return;
       const formattedDate = formatDate(selectedStartDate);
@@ -2186,6 +1991,36 @@ export default function OnboardingScreen({ navigation }: Props) {
       setChecklistStep(0);
       callGenerateAssessment();
     };
+
+    if (isGenerating) {
+      return (
+        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+          <Text style={[styles.logo, { color: '#e8ff47' }]}>Peak 65</Text>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 }}>
+            <Text style={{
+              fontSize: 38,
+              fontWeight: '800',
+              color: '#f0ede8',
+              fontFamily: 'BarlowCondensed_700Bold',
+              textAlign: 'center',
+              marginBottom: 12,
+              lineHeight: 44,
+            }}>
+              Building your program.
+            </Text>
+            <Text style={{ fontSize: 14, color: '#8a877f', marginBottom: 40, textAlign: 'center' }}>
+              This takes about 10 seconds.
+            </Text>
+            <ActivityIndicator size="large" color="#e8ff47" />
+            <View style={{ marginTop: 48, paddingHorizontal: 8 }}>
+              <Text style={{ color: '#8a877f', fontSize: 14, textAlign: 'center', lineHeight: 22 }}>
+                {GENERATING_TIPS[generatingTipIdx]}
+              </Text>
+            </View>
+          </View>
+        </SafeAreaView>
+      );
+    }
 
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -2440,12 +2275,12 @@ const styles = StyleSheet.create({
   textInput:  { backgroundColor: Colors.card, borderWidth:1, borderColor: Colors.border, borderRadius:10, paddingHorizontal:16, paddingVertical:14, color: Colors.textPrimary, fontSize:18 },
 
   option:          { backgroundColor: Colors.card, borderWidth:1, borderColor: Colors.border, borderRadius:10, paddingHorizontal:16, paddingVertical:15 },
-  optionSelected:  { backgroundColor: '#1a1a1a', borderLeftWidth: 3, borderLeftColor: '#e8ff47' },
+  optionSelected:  { backgroundColor: '#1a1a1a', borderWidth: 1.5, borderColor: '#e8ff47' },
   optionText:      { color: Colors.textPrimary, fontSize:16, lineHeight:22 },
   optionTextSelected: { color: '#e8ff47', fontWeight:'600' },
 
   goalCard:          { backgroundColor: Colors.card, borderWidth:1.5, borderColor: Colors.border, borderRadius:16, overflow:'hidden' },
-  goalCardSelected:  { backgroundColor: '#1a1a1a', borderLeftWidth: 3, borderLeftColor: '#e8ff47' },
+  goalCardSelected:  { backgroundColor: '#1a1a1a', borderWidth: 1.5, borderColor: '#e8ff47' },
   goalCardInner:     { padding:20, gap:8 },
   goalCardTitle:     { color: Colors.textPrimary, fontSize:20, fontWeight:'700' },
   goalCardTitleSelected: { color: '#e8ff47' },
@@ -2454,7 +2289,7 @@ const styles = StyleSheet.create({
 
   twoCardRow:   { flexDirection:'row', gap:10 },
   halfCard:     { flex:1, backgroundColor: Colors.card, borderWidth:1.5, borderColor: Colors.border, borderRadius:14, height:56, alignItems:'center', justifyContent:'center' },
-  halfCardSelected: { backgroundColor: '#1a1a1a', borderLeftWidth: 3, borderLeftColor: '#e8ff47' },
+  halfCardSelected: { backgroundColor: '#1a1a1a', borderWidth: 1.5, borderColor: '#e8ff47' },
   halfCardTitle:{ color: Colors.textPrimary, fontSize:16, fontWeight:'700' },
 
   toggleRow:    { flexDirection:'row', backgroundColor: Colors.nested, borderRadius:10, padding:3, gap:3 },
@@ -2492,13 +2327,13 @@ const styles = StyleSheet.create({
   percentileHint: { color: Colors.textSecondary, fontSize:12, textAlign:'center', marginTop:-4 },
 
   presetCard:   { backgroundColor: Colors.card, borderWidth:1, borderColor: Colors.border, borderRadius:10, paddingHorizontal:16, paddingVertical:12, flexDirection:'row', alignItems:'center', justifyContent:'space-between' },
-  presetCardSelected: { borderColor: Colors.accent, borderWidth:2 },
+  presetCardSelected: { borderColor: Colors.accent, borderWidth: 1.5 },
   presetLabel:  { color: Colors.textPrimary, fontSize:15, fontWeight:'600' },
   presetSub:    { color: Colors.textSecondary, fontSize:12, marginTop:2 },
   presetTime:   { color: Colors.accent, fontSize:18, fontWeight:'700' },
 
   weaknessCard:         { backgroundColor: '#111111', borderRadius:12, padding:14, borderLeftWidth:3, borderLeftColor:'transparent' },
-  weaknessCardSelected: { backgroundColor: '#1a1a1a', borderLeftColor: '#e8ff47' },
+  weaknessCardSelected: { backgroundColor: '#1a1a1a', borderWidth: 1.5, borderColor: '#e8ff47', borderLeftWidth: 1.5, borderLeftColor: '#e8ff47' },
   weaknessName:         { color: Colors.textPrimary, fontSize:15, fontWeight:'600' },
   weaknessNameSelected: { color: '#e8ff47' },
   weaknessDesc:         { color: '#8a877f', fontSize:13, marginTop:3, lineHeight:18 },
@@ -2527,13 +2362,13 @@ const styles = StyleSheet.create({
   coachingText:  { color: Colors.textPrimary, fontSize:14, lineHeight:22 },
 
   descOption:      { backgroundColor: Colors.card, borderWidth:1, borderColor: Colors.border, borderRadius:12, padding:14 },
-  descOptionSelected: { backgroundColor: '#1a1a1a', borderLeftWidth: 3, borderLeftColor: '#e8ff47' },
+  descOptionSelected: { backgroundColor: '#1a1a1a', borderWidth: 1.5, borderColor: '#e8ff47' },
   descOptionTitle: { color: Colors.textPrimary, fontSize:15, fontWeight:'600' },
   descOptionSub:   { color: Colors.textSecondary, fontSize:13, marginTop:3, lineHeight:18 },
 
   twoByTwoGrid:  { flexDirection:'row', flexWrap:'wrap', gap:10 },
   gridBtn:       { flex:1, minWidth:'45%', backgroundColor: Colors.card, borderWidth:1, borderColor: Colors.border, borderRadius:12, paddingVertical:18, alignItems:'center' },
-  gridBtnSelected: { backgroundColor: '#1a1a1a', borderLeftWidth: 3, borderLeftColor: '#e8ff47' },
+  gridBtnSelected: { backgroundColor: '#1a1a1a', borderWidth: 1.5, borderColor: '#e8ff47' },
   gridBtnText:   { color: Colors.textPrimary, fontSize:16, fontWeight:'600' },
 
   unitToggleRow:  { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:4 },
