@@ -1519,7 +1519,7 @@ export default function OnboardingScreen({ navigation }: Props) {
         ) : (
           <Text style={styles.label}>Your program is ready to build{data.first_name ? `, ${data.first_name}` : ''}.</Text>
         )}
-        <View style={{ gap: 10 }}>
+        <View style={{ gap: 0 }}>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Training days</Text>
             <Text style={styles.summaryValue}>{data.training_days_count} days / week</Text>
@@ -2026,7 +2026,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <Text style={styles.logo}>Peak 65</Text>
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 16 }}
           showsVerticalScrollIndicator={false}
         >
           {/* Header */}
@@ -2044,7 +2044,7 @@ export default function OnboardingScreen({ navigation }: Props) {
           <Text style={{
             fontSize: 14,
             color: '#8a877f',
-            marginBottom: 32,
+            marginBottom: 16,
             lineHeight: 20,
           }}>
             The sooner you start, the smarter your program gets.
