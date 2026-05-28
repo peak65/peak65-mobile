@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import type { ProgramSession } from '../app/_layout';
+import { supabase } from '../lib/supabase';
 
 type PickedImage = { base64: string; uri: string };
 
@@ -35,6 +36,7 @@ async function pickImage(): Promise<PickedImage | null> {
 
 function HRUploadPrompt({
   session, sessionLogId, userId, programId, dayName,
+  session_type, prescribed_zone,
   onDebrief, onInvalid, onNetworkError, onSkip,
 }: {
   session?: ProgramSession;
@@ -42,7 +44,9 @@ function HRUploadPrompt({
   userId: string | null;
   programId?: string;
   dayName?: string;
-  onDebrief: (result: any) => void;
+  session_type?: string;
+  prescribed_zone?: string;
+  onDebrief: () => void;
   onInvalid: () => void;
   onNetworkError: () => void;
   onSkip: () => void;
@@ -50,7 +54,21 @@ function HRUploadPrompt({
   const [zoneChart, setZoneChart] = useState<PickedImage | null>(null);
   const [hrCurve, setHrCurve]     = useState<PickedImage | null>(null);
   const [loading, setLoading]     = useState(false);
+  const [errorMsg, setErrorMsg]   = useState<string | null>(null);
+  const [showCoachingNote, setShowCoachingNote] = useState(false);
+  const [coachingNote, setCoachingNote]         = useState<string | null>(null);
+  const [wearableSource, setWearableSource]     = useState('unknown');
   const spinVal = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!userId) return;
+    supabase
+      .from('profiles')
+      .select('wearable')
+      .eq('id', userId)
+      .single()
+      .then(({ data }) => { if (data?.wearable) setWearableSource(data.wearable); });
+  }, [userId]);
 
   useEffect(() => {
     if (!loading) return;
@@ -63,9 +81,20 @@ function HRUploadPrompt({
   const spin = spinVal.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   async function analyze() {
+    if (!sessionLogId) {
+      setErrorMsg('Session must be saved before uploading HR data.');
+      return;
+    }
+    setErrorMsg(null);
     setLoading(true);
     try {
-      const body: Record<string, any> = { sessionLogId, userId };
+      const body: Record<string, any> = {
+        sessionLogId,
+        userId,
+        session_type:    session_type    ?? 'unknown',
+        prescribed_zone: prescribed_zone ?? 'unknown',
+        wearable_source: wearableSource,
+      };
       if (zoneChart) body.zoneChartBase64 = zoneChart.base64.replace(/^data:image\/\w+;base64,/, '');
       if (hrCurve)   body.hrCurveBase64  = hrCurve.base64.replace(/^data:image\/\w+;base64,/, '');
 
@@ -80,7 +109,9 @@ function HRUploadPrompt({
       const data = await res.json();
       if (!data.success || data.analysis?.image_valid === false) { onInvalid(); return; }
 
-      onDebrief(data);
+      const notes = data.hr_coaching_notes || data.analysis?.hr_coaching_notes || null;
+      setCoachingNote(notes);
+      setShowCoachingNote(true);
     } catch {
       onNetworkError();
     } finally {
@@ -89,6 +120,33 @@ function HRUploadPrompt({
   }
 
   const hasImage = !!(zoneChart || hrCurve);
+
+  if (showCoachingNote) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#080808' }} edges={['bottom']}>
+        <StatusBar barStyle="light-content" />
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 32, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+          <View style={{ alignItems: 'center', marginBottom: 20 }}>
+            <Feather name="check-circle" size={40} color="#e8ff47" />
+          </View>
+          <View style={{ backgroundColor: '#111111', borderLeftWidth: 3, borderLeftColor: '#e8ff47', padding: 16, borderRadius: 4, marginBottom: 20 }}>
+            <Text style={{ color: '#e8ff47', fontSize: 12, fontWeight: '700', letterSpacing: 3, fontFamily: 'BarlowCondensed_700Bold', marginBottom: 10 }}>
+              COACHING FEEDBACK
+            </Text>
+            <Text style={{ color: '#f0ede8', fontSize: 15, lineHeight: 24 }}>
+              {coachingNote || 'HR data saved. Your coach will review this with your next program.'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={{ backgroundColor: '#e8ff47', borderRadius: 8, paddingVertical: 14, alignItems: 'center' }}
+            onPress={onDebrief}
+          >
+            <Text style={{ color: '#080808', fontSize: 16, fontWeight: '700' }}>Done →</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#080808' }} edges={['bottom']}>
@@ -133,6 +191,9 @@ function HRUploadPrompt({
 
         {/* Upload buttons or loading */}
         <View style={{ margin: 24, gap: 12 }}>
+          {errorMsg && (
+            <Text style={{ color: '#ff6b6b', fontSize: 14, textAlign: 'center' }}>{errorMsg}</Text>
+          )}
           {loading ? (
             <View style={{ alignItems: 'center', paddingVertical: 24 }}>
               {/* Thumbnails */}

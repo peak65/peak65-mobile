@@ -212,6 +212,8 @@ export default function LogSessionScreen() {
               <HRUploadPrompt
                 sessionLogId={sessionLogId}
                 userId={userId}
+                session_type={sessionType}
+                prescribed_zone={sessionType === 'time_trial' ? 'zone4' : sessionType === 'z2' ? 'zone2' : 'zone4'}
                 onDebrief={() => navigation.goBack()}
                 onInvalid={() => {}}
                 onNetworkError={() => {}}
