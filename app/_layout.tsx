@@ -36,7 +36,6 @@ import HomeScreen from './(main)/home';
 import ProgramScreen from './(main)/program';
 import HistoryScreen from './(main)/history';
 import ProfileScreen from './(main)/profile';
-import LiveWorkoutScreen from './(main)/live-workout';
 import WaitingScreen from './(main)/waiting';
 import CoachScreen from './(main)/coach';
 import CoachAthleteScreen from './(main)/coach-athlete';
@@ -118,7 +117,6 @@ export type MainStackParamList = {
   Onboarding: undefined;
   Generating: undefined;
   Tabs: undefined;
-  LiveWorkout: { sessionJson: string; programId: string; weekNumber: number; dayName: string };
   LogSession: { sessionJson: string; programId: string; weekNumber: number; dayName: string };
   Waiting: undefined;
   CoachAthleteDetail: { athleteId: string };
@@ -216,7 +214,6 @@ function MainNavigator({ initialRoute }: { initialRoute: keyof MainStackParamLis
       <MainStack.Screen name="Onboarding"        component={OnboardingScreen} />
       <MainStack.Screen name="Generating"        component={GeneratingScreen} />
       <MainStack.Screen name="Tabs"              component={MainTabs} />
-      <MainStack.Screen name="LiveWorkout"       component={LiveWorkoutScreen} />
       <MainStack.Screen name="LogSession"        component={LogSessionScreen} options={{ headerShown: false }} />
       <MainStack.Screen name="Waiting"           component={WaitingScreen} />
       <MainStack.Screen name="CoachAthleteDetail" component={CoachAthleteScreen} />

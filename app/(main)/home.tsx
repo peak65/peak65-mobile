@@ -1120,7 +1120,7 @@ export default function HomeScreen() {
           </View>
           <View style={[styles.miniCard, { flex: 1 }]}>
             <View style={styles.streakRow}>
-              <Dumbbell color={Colors.textSecondary} size={18} strokeWidth={1.5} />
+              <Dumbbell color={Colors.accent} size={18} strokeWidth={1.5} />
               <Text style={styles.streakNum}>{Math.round(sessionCount * countupFraction)}</Text>
             </View>
             <Text style={styles.miniCardLabel}>Sessions</Text>

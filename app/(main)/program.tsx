@@ -451,6 +451,7 @@ function DayCard({
   profile: TimeTrialProfile | null;
 }) {
   const isRest = day.type === 'rest' || !day.sessions?.length;
+  const [expanded, setExpanded] = React.useState(isToday);
 
   // ── Trial state (single-value sessions) ─────────────────────────────────────
   const [trialValues, setTrialValues] = useState<Record<number, string>>({});
@@ -743,20 +744,21 @@ function DayCard({
 
   return (
     <>
-    <View style={[styles.dayCard, isToday && styles.dayCardToday]}>
-      <View style={pd.dayHeader}>
+    <View style={[styles.dayCard, isToday && styles.dayCardToday, { borderLeftWidth: isToday ? 2 : 0, borderLeftColor: '#e8ff47' }]}>
+      <TouchableOpacity style={pd.dayHeader} onPress={() => setExpanded(e => !e)}>
         <Text style={pd.dayName}>{day.day.toUpperCase()}</Text>
         <Text style={[pd.dayType, {
-          color: day.type === 'hard' ? '#e8ff47' : day.type === 'easy' ? '#00d4aa' : '#3a3a3a'
+          color: day.type === 'hard' ? '#e8ff47' : day.type === 'easy' ? '#00d4aa' : day.type === 'trial' ? '#e8ff47' : '#3a3a3a'
         }]}>
           {(day.type ?? 'rest').toUpperCase()}
         </Text>
-      </View>
+        <Feather name={expanded ? 'chevron-up' : 'chevron-down'} color='#8a877f' size={16} />
+      </TouchableOpacity>
 
-      {!isRest && (day.sessions ?? []).map((session, si) => (
+      {expanded && !isRest && (day.sessions ?? []).map((session, si) => (
         <View key={si}>
           <SessionDocument session={session} />
-          {(session.log_result !== false) && (
+          {(session.log_result !== false) && (isToday || !isComplete) && (
             <TouchableOpacity
               style={pd.logBtn}
               onPress={() => navigation.navigate('LogSession', {
@@ -1076,9 +1078,9 @@ export default function ProgramScreen() {
               }}
               activeOpacity={0.8}
             >
-              <Feather name="calendar" color={Colors.green} size={22} style={{ marginRight: 12 }} />
+              <Feather name="calendar" color={Colors.accent} size={22} style={{ marginRight: 12 }} />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.nextWeekTitle, { color: Colors.green }]}>
+                <Text style={[styles.nextWeekTitle, { color: Colors.accent }]}>
                   Week {activeProgram.week_number + 1} is ready.
                 </Text>
                 <Text style={styles.nextWeekSub}>Tap the arrows above to view it.</Text>
