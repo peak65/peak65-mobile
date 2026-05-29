@@ -345,6 +345,9 @@ const pd = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 2,
+    minWidth: 48,
+    textAlign: 'right',
+    marginLeft: 'auto',
   },
   logBtn: {
     marginHorizontal: 20,
@@ -452,6 +455,7 @@ function DayCard({
 }) {
   const isRest = day.type === 'rest' || !day.sessions?.length;
   const [expanded, setExpanded] = React.useState(isToday);
+  console.log('[today check]', day.day, isToday);
 
   // ── Trial state (single-value sessions) ─────────────────────────────────────
   const [trialValues, setTrialValues] = useState<Record<number, string>>({});
@@ -742,18 +746,26 @@ function DayCard({
     setCompleteSaving(false);
   }
 
+  const headerInner = (
+    <>
+      <Text style={pd.dayName}>{day.day.toUpperCase()}</Text>
+      <Text style={[pd.dayType, {
+        color: day.type === 'hard' ? '#e8ff47' : day.type === 'easy' ? '#00d4aa' : day.type === 'trial' ? '#e8ff47' : '#3a3a3a'
+      }]}>
+        {(day.type ?? 'rest').toUpperCase()}
+      </Text>
+      {day.type !== 'rest' && <Feather name={expanded ? 'chevron-up' : 'chevron-down'} color='#8a877f' size={16} />}
+    </>
+  );
+
   return (
     <>
     <View style={[styles.dayCard, isToday && styles.dayCardToday, { borderLeftWidth: isToday ? 2 : 0, borderLeftColor: '#e8ff47' }]}>
-      <TouchableOpacity style={pd.dayHeader} onPress={() => setExpanded(e => !e)}>
-        <Text style={pd.dayName}>{day.day.toUpperCase()}</Text>
-        <Text style={[pd.dayType, {
-          color: day.type === 'hard' ? '#e8ff47' : day.type === 'easy' ? '#00d4aa' : day.type === 'trial' ? '#e8ff47' : '#3a3a3a'
-        }]}>
-          {(day.type ?? 'rest').toUpperCase()}
-        </Text>
-        <Feather name={expanded ? 'chevron-up' : 'chevron-down'} color='#8a877f' size={16} />
-      </TouchableOpacity>
+      {day.type === 'rest' ? (
+        <View style={pd.dayHeader}>{headerInner}</View>
+      ) : (
+        <TouchableOpacity style={pd.dayHeader} onPress={() => setExpanded(e => !e)}>{headerInner}</TouchableOpacity>
+      )}
 
       {expanded && !isRest && (day.sessions ?? []).map((session, si) => (
         <View key={si}>
@@ -1116,7 +1128,9 @@ export default function ProgramScreen() {
               style={styles.dayList}
               onLayout={e => { dayListY.current = e.nativeEvent.layout.y; }}
             >
-              {days.map(day => (
+              {days.map(day => {
+                console.log('[today check]', day.day, todayName, isViewingCurrentWeek);
+                return (
                 <View
                   key={day.day}
                   onLayout={e => { dayYOffsets.current[day.day] = e.nativeEvent.layout.y; }}
@@ -1132,7 +1146,8 @@ export default function ProgramScreen() {
                     profile={ttProfile}
                   />
                 </View>
-              ))}
+                );
+              })}
             </View>
           )}
         </ScrollView>
@@ -1155,7 +1170,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16, marginBottom: 8,
     backgroundColor: Colors.card, borderRadius: 14, padding: 16,
   },
-  nextWeekBannerReady: { borderLeftWidth: 3, borderLeftColor: Colors.green },
+  nextWeekBannerReady: { borderLeftWidth: 3, borderLeftColor: '#e8ff47' },
   nextWeekTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
   nextWeekSub:   { color: Colors.textSecondary, fontSize: 12, marginTop: 2 },
 
