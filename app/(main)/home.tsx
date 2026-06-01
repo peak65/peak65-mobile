@@ -28,6 +28,7 @@ import {
 import type { Program, ProgramDay, ProgramSession, TabParamList, MainStackParamList } from '../_layout';
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
+import { Logo } from '../../components/Logo';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
 import { Flags } from '../../lib/flags';
 
@@ -945,7 +946,7 @@ export default function HomeScreen() {
 
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerLogo}>Peak 65</Text>
+          <Logo width={100} />
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={styles.headerDate}>{todayLabel()}</Text>
             {cacheStale && <Text style={{ color: Colors.textSecondary, fontSize: 10, marginTop: 1 }}>Refreshing...</Text>}

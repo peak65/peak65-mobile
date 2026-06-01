@@ -326,8 +326,8 @@ function BrandedLoadingScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: '#080808', alignItems: 'center', justifyContent: 'center' }}>
       <Animated.Image
-        source={require('../assets/splash.png')}
-        style={{ width: 120, height: 120, transform: [{ scale }] }}
+        source={require('../assets/peak65-logo.png')}
+        style={{ width: 200, height: 200 / 1.95, transform: [{ scale }] }}
         resizeMode="contain"
       />
     </View>

@@ -9,6 +9,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList } from '../_layout';
 import { Colors, Fonts } from '../../lib/theme';
+import { Logo } from '../../components/Logo';
 import { Feather } from '@expo/vector-icons';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'UpdateProgram'>;
@@ -706,7 +707,7 @@ export default function UpdateProgramScreen({ navigation }: Props) {
     const animWidth = progressAnim.interpolate({ inputRange: [0, 1], outputRange: [0, genBarWidth] });
     return (
       <SafeAreaView style={s.container} edges={['top', 'bottom']}>
-        <Text style={s.logo}>Peak 65</Text>
+        <Logo width={150} />
         <View style={s.genBody}>
           <Text style={s.genHeading}>Rebuilding your program</Text>
           {genError ? (
@@ -737,7 +738,7 @@ export default function UpdateProgramScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={s.container} edges={['top', 'bottom']}>
-      <Text style={s.logo}>Peak 65</Text>
+      <Logo width={150} />
 
       <View style={s.header}>
         <TouchableOpacity

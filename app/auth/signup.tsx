@@ -16,6 +16,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import type { AuthStackParamList } from '../_layout';
 import { Colors, Fonts } from '../../lib/theme';
+import { Logo } from '../../components/Logo';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 
@@ -61,7 +62,7 @@ export default function SignupScreen({ navigation }: Props) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.inner}>
-          <Text style={styles.logo}>Peak 65</Text>
+          <Logo width={200} />
           <Text style={styles.successTitle}>Check your email</Text>
           <Text style={styles.successBody}>
             We sent a confirmation link to {email}. Click it to activate your account,
@@ -83,7 +84,7 @@ export default function SignupScreen({ navigation }: Props) {
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.inner}>
-          <Text style={styles.logo}>Peak 65</Text>
+          <Logo width={200} />
 
           <View style={styles.form}>
         <TextInput

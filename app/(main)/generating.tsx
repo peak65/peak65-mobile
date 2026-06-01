@@ -7,6 +7,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList } from '../_layout';
 import { Colors, Fonts } from '../../lib/theme';
+import { Logo } from '../../components/Logo';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'Generating'>;
 
@@ -122,7 +123,7 @@ export default function GeneratingScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <Text style={styles.logo}>Peak 65</Text>
+      <Logo width={160} />
 
       <View style={styles.body}>
         <Text style={styles.heading}>Building your program</Text>

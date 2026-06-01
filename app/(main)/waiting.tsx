@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../../lib/theme';
+import { Logo } from '../../components/Logo';
 
 
 
@@ -11,7 +12,7 @@ import { Colors } from '../../lib/theme';
 export default function WaitingScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <Text style={styles.logo}>Peak 65</Text>
+      <Logo width={90} />
       <View style={styles.body}>
         <Text style={styles.heading}>You're all set.</Text>
         <Text style={styles.subtext}>

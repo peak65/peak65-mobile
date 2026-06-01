@@ -10,6 +10,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList } from '../_layout';
 import { Colors, Fonts } from '../../lib/theme';
+import { Logo } from '../../components/Logo';
 import { Feather } from '@expo/vector-icons';
 import {
   fetchDivisionStats, searchAthletes, fetchAthleteResults,
@@ -1597,7 +1598,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   if (closingPhase === 'loading') {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <Text style={styles.logo}>Peak 65</Text>
+        <Logo width={150} />
         <View style={{ flex: 1, paddingHorizontal: 24, justifyContent: 'center' }}>
           <Text style={{
             fontSize: 32,
@@ -1677,7 +1678,7 @@ export default function OnboardingScreen({ navigation }: Props) {
 
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <Text style={styles.logo}>Peak 65</Text>
+        <Logo width={150} />
         <ScrollView
           contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 40 }}
           showsVerticalScrollIndicator={false}
@@ -1995,7 +1996,7 @@ export default function OnboardingScreen({ navigation }: Props) {
     if (isGenerating) {
       return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-          <Text style={[styles.logo, { color: '#e8ff47' }]}>Peak 65</Text>
+          <Logo width={150} />
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 }}>
             <Text style={{
               fontSize: 38,
@@ -2024,7 +2025,7 @@ export default function OnboardingScreen({ navigation }: Props) {
 
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <Text style={styles.logo}>Peak 65</Text>
+        <Logo width={150} />
         <ScrollView
           contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 16 }}
           showsVerticalScrollIndicator={false}
@@ -2183,7 +2184,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   if (showSplash) {
     return (
       <SafeAreaView style={styles.container} edges={['top','bottom']}>
-        <Text style={styles.logo}>Peak 65</Text>
+        <Logo width={150} />
         <View style={styles.loadingBody}>
           <Text style={[styles.loadingTitle, { fontSize: 36, letterSpacing: -1 }]}>Let's build your program.</Text>
           <Text style={[styles.loadingSubtext, { marginTop: 12 }]}>Answer a few questions. We handle the rest.</Text>
@@ -2204,7 +2205,7 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top','bottom']}>
-      <Text style={styles.logo}>Peak 65</Text>
+      <Logo width={150} />
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={handleBack} disabled={step === 0} hitSlop={{ top:12, bottom:12, left:12, right:12 }}>
           {step > 0 && <Feather name="arrow-left" color={Colors.textPrimary} size={22} />}
