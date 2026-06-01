@@ -1,7 +1,9 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   View, Text, ScrollView, TouchableOpacity, RefreshControl,
   StyleSheet, ActivityIndicator, Modal, AppState, Animated,
@@ -23,10 +25,11 @@ import {
   selectHRVSource, selectRHRSource,
   selectSleepSource, resolveAllSources,
 } from '../../lib/wearablePriority';
-import type { Program, ProgramDay, TabParamList } from '../_layout';
+import type { Program, ProgramDay, ProgramSession, TabParamList, MainStackParamList } from '../_layout';
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
+import { Flags } from '../../lib/flags';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -331,7 +334,10 @@ function PulsingRing() {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
-  const navigation = useNavigation<BottomTabNavigationProp<TabParamList>>();
+  const navigation = useNavigation<CompositeNavigationProp<
+    BottomTabNavigationProp<TabParamList>,
+    NativeStackNavigationProp<MainStackParamList>
+  >>();
 
   const [userId, setUserId]               = useState('');
   const [program, setProgram]             = useState<Program | null>(null);
@@ -366,9 +372,8 @@ export default function HomeScreen() {
   const [storedProfile, setStoredProfile]     = useState<HomeProfile | null>(null);
   const [pendingCandidates, setPendingCandidates] = useState<CandidateRow[]>([]);
   const [refreshing, setRefreshing]               = useState(false);
-  const [todayCompleted, setTodayCompleted]       = useState(false);
+  const [completedTodayKeys, setCompletedTodayKeys] = useState<Set<string>>(new Set());
   const [scoreModalVisible, setScoreModalVisible] = useState(false);
-  const [workoutSheetOpen, setWorkoutSheetOpen]   = useState(false);
   const [cacheStale, setCacheStale]               = useState(false);
   const [countupFraction, setCountupFraction]     = useState(1);
 
@@ -454,7 +459,8 @@ export default function HomeScreen() {
           }
           setStreak(c.streak ?? 0);
           setSessionCount(c.sessionCount ?? 0);
-          setTodayCompleted(c.todayCompleted ?? false);
+          // Per-session completion (completedTodayKeys) is intentionally NOT seeded from
+          // cache — the fresh session_logs query below populates it. Cache skips this state.
           setWeek2Exists(c.week2Exists ?? false);
           setLoading(false);
           cacheApplied = true;
@@ -475,7 +481,7 @@ export default function HomeScreen() {
     const [progsRes, logsRes, profileRes, extStreakRes, cacheRes] = await Promise.all([
       supabase.from('programs').select('*').eq('user_id', uid)
         .order('week_number', { ascending: true }),
-      supabase.from('session_logs').select('completed_at, completed')
+      supabase.from('session_logs').select('completed_at, completed, session_name, session_time')
         .eq('user_id', uid).eq('completed', true).order('completed_at', { ascending: false }),
       supabase.from('profiles')
         .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, whoop_access_token, whoop_refresh_token, garmin_connected, coros_connected, manual_hrv, manual_hrv_date, program_start_date')
@@ -518,14 +524,20 @@ export default function HomeScreen() {
     const logs = logsRes.data ?? [];
     setSessionCount(logs.length);
 
-    // Check if today's session was already completed (to show non-tappable "Session Complete")
+    // Build the set of per-session completion keys for today (`${session_name}|${session_time}`)
+    // so each AM/PM block can resolve its own completion. Uses the same local-date logic as before.
     const todayDateStr = new Date().toLocaleDateString('en-CA');
-    const hasCompletedToday = logs.some(l =>
-      l.completed_at &&
-      new Date(l.completed_at).toLocaleDateString('en-CA') === todayDateStr &&
-      (l as any).completed === true,
-    );
-    setTodayCompleted(hasCompletedToday);
+    const completedKeys = new Set<string>();
+    for (const l of logs) {
+      if (
+        l.completed_at &&
+        new Date(l.completed_at).toLocaleDateString('en-CA') === todayDateStr &&
+        (l as any).completed === true
+      ) {
+        completedKeys.add(`${(l as any).session_name ?? ''}|${(l as any).session_time ?? ''}`);
+      }
+    }
+    setCompletedTodayKeys(completedKeys);
 
     const sessionDates  = new Set(logs.map(l => new Date(l.completed_at).toLocaleDateString('en-CA')));
     const externalDates = new Set(
@@ -577,7 +589,6 @@ export default function HomeScreen() {
       program:        prog,
       streak:         newStreak,
       sessionCount:   logs.length,
-      todayCompleted: hasCompletedToday,
       week2Exists:    progs.some(p => p.week_number === 2),
     })).catch(() => {});
 
@@ -941,7 +952,8 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Peak Score bottom sheet */}
+        {/* Peak Score bottom sheet — gated by Flags.PEAK_SCORE_ENABLED */}
+        {Flags.PEAK_SCORE_ENABLED && (
         <Modal
           visible={scoreModalVisible}
           animationType="slide"
@@ -1013,76 +1025,10 @@ export default function HomeScreen() {
             </View>
           </View>
         </Modal>
+        )}
 
-        {/* Workout preview bottom sheet */}
-        <Modal
-          visible={workoutSheetOpen}
-          animationType="slide"
-          presentationStyle="pageSheet"
-          transparent={false}
-          onRequestClose={() => setWorkoutSheetOpen(false)}
-        >
-          <View style={{ flex: 1, backgroundColor: '#111111' }}>
-            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}>
-              <View style={styles.sheetHandle} />
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <Text style={styles.workoutDayLabel}>{dayLabel}</Text>
-                {typeLabel && todayDay ? (
-                  <View style={[styles.typeBadge, {
-                    backgroundColor: todayDay.type === 'hard' ? 'rgba(255,59,59,0.15)' :
-                                     todayDay.type === 'easy' ? 'rgba(0,212,170,0.15)' :
-                                     'rgba(138,135,127,0.15)',
-                  }]}>
-                    <Text style={[styles.typeBadgeText, {
-                      color: todayDay.type === 'hard' ? '#ff3b3b' :
-                             todayDay.type === 'easy' ? '#00d4aa' :
-                             '#8a877f',
-                    }]}>{typeLabel.toUpperCase()}</Text>
-                  </View>
-                ) : null}
-              </View>
-              <Text style={[styles.workoutSessionTitle, { marginBottom: 8 }]}>{sessionTitle}</Text>
-              <View style={{ height: 1, backgroundColor: '#1a1a1a', marginBottom: 20 }} />
-              {sessions.map((session, si) => (
-                <View key={si} style={{ marginBottom: 8 }}>
-                  {(session.blocks ?? []).map((block: any, bi: number) => {
-                    const bn = block.block_name.toLowerCase();
-                    if (bn.includes('warm') || bn.includes('cool')) return null;
-                    return (
-                      <View key={bi} style={{ marginBottom: 20 }}>
-                        <Text style={{ color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 10 }}>{block.block_name}</Text>
-                        {(block.exercises ?? []).map((ex: any, ei: number) => (
-                          <View key={ei} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-                            <View style={{ flex: 1, marginRight: 12 }}>
-                              <Text style={{ color: '#f0ede8', fontSize: 14, fontWeight: '600' }}>{ex.name}</Text>
-                              {ex.notes ? <Text style={{ color: '#8a877f', fontSize: 12, marginTop: 2, lineHeight: 16 }}>{ex.notes}</Text> : null}
-                            </View>
-                            {(ex.sets || ex.reps_per_set) ? (
-                              <Text style={{ color: '#8a877f', fontSize: 13, fontWeight: '600' }}>
-                                {ex.sets && ex.reps_per_set ? `${ex.sets}×${ex.reps_per_set}` : ex.sets ? `${ex.sets} sets` : `${ex.reps_per_set} reps`}
-                              </Text>
-                            ) : null}
-                          </View>
-                        ))}
-                      </View>
-                    );
-                  })}
-                </View>
-              ))}
-              <View style={{ height: 1, backgroundColor: '#1a1a1a', marginBottom: 20 }} />
-              <TouchableOpacity
-                style={styles.viewWorkoutBtn}
-                activeOpacity={0.85}
-                onPress={() => { setWorkoutSheetOpen(false); navigation.navigate('Program'); }}
-              >
-                <Text style={styles.viewWorkoutBtnText}>LOG SESSION →</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </Modal>
-
-        {/* Peak Score hero card */}
-        {(() => {
+        {/* Peak Score hero card — gated by Flags.PEAK_SCORE_ENABLED */}
+        {Flags.PEAK_SCORE_ENABLED && (() => {
           const sc = hasWearable && peakScore ? peakScore.score : null;
           const borderColor = sc != null ? scoreColor(sc) + '66' : '#1a1a1a';
           return (
@@ -1108,6 +1054,111 @@ export default function HomeScreen() {
           );
         })()}
 
+        {/* ── TODAY'S SESSION (hero) ─────────────────────────────────────────── */}
+        <Text style={styles.sectionHeader}>TODAY</Text>
+
+        {!todayDay ? (
+          <View style={styles.emptyBlock}>
+            {program && program.week_start_date ? (() => {
+              const firstSession = program.program_data?.days?.find((d: any) => d.type !== 'rest' && d.sessions?.length > 0);
+              const firstName = firstSession?.sessions?.[0]?.name ?? 'your first session';
+              const startDate = new Date((storedProfile?.program_start_date || program.week_start_date) + 'T00:00:00');
+              const today = new Date();
+              today.setHours(0,0,0,0);
+              const daysUntil = Math.round((startDate.getTime() - today.getTime()) / 86_400_000);
+              const when = daysUntil === 1 ? 'Tomorrow' : daysUntil === 0 ? 'Today' : `In ${daysUntil} days`;
+              return (
+                <View style={{ gap: 8 }}>
+                  <Text style={[styles.emptyText, { color: '#e8ff47', fontSize: 16, fontWeight: '700' }]}>{when}: {firstName}</Text>
+                  <Text style={styles.emptyText}>Your baseline starts there. Everything builds from that session.</Text>
+                </View>
+              );
+            })() : (
+              <Text style={styles.emptyText}>Your program is being built. Check back shortly.</Text>
+            )}
+          </View>
+        ) : isRestDay ? (
+          <View style={styles.restCard}>
+            <Moon color={Colors.accent} size={28} strokeWidth={1.5} />
+            <Text style={styles.restTitle}>REST DAY</Text>
+            <Text style={styles.restSub}>Recovery is where adaptation happens. Rest well.</Text>
+          </View>
+        ) : (
+          <View style={styles.todayWrap}>
+            {/* Day label + type badge */}
+            <View style={styles.todayDayRow}>
+              <Text style={styles.workoutDayLabel}>{dayLabel}</Text>
+              {typeLabel ? (
+                <View style={[styles.typeBadge, {
+                  backgroundColor: todayDay!.type === 'hard' || todayDay!.type === 'trial' ? 'rgba(232,255,71,0.15)' :
+                                   todayDay!.type === 'easy' ? 'rgba(0,212,170,0.15)' :
+                                   'rgba(138,135,127,0.15)',
+                }]}>
+                  <Text style={[styles.typeBadgeText, {
+                    color: todayDay!.type === 'hard' || todayDay!.type === 'trial' ? '#e8ff47' :
+                           todayDay!.type === 'easy' ? '#00d4aa' :
+                           '#8a877f',
+                  }]}>{typeLabel.toUpperCase()}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            {/* One block per session (doubles day shows AM + PM stacked) */}
+            {sessions.map((session, si) => (
+              <View key={si} style={styles.sessionBlock}>
+                {!!session.time && (
+                  <Text style={styles.sessionTimeLabel}>{session.time.toUpperCase()}</Text>
+                )}
+                <Text style={styles.sessionName}>{session.name}</Text>
+                {!!session.description && (
+                  <Text style={styles.sessionDesc}>{session.description}</Text>
+                )}
+
+                {(session.blocks ?? []).map((block, bi) => (
+                  <View key={bi} style={styles.blockSection}>
+                    <Text style={styles.blockLabel}>{block.block_name}</Text>
+                    {(block.exercises ?? []).map((ex, ei) => {
+                      const parts: string[] = [];
+                      if (ex.sets && ex.reps)      parts.push(`${ex.sets}×${ex.reps}`);
+                      else if (ex.sets)            parts.push(`${ex.sets} sets`);
+                      else if (ex.reps)            parts.push(ex.reps);
+                      if (ex.duration)             parts.push(ex.duration);
+                      else if (ex.distance)        parts.push(ex.distance);
+                      const detail = parts.join(' · ');
+                      return (
+                        <View key={ei} style={styles.exerciseRow}>
+                          <Text style={styles.exerciseName} numberOfLines={2}>{ex.name}</Text>
+                          {detail ? <Text style={styles.exerciseDetail}>{detail}</Text> : null}
+                        </View>
+                      );
+                    })}
+                  </View>
+                ))}
+
+                {/* Log button (or completed state) — per-session via name|time key */}
+                {program && (completedTodayKeys.has(`${session.name}|${session.time}`) ? (
+                  <View style={[styles.viewWorkoutBtn, { backgroundColor: '#1a2a1a', marginTop: 12 }]}>
+                    <Text style={[styles.viewWorkoutBtnText, { color: '#4aff78' }]}>SESSION COMPLETE ✓</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.viewWorkoutBtn, { marginTop: 12 }]}
+                    activeOpacity={0.85}
+                    onPress={() => navigation.navigate('LogSession', {
+                      sessionJson: JSON.stringify(session),
+                      programId:   program.id,
+                      weekNumber:  program.week_number,
+                      dayName:     todayDay!.day,
+                    })}
+                  >
+                    <Text style={styles.viewWorkoutBtnText}>LOG SESSION →</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* Streak + Sessions row */}
         <View style={styles.row}>
           <View style={[styles.miniCard, { flex: 1 }]}>
@@ -1128,7 +1179,21 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Stats row — Active | Total */}
+        {/* Progress toward your goal */}
+        {program && (
+          <>
+            <Text style={styles.sectionHeader}>PROGRESS TOWARD YOUR GOAL</Text>
+            <View style={styles.progressCard}>
+              <Text style={styles.progressWeek}>Week {program.week_number}</Text>
+              {storedProfile?.goal_time ? (
+                <Text style={styles.progressGoal}>Goal: {storedProfile.goal_time}</Text>
+              ) : null}
+            </View>
+          </>
+        )}
+
+        {/* Stats row — Active | Total — gated by Flags.CALORIE_CARDS_ENABLED */}
+        {Flags.CALORIE_CARDS_ENABLED && (
         <View style={styles.row}>
           {/* Active Calories */}
           <View style={[styles.statCard, { flex: 1 }]}>
@@ -1226,6 +1291,7 @@ export default function HomeScreen() {
             );
           })()}
         </View>
+        )}
 
 
         {/* Workout confirmation cards */}
@@ -1241,78 +1307,6 @@ export default function HomeScreen() {
             }}
           />
         ))}
-
-        {/* ── TODAY ──────────────────────────────────────────────────────────── */}
-        <Text style={styles.todayHeader}>TODAY</Text>
-
-        {!todayDay ? (
-          <View style={styles.emptyBlock}>
-            {program && program.week_start_date ? (() => {
-              const firstSession = program.program_data?.days?.find((d: any) => d.type !== 'rest' && d.sessions?.length > 0);
-              const firstName = firstSession?.sessions?.[0]?.name ?? 'your first session';
-              const startDate = new Date((storedProfile?.program_start_date || program.week_start_date) + 'T00:00:00');
-              const today = new Date();
-              today.setHours(0,0,0,0);
-              const daysUntil = Math.round((startDate.getTime() - today.getTime()) / 86_400_000);
-              const when = daysUntil === 1 ? 'Tomorrow' : daysUntil === 0 ? 'Today' : `In ${daysUntil} days`;
-              return (
-                <View style={{ gap: 8 }}>
-                  <Text style={[styles.emptyText, { color: '#e8ff47', fontSize: 16, fontWeight: '700' }]}>{when}: {firstName}</Text>
-                  <Text style={styles.emptyText}>Your baseline starts there. Everything builds from that session.</Text>
-                </View>
-              );
-            })() : (
-              <Text style={styles.emptyText}>Your program is being built. Check back shortly.</Text>
-            )}
-          </View>
-        ) : isRestDay ? (
-          <View style={styles.emptyBlock}>
-            <Text style={styles.emptyText}>Rest day — recover well.</Text>
-          </View>
-        ) : (() => {
-          return (
-            <View style={styles.workoutCard}>
-              <TouchableOpacity activeOpacity={0.8} onPress={() => setWorkoutSheetOpen(true)}>
-                <View style={styles.workoutCardTop}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={styles.workoutDayLabel}>{dayLabel}</Text>
-                    {typeLabel ? (
-                      <View style={[styles.typeBadge, {
-                        backgroundColor: todayDay!.type === 'hard' ? 'rgba(255,59,59,0.15)' :
-                                         todayDay!.type === 'easy' ? 'rgba(0,212,170,0.15)' :
-                                         'rgba(138,135,127,0.15)',
-                      }]}>
-                        <Text style={[styles.typeBadgeText, {
-                          color: todayDay!.type === 'hard' ? '#ff3b3b' :
-                                 todayDay!.type === 'easy' ? '#00d4aa' :
-                                 '#8a877f',
-                        }]}>{typeLabel.toUpperCase()}</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                  <Text style={styles.workoutSessionTitle}>{sessionTitle}</Text>
-                </View>
-                {!!workoutSummary && (
-                  <Text style={styles.workoutSummary}>{workoutSummary}</Text>
-                )}
-              </TouchableOpacity>
-              <View style={{ height: 1, backgroundColor: '#1a1a1a' }} />
-              {todayCompleted ? (
-                <View style={[styles.viewWorkoutBtn, { backgroundColor: '#1a2a1a' }]}>
-                  <Text style={[styles.viewWorkoutBtnText, { color: '#4aff78' }]}>SESSION COMPLETE ✓</Text>
-                </View>
-              ) : (
-                <TouchableOpacity
-                  style={styles.viewWorkoutBtn}
-                  activeOpacity={0.85}
-                  onPress={() => navigation.navigate('Program')}
-                >
-                  <Text style={styles.viewWorkoutBtnText}>LOG SESSION →</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          );
-        })()}
 
         {/* Extra workouts from wearable (off-program) */}
         {externalWorkouts.map(w => {
@@ -1494,6 +1488,60 @@ const styles = StyleSheet.create({
   },
   emptyBlock: { paddingHorizontal: 20, paddingVertical: 24 },
   emptyText: { color: Colors.textSecondary, fontSize: 15, textAlign: 'center' },
+
+  // Section header (session-first layout)
+  sectionHeader: {
+    color: Colors.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
+    textTransform: 'uppercase', paddingHorizontal: 20, marginTop: 12, marginBottom: 12,
+  },
+
+  // Today's session — hero
+  todayWrap: { gap: 12 },
+  todayDayRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20,
+  },
+  sessionBlock: {
+    marginHorizontal: 16, backgroundColor: '#111111', borderRadius: 16,
+    padding: 20, borderLeftWidth: 3, borderLeftColor: Colors.accent,
+  },
+  sessionTimeLabel: {
+    color: '#e8ff47', fontSize: 12, fontWeight: '800', letterSpacing: 1.5, marginBottom: 4,
+  },
+  sessionName: {
+    fontFamily: Fonts.metricHeavy, fontSize: 26, color: '#f0ede8', marginBottom: 4,
+  },
+  sessionDesc: {
+    color: '#8a877f', fontSize: 13, lineHeight: 19, marginBottom: 8,
+  },
+  blockSection: { marginTop: 14 },
+  blockLabel: {
+    color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5,
+    textTransform: 'uppercase', marginBottom: 8,
+  },
+  exerciseRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+    gap: 12, marginBottom: 8,
+  },
+  exerciseName: { color: '#f0ede8', fontSize: 14, fontWeight: '600', flex: 1 },
+  exerciseDetail: { color: '#8a877f', fontSize: 13, fontWeight: '600' },
+
+  // Rest day
+  restCard: {
+    marginHorizontal: 16, backgroundColor: '#111111', borderRadius: 16,
+    paddingVertical: 32, paddingHorizontal: 20, alignItems: 'center', gap: 10,
+  },
+  restTitle: {
+    fontFamily: Fonts.metricHeavy, fontSize: 30, color: '#f0ede8', letterSpacing: 1,
+  },
+  restSub: { color: '#8a877f', fontSize: 14, textAlign: 'center', lineHeight: 20 },
+
+  // Progress toward goal
+  progressCard: {
+    marginHorizontal: 16, backgroundColor: '#111111', borderRadius: 16,
+    padding: 20, gap: 6,
+  },
+  progressWeek: { fontFamily: Fonts.metricHeavy, fontSize: 22, color: '#f0ede8' },
+  progressGoal: { color: '#e8ff47', fontSize: 14, fontWeight: '700' },
 
   // Compact workout card
   workoutCard: {

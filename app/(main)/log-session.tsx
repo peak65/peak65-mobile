@@ -65,6 +65,7 @@ export default function LogSessionScreen() {
         program_id:           programId,
         day_name:             dayName,
         session_name:         session.name,
+        session_time:         session.time ?? null,
         session_type_context: sessionType,
         log_field:            sessionType === 'time_trial' ? 'time' : sessionType === 'amrap' ? 'rounds' : 'completed',
         log_value:            sessionType === 'time_trial' ? trialValue : sessionType === 'amrap' ? String(rounds) : 'true',
