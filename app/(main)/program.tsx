@@ -182,12 +182,17 @@ function SessionDocument({ session }: { session: ProgramSession }) {
   function renderBlock(block: { block_name: string; exercises?: ExerciseItem[] }, bi: number): React.ReactNode {
     const exercises = block.exercises ?? [];
     const groups = groupBySuperset(exercises);
+    // Sequential movement numbering applies ONLY to the MAIN block. Warm-up,
+    // Cool-down and any other block render exactly as before (no numbering).
+    const isMain = /main/i.test(block.block_name ?? '');
+    let counter = 1; // running movement number, MAIN block only
 
     return (
       <View key={bi} style={pd.blockSection}>
         <Text style={pd.blockLabel}>{block.block_name}</Text>
         {groups.map((group, gi) => {
           if (group.kind === 'circuit' || group.kind === 'part-circuit') {
+            // Circuits / AMRAP: never numbered, never advance the counter.
             const members = group.members;
             const rounds = group.kind === 'circuit' ? group.rounds : group.rounds;
             const rest = group.kind === 'circuit' ? group.rest : group.rest;
@@ -205,18 +210,23 @@ function SessionDocument({ session }: { session: ProgramSession }) {
           }
           if (group.kind === 'superset' || group.kind === 'part-superset') {
             const members = group.members;
-            return (
+            // MAIN: the whole superset shares one running number with letter
+            // suffixes (e.g. 3A, 3B). Non-MAIN: letter only, NO number, so the
+            // grouping still reads while staying unnumbered like its neighbors.
+            const node = (
               <View key={gi}>
                 {members.map(({ ex }, mi) => {
                   const letter = String.fromCharCode(65 + mi);
-                  const setNum = Math.floor(gi) + 1;
-                  const prefix = `${setNum}${letter})`;
+                  const prefix = isMain ? `${counter}${letter})` : `${letter})`;
                   return renderExerciseLine(ex, mi, prefix);
                 })}
               </View>
             );
+            if (isMain) counter++; // one number consumed by the whole superset
+            return node;
           }
           if (group.kind === 'block') {
+            // Named sub-block: members unnumbered, counter unchanged.
             return (
               <View key={gi}>
                 <Text style={pd.subBlockLabel}>{group.blockName}</Text>
@@ -225,6 +235,11 @@ function SessionDocument({ session }: { session: ProgramSession }) {
             );
           }
           // single
+          if (isMain) {
+            const prefix = `${counter})`;
+            counter++; // one number consumed by this standalone movement
+            return renderExerciseLine(group.ex, gi, prefix);
+          }
           return renderExerciseLine(group.ex, gi);
         })}
       </View>
