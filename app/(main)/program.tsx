@@ -139,10 +139,9 @@ function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
 function SessionDocument({ session }: { session: ProgramSession }) {
   const blocks = session.blocks ?? [];
 
-  function renderExerciseLine(ex: ExerciseItem, index: number, prefix?: string): React.ReactNode {
+  function renderExerciseLine(ex: ExerciseItem, index: number, prefix?: string, hideSets?: boolean): React.ReactNode {
     const name = prefix ? `${prefix} ${ex.name}` : ex.name;
     const duration = (ex as any).duration as string | undefined;
-    const type = (ex as any).type as string | undefined;
     const loadNote = (ex as any).load_note as string | undefined;
     const note = ex.notes || (ex as any).note as string | undefined;
     const firstSentence = note
@@ -151,16 +150,14 @@ function SessionDocument({ session }: { session: ProgramSession }) {
 
     const parts: string[] = [];
 
-    if (type === 'strength' && ex.sets && ex.reps && Number(ex.sets) > 1) {
-      parts.push(`${ex.sets}×${ex.reps}`);
-    } else if (type === 'cardio' && duration && ex.sets && Number(ex.sets) > 1) {
-      parts.push(`${ex.sets}×${duration}`);
-    } else if (type === 'cardio' && duration) {
-      parts.push(duration);
-    } else if (type === 'z2_cardio' && duration) {
-      parts.push(duration);
-    } else if (ex.reps && ex.reps !== '1') {
-      parts.push(String(ex.reps));
+    // The interval value lives in either `duration` or `reps` — prefer duration.
+    // Sets are shown whenever sets > 1, regardless of `type` (unless hideSets).
+    const value = (duration && duration.trim() !== '') ? duration : ex.reps;
+    const setsNum = ex.sets ? Number(ex.sets) : 0;
+    if (value && setsNum > 1 && !hideSets) {
+      parts.push(`${ex.sets} × ${value}`);
+    } else if (value && value !== '1') {
+      parts.push(value);
     }
 
     if (ex.rest && !['none','0 min','0:00','0','00:00'].includes(ex.rest.trim())) {
@@ -201,7 +198,7 @@ function SessionDocument({ session }: { session: ProgramSession }) {
                 {(() => { const timeCap = members[0]?.ex && (members[0].ex as any).time_cap; return (
                   <Text style={pd.circuitRounds}>{timeCap ? `${timeCap} AMRAP:` : `${rounds} Rounds:`}</Text>
                 ); })()}
-                {members.map(({ ex }, mi) => renderExerciseLine(ex, mi, undefined))}
+                {members.map(({ ex }, mi) => renderExerciseLine(ex, mi, undefined, true))}
                 {!!rest && (
                   <Text style={pd.exerciseDetail}>{'  '}{rest} rest between rounds</Text>
                 )}
