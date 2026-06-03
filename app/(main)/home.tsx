@@ -1531,7 +1531,7 @@ const styles = StyleSheet.create({
   },
 
   // Today's session — hero
-  todayWrap: { gap: 12 },
+  todayWrap: { gap: 12, marginBottom: 12 },
   todayDayRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20,
   },
