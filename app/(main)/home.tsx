@@ -1529,7 +1529,8 @@ const styles = StyleSheet.create({
   // Rest day
   restCard: {
     marginHorizontal: 16, backgroundColor: '#111111', borderRadius: 16,
-    paddingVertical: 32, paddingHorizontal: 20, alignItems: 'center', gap: 10,
+    paddingVertical: 24, paddingHorizontal: 20, alignItems: 'center', gap: 10,
+    marginBottom: 12,
   },
   restTitle: {
     fontFamily: Fonts.metricHeavy, fontSize: 30, color: '#f0ede8', letterSpacing: 1,

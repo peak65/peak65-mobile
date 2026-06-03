@@ -169,10 +169,10 @@ function SessionDocument({ session }: { session: ProgramSession }) {
     const detail = parts.join(' · ');
 
     return (
-      <Text key={`ex-${index}-${prefix ?? ''}`} style={pd.exerciseLine}>
+      <View key={`ex-${index}-${prefix ?? ''}`} style={pd.exerciseLine}>
         <Text style={pd.exerciseName}>{name}</Text>
-        {detail ? <Text style={pd.exerciseDetail}>{'  '}{detail}</Text> : null}
-      </Text>
+        {detail ? <Text style={pd.exerciseDetail}>{detail}</Text> : null}
+      </View>
     );
   }
 
@@ -315,19 +315,20 @@ const pd = StyleSheet.create({
     textAlign: 'center',
   },
   exerciseLine: {
-    color: '#f0ede8',
-    fontSize: 15,
-    lineHeight: 24,
-    marginBottom: 2,
+    marginBottom: 12,   // more separation between movements now that each is a 2-line block
   },
   exerciseName: {
     color: '#f0ede8',
     fontSize: 15,
     fontWeight: '600',
+    lineHeight: 22,
   },
   exerciseDetail: {
     color: '#8a877f',
     fontSize: 14,
+    lineHeight: 20,
+    marginTop: 1,
+    marginLeft: 14,   // indent details under the name for the clean coaching-sheet look
   },
   circuitSection: {
     marginBottom: 8,
