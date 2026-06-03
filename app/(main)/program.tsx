@@ -376,6 +376,20 @@ const pd = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
   },
+  completeBtn: {
+    marginHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 8,
+    backgroundColor: '#0e1f1b',
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  completeBtnTxt: {
+    color: Colors.green,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
 });
 
 // ─── Single-value trial log card (e.g. 8K time) ──────────────────────────────
@@ -455,7 +469,7 @@ function MarkCompleteCard({
 function DayCard({
   day, isToday, isComplete,
   userId, programId, weekNumber, savedTrials,
-  profile,
+  profile, completedSessionKeys,
 }: {
   day: ProgramDay;
   isToday: boolean;
@@ -465,6 +479,7 @@ function DayCard({
   weekNumber: number;
   savedTrials: Set<string>;
   profile: TimeTrialProfile | null;
+  completedSessionKeys: Set<string>;
 }) {
   const isRest = day.type === 'rest' || !day.sessions?.length;
   const [expanded, setExpanded] = React.useState(isToday);
@@ -588,6 +603,8 @@ function DayCard({
       day_name:     day.day,
       week_number:  weekNumber,
       session_name: session.name,
+      session_time: session.time ?? null,
+      session_date: new Date().toISOString().split('T')[0],
       log_field:    session.log_field ?? null,
       log_value:    trialValues[si].trim(),
       completed:    true,
@@ -707,6 +724,8 @@ function DayCard({
       day_name:     day.day,
       week_number:  weekNumber,
       session_name: sessionName,
+      session_time: day.sessions?.[si]?.time ?? null,
+      session_date: new Date().toISOString().split('T')[0],
       log_field:    'session_complete',
       completed:    true,
       completed_at: new Date().toISOString(),
@@ -780,24 +799,34 @@ function DayCard({
         <TouchableOpacity style={pd.dayHeader} onPress={() => setExpanded(e => !e)}>{headerInner}</TouchableOpacity>
       )}
 
-      {expanded && !isRest && (day.sessions ?? []).map((session, si) => (
+      {expanded && !isRest && (day.sessions ?? []).map((session, si) => {
+        const sessionKey  = `${weekNumber}|${day.day}|${session.name}|${session.time ?? ''}`;
+        const sessionDone = completedSessionKeys.has(sessionKey);
+        return (
         <View key={si}>
           <SessionDocument session={session} />
-          {(session.log_result !== false) && (isToday || !isComplete) && (
-            <TouchableOpacity
-              style={pd.logBtn}
-              onPress={() => navigation.navigate('LogSession', {
-                sessionJson: JSON.stringify(session),
-                programId,
-                weekNumber,
-                dayName: day.day,
-              })}
-            >
-              <Text style={pd.logBtnTxt}>LOG SESSION →</Text>
-            </TouchableOpacity>
+          {(session.log_result !== false) && (
+            sessionDone ? (
+              <View style={pd.completeBtn}>
+                <Text style={pd.completeBtnTxt}>SESSION COMPLETE ✓</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={pd.logBtn}
+                onPress={() => navigation.navigate('LogSession', {
+                  sessionJson: JSON.stringify(session),
+                  programId,
+                  weekNumber,
+                  dayName: day.day,
+                })}
+              >
+                <Text style={pd.logBtnTxt}>LOG SESSION →</Text>
+              </TouchableOpacity>
+            )
           )}
         </View>
-      ))}
+        );
+      })}
     </View>
 
     <Modal
@@ -846,6 +875,8 @@ export default function ProgramScreen() {
   const [weekIdx, setWeekIdx]             = useState(0);
   const [completedMap, setCompletedMap]   = useState<Record<number, Set<string>>>({});
   const [savedTrialMap, setSavedTrialMap] = useState<Record<number, Set<string>>>({});
+  // Per-session completion keys: `${week_number}|${day_name}|${session_name}|${session_time}`
+  const [completedSessionKeys, setCompletedSessionKeys] = useState<Set<string>>(new Set());
   const [userId, setUserId]               = useState<string | null>(null);
   const [todayName, setTodayName]         = useState('');
   const [loading, setLoading]             = useState(true);
@@ -931,10 +962,14 @@ export default function ProgramScreen() {
           }
           const cMap: Record<number, Set<string>> = {};
           const tMap: Record<number, Set<string>> = {};
+          const sKeys = new Set<string>();
           for (const log of c.sessionLogs ?? []) {
             if (!log.week_number || !log.day_name) continue;
             if (!cMap[log.week_number]) cMap[log.week_number] = new Set();
             cMap[log.week_number].add(log.day_name);
+            if (log.session_name) {
+              sKeys.add(`${log.week_number}|${log.day_name}|${log.session_name}|${log.session_time ?? ''}`);
+            }
             if (log.log_field) {
               if (!tMap[log.week_number]) tMap[log.week_number] = new Set();
               tMap[log.week_number].add(`${log.day_name}:${log.log_field}`);
@@ -942,6 +977,7 @@ export default function ProgramScreen() {
           }
           setCompletedMap(cMap);
           setSavedTrialMap(tMap);
+          setCompletedSessionKeys(sKeys);
           setLoading(false);
           cacheApplied = true;
         }
@@ -961,7 +997,7 @@ export default function ProgramScreen() {
         .order('week_number', { ascending: true }),
       supabase
         .from('session_logs')
-        .select('week_number, day_name, log_field')
+        .select('week_number, day_name, log_field, session_name, session_time')
         .eq('user_id', session.user.id)
         .not('day_name', 'is', null),
       supabase
@@ -1002,16 +1038,23 @@ export default function ProgramScreen() {
 
     const cMap: Record<number, Set<string>> = {};
     const tMap: Record<number, Set<string>> = {};
+    const sKeys = new Set<string>();
     for (const log of logsRes.data ?? []) {
       if (!log.week_number || !log.day_name) continue;
       if (!cMap[log.week_number]) cMap[log.week_number] = new Set();
       cMap[log.week_number].add(log.day_name);
+      const sName = (log as any).session_name as string | null | undefined;
+      const sTime = (log as any).session_time as string | null | undefined;
+      if (sName) {
+        sKeys.add(`${log.week_number}|${log.day_name}|${sName}|${sTime ?? ''}`);
+      }
       if (log.log_field) {
         if (!tMap[log.week_number]) tMap[log.week_number] = new Set();
         tMap[log.week_number].add(`${log.day_name}:${log.log_field}`);
       }
     }
     setCompletedMap(cMap);
+    setCompletedSessionKeys(sKeys);
     setSavedTrialMap(tMap);
     setLoading(false);
 
@@ -1157,6 +1200,7 @@ export default function ProgramScreen() {
                     weekNumber={displayWeekNum}
                     savedTrials={savedTrials}
                     profile={ttProfile}
+                    completedSessionKeys={completedSessionKeys}
                   />
                 </View>
                 );

@@ -218,7 +218,7 @@ async function prefetchTabCaches(uid: string, programs: Program[], profileData: 
   try {
     const programLogsRes = await supabase
       .from('session_logs')
-      .select('week_number, day_name, log_field')
+      .select('week_number, day_name, log_field, session_name, session_time')
       .eq('user_id', uid)
       .not('day_name', 'is', null);
     const profileSubset = profileData ? {
