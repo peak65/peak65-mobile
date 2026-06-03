@@ -25,7 +25,7 @@ import {
   selectHRVSource, selectRHRSource,
   selectSleepSource, resolveAllSources,
 } from '../../lib/wearablePriority';
-import type { Program, ProgramDay, ProgramSession, TabParamList, MainStackParamList } from '../_layout';
+import type { Program, ProgramDay, ProgramSession, ExerciseItem, TabParamList, MainStackParamList } from '../_layout';
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Logo } from '../../components/Logo';
@@ -1118,21 +1118,55 @@ export default function HomeScreen() {
                 {(session.blocks ?? []).map((block, bi) => (
                   <View key={bi} style={styles.blockSection}>
                     <Text style={styles.blockLabel}>{block.block_name}</Text>
-                    {(block.exercises ?? []).map((ex, ei) => {
-                      const parts: string[] = [];
-                      if (ex.sets && ex.reps)      parts.push(`${ex.sets}×${ex.reps}`);
-                      else if (ex.sets)            parts.push(`${ex.sets} sets`);
-                      else if (ex.reps)            parts.push(ex.reps);
-                      if (ex.duration)             parts.push(ex.duration);
-                      else if (ex.distance)        parts.push(ex.distance);
-                      const detail = parts.join(' · ');
-                      return (
-                        <View key={ei} style={styles.exerciseRow}>
-                          <Text style={styles.exerciseName} numberOfLines={2}>{ex.name}</Text>
-                          {detail ? <Text style={styles.exerciseDetail}>{detail}</Text> : null}
-                        </View>
-                      );
-                    })}
+                    {(() => {
+                      const exercises = block.exercises ?? [];
+                      // Volume string: only show the "N×" multiplier when sets > 1.
+                      // Circuit members pass hideSets so they never show a multiplier
+                      // (rounds are conveyed by the "N ROUNDS" header instead).
+                      const volume = (ex: ExerciseItem, hideSets?: boolean): string => {
+                        const parts: string[] = [];
+                        const setsNum = ex.sets ? Number(ex.sets) : 0;
+                        if (!hideSets && setsNum > 1 && ex.reps) parts.push(`${ex.sets}×${ex.reps}`);
+                        else if (ex.reps && ex.reps !== '1')     parts.push(ex.reps);
+                        if (ex.duration)                         parts.push(ex.duration);
+                        else if (ex.distance)                    parts.push(ex.distance);
+                        return parts.join(' · ');
+                      };
+                      const line = (ex: ExerciseItem, key: string, hideSets: boolean, indent: boolean) => {
+                        const detail = volume(ex, hideSets);
+                        return (
+                          <View key={key} style={[styles.exerciseRow, indent ? { marginLeft: 10 } : null]}>
+                            <Text style={styles.exerciseName} numberOfLines={2}>{ex.name}</Text>
+                            {detail ? <Text style={styles.exerciseDetail}>{detail}</Text> : null}
+                          </View>
+                        );
+                      };
+                      // Walk exercises, grouping consecutive same circuit_id into a rounds block.
+                      const out: React.ReactNode[] = [];
+                      let i = 0;
+                      while (i < exercises.length) {
+                        const ex = exercises[i];
+                        if (ex.circuit_id) {
+                          const cId = ex.circuit_id;
+                          const members: ExerciseItem[] = [];
+                          while (i < exercises.length && exercises[i].circuit_id === cId) {
+                            members.push(exercises[i]);
+                            i++;
+                          }
+                          const rounds = members[0].circuit_rounds ?? 4;
+                          out.push(
+                            <View key={`c-${bi}-${i}`}>
+                              <Text style={styles.circuitRoundsLabel}>{rounds} Rounds</Text>
+                              {members.map((m, mi) => line(m, `cm-${bi}-${i}-${mi}`, true, true))}
+                            </View>,
+                          );
+                        } else {
+                          out.push(line(ex, `e-${bi}-${i}`, false, false));
+                          i++;
+                        }
+                      }
+                      return out;
+                    })()}
                   </View>
                 ))}
 
@@ -1518,6 +1552,10 @@ const styles = StyleSheet.create({
   blockLabel: {
     color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5,
     textTransform: 'uppercase', marginBottom: 8,
+  },
+  circuitRoundsLabel: {
+    color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5,
+    textTransform: 'uppercase', marginTop: 4, marginBottom: 6,
   },
   exerciseRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
