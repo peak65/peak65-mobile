@@ -1141,49 +1141,72 @@ export default function HomeScreen() {
                           </View>
                         );
                       };
-                      // Walk exercises, grouping consecutive same circuit_id into a rounds block.
+                      // Inner walk: group a slice of exercises by emom_id / circuit_id,
+                      // standalone otherwise. Used both at the top level and within a Part.
+                      const renderExerciseSlice = (slice: ExerciseItem[], kp: string): React.ReactNode[] => {
+                        const nodes: React.ReactNode[] = [];
+                        let j = 0;
+                        while (j < slice.length) {
+                          const ex = slice[j];
+                          if (ex.emom_id) {
+                            const eId = ex.emom_id;
+                            const members: ExerciseItem[] = [];
+                            while (j < slice.length && slice[j].emom_id === eId) { members.push(slice[j]); j++; }
+                            const label  = (members[0].emom_label ?? 'EMOM').toUpperCase();
+                            const rounds = members[0].emom_rounds;
+                            const header = `${label}${rounds ? ` · ${rounds} ROUNDS` : ''}`;
+                            nodes.push(
+                              <View key={`${kp}-emom-${j}`}>
+                                <Text style={styles.circuitRoundsLabel}>{header}</Text>
+                                {members.map((m, mi) => (
+                                  <View key={`${kp}-em-${j}-${mi}`} style={styles.emomMemberRow}>
+                                    {m.time_window ? <Text style={styles.emomWindow}>{m.time_window}</Text> : null}
+                                    <View style={{ flex: 1 }}>{line(m, `${kp}-eml-${j}-${mi}`, true, false)}</View>
+                                  </View>
+                                ))}
+                              </View>,
+                            );
+                          } else if (ex.circuit_id) {
+                            const cId = ex.circuit_id;
+                            const members: ExerciseItem[] = [];
+                            while (j < slice.length && slice[j].circuit_id === cId) { members.push(slice[j]); j++; }
+                            const rounds = members[0].circuit_rounds ?? 4;
+                            nodes.push(
+                              <View key={`${kp}-c-${j}`}>
+                                <Text style={styles.circuitRoundsLabel}>{rounds} Rounds</Text>
+                                {members.map((m, mi) => line(m, `${kp}-cm-${j}-${mi}`, true, true))}
+                              </View>,
+                            );
+                          } else {
+                            nodes.push(line(ex, `${kp}-e-${j}`, false, false));
+                            j++;
+                          }
+                        }
+                        return nodes;
+                      };
+
+                      // Outer walk: split into Parts (named block_id groups). Each Part
+                      // renders its block_name header once, then its inner slice below it.
                       const out: React.ReactNode[] = [];
                       let i = 0;
                       while (i < exercises.length) {
                         const ex = exercises[i];
-                        if (ex.emom_id) {
-                          const eId = ex.emom_id;
+                        if (ex.block_id) {
+                          const bId = ex.block_id;
+                          const partName = ex.block_name;
                           const members: ExerciseItem[] = [];
-                          while (i < exercises.length && exercises[i].emom_id === eId) {
-                            members.push(exercises[i]);
-                            i++;
-                          }
-                          const label  = (members[0].emom_label ?? 'EMOM').toUpperCase();
-                          const rounds = members[0].emom_rounds;
-                          const header = `${label}${rounds ? ` · ${rounds} ROUNDS` : ''}`;
+                          while (i < exercises.length && exercises[i].block_id === bId) { members.push(exercises[i]); i++; }
                           out.push(
-                            <View key={`emom-${bi}-${i}`}>
-                              <Text style={styles.circuitRoundsLabel}>{header}</Text>
-                              {members.map((m, mi) => (
-                                <View key={`em-${bi}-${i}-${mi}`} style={styles.emomMemberRow}>
-                                  {m.time_window ? <Text style={styles.emomWindow}>{m.time_window}</Text> : null}
-                                  <View style={{ flex: 1 }}>{line(m, `eml-${bi}-${i}-${mi}`, true, false)}</View>
-                                </View>
-                              ))}
-                            </View>,
-                          );
-                        } else if (ex.circuit_id) {
-                          const cId = ex.circuit_id;
-                          const members: ExerciseItem[] = [];
-                          while (i < exercises.length && exercises[i].circuit_id === cId) {
-                            members.push(exercises[i]);
-                            i++;
-                          }
-                          const rounds = members[0].circuit_rounds ?? 4;
-                          out.push(
-                            <View key={`c-${bi}-${i}`}>
-                              <Text style={styles.circuitRoundsLabel}>{rounds} Rounds</Text>
-                              {members.map((m, mi) => line(m, `cm-${bi}-${i}-${mi}`, true, true))}
+                            <View key={`part-${bi}-${i}`}>
+                              {partName ? <Text style={styles.partLabel}>{partName}</Text> : null}
+                              {renderExerciseSlice(members, `p-${bi}-${i}`)}
                             </View>,
                           );
                         } else {
-                          out.push(line(ex, `e-${bi}-${i}`, false, false));
-                          i++;
+                          // Run of non-Part exercises — keep circuit/emom grouping intact.
+                          const members: ExerciseItem[] = [];
+                          while (i < exercises.length && !exercises[i].block_id) { members.push(exercises[i]); i++; }
+                          out.push(...renderExerciseSlice(members, `top-${bi}-${i}`));
                         }
                       }
                       return out;
@@ -1577,6 +1600,10 @@ const styles = StyleSheet.create({
   circuitRoundsLabel: {
     color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5,
     textTransform: 'uppercase', marginTop: 4, marginBottom: 6,
+  },
+  partLabel: {
+    color: '#e8ff47', fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
+    textTransform: 'uppercase', marginTop: 10, marginBottom: 6,
   },
   emomMemberRow: {
     flexDirection: 'row', alignItems: 'flex-start',

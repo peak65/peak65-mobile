@@ -221,6 +221,9 @@ function SessionDocument({ session }: { session: ProgramSession }) {
             const rest = group.kind === 'circuit' ? group.rest : group.rest;
             return (
               <View key={gi} style={pd.circuitSection}>
+                {group.kind === 'part-circuit' && group.blockName ? (
+                  <Text style={pd.subBlockLabel}>{group.blockName}</Text>
+                ) : null}
                 {(() => { const timeCap = members[0]?.ex && (members[0].ex as any).time_cap; return (
                   <Text style={pd.circuitRounds}>{timeCap ? `${timeCap} AMRAP:` : `${rounds} Rounds:`}</Text>
                 ); })()}
@@ -238,6 +241,9 @@ function SessionDocument({ session }: { session: ProgramSession }) {
             const header = `${(group.label ?? 'EMOM').toUpperCase()}${group.rounds ? ` · ${group.rounds} ROUNDS` : ''}`;
             return (
               <View key={gi} style={pd.circuitSection}>
+                {group.kind === 'part-emom' && group.blockName ? (
+                  <Text style={pd.subBlockLabel}>{group.blockName}</Text>
+                ) : null}
                 <Text style={pd.circuitRounds}>{header}</Text>
                 {members.map(({ ex }, mi) => (
                   <View key={mi} style={pd.emomMemberRow}>
@@ -257,6 +263,9 @@ function SessionDocument({ session }: { session: ProgramSession }) {
             // grouping still reads while staying unnumbered like its neighbors.
             const node = (
               <View key={gi}>
+                {group.kind === 'part-superset' && group.blockName ? (
+                  <Text style={pd.subBlockLabel}>{group.blockName}</Text>
+                ) : null}
                 {members.map(({ ex }, mi) => {
                   const letter = String.fromCharCode(65 + mi);
                   const prefix = isMain ? `${counter}${letter})` : `${letter})`;
