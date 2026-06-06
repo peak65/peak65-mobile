@@ -1146,7 +1146,28 @@ export default function HomeScreen() {
                       let i = 0;
                       while (i < exercises.length) {
                         const ex = exercises[i];
-                        if (ex.circuit_id) {
+                        if (ex.emom_id) {
+                          const eId = ex.emom_id;
+                          const members: ExerciseItem[] = [];
+                          while (i < exercises.length && exercises[i].emom_id === eId) {
+                            members.push(exercises[i]);
+                            i++;
+                          }
+                          const label  = (members[0].emom_label ?? 'EMOM').toUpperCase();
+                          const rounds = members[0].emom_rounds;
+                          const header = `${label}${rounds ? ` · ${rounds} ROUNDS` : ''}`;
+                          out.push(
+                            <View key={`emom-${bi}-${i}`}>
+                              <Text style={styles.circuitRoundsLabel}>{header}</Text>
+                              {members.map((m, mi) => (
+                                <View key={`em-${bi}-${i}-${mi}`} style={styles.emomMemberRow}>
+                                  {m.time_window ? <Text style={styles.emomWindow}>{m.time_window}</Text> : null}
+                                  <View style={{ flex: 1 }}>{line(m, `eml-${bi}-${i}-${mi}`, true, false)}</View>
+                                </View>
+                              ))}
+                            </View>,
+                          );
+                        } else if (ex.circuit_id) {
                           const cId = ex.circuit_id;
                           const members: ExerciseItem[] = [];
                           while (i < exercises.length && exercises[i].circuit_id === cId) {
@@ -1556,6 +1577,12 @@ const styles = StyleSheet.create({
   circuitRoundsLabel: {
     color: '#8a877f', fontSize: 10, fontWeight: '700', letterSpacing: 1.5,
     textTransform: 'uppercase', marginTop: 4, marginBottom: 6,
+  },
+  emomMemberRow: {
+    flexDirection: 'row', alignItems: 'flex-start',
+  },
+  emomWindow: {
+    color: '#e8ff47', fontSize: 12, fontWeight: '700', marginRight: 8, minWidth: 30,
   },
   exerciseRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',

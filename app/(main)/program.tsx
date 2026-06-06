@@ -71,7 +71,9 @@ type ExGroup =
   | { kind: 'circuit'; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number; rest: string | null }
   | { kind: 'block'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] }
   | { kind: 'part-circuit'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number; rest: string | null }
-  | { kind: 'part-superset'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] };
+  | { kind: 'part-superset'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] }
+  | { kind: 'emom'; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; rounds: number | null; totalMinutes: number | null }
+  | { kind: 'part-emom'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; rounds: number | null; totalMinutes: number | null };
 
 function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
   const groups: ExGroup[] = [];
@@ -86,8 +88,14 @@ function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
         members.push({ ex: exercises[i], origIdx: i });
         i++;
       }
+      const firstEmomId = members[0].ex.emom_id;
       const firstCircuitId = members[0].ex.circuit_id;
-      if (firstCircuitId && members.every((m) => m.ex.circuit_id === firstCircuitId)) {
+      if (firstEmomId && members.every((m) => m.ex.emom_id === firstEmomId)) {
+        groups.push({ kind: 'part-emom', blockName, members,
+          label: members[0].ex.emom_label ?? null,
+          rounds: members[0].ex.emom_rounds ?? null,
+          totalMinutes: members[0].ex.emom_total_minutes ?? null });
+      } else if (firstCircuitId && members.every((m) => m.ex.circuit_id === firstCircuitId)) {
         groups.push({ kind: 'part-circuit', blockName, members, rounds: members[0].ex.circuit_rounds ?? 4, rest: members[0].ex.circuit_rest ?? null });
       } else {
         const firstSupersetId = members[0].ex.superset_id;
@@ -96,6 +104,24 @@ function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
         } else {
           groups.push({ kind: 'block', blockName, members });
         }
+      }
+    } else if (ex.emom_id) {
+      const eId = ex.emom_id;
+      const members: { ex: ExerciseItem; origIdx: number }[] = [];
+      while (i < exercises.length && exercises[i].emom_id === eId) {
+        members.push({ ex: exercises[i], origIdx: i });
+        i++;
+      }
+      if (members.length === 1) {
+        groups.push({ kind: 'single', ex: members[0].ex, origIdx: members[0].origIdx });
+      } else {
+        groups.push({
+          kind: 'emom',
+          members,
+          label: members[0].ex.emom_label ?? null,
+          rounds: members[0].ex.emom_rounds ?? null,
+          totalMinutes: members[0].ex.emom_total_minutes ?? null,
+        });
       }
     } else if (ex.circuit_id) {
       const cId = ex.circuit_id;
@@ -202,6 +228,25 @@ function SessionDocument({ session }: { session: ProgramSession }) {
                 {!!rest && (
                   <Text style={pd.exerciseDetail}>{'  '}{rest} rest between rounds</Text>
                 )}
+              </View>
+            );
+          }
+          if (group.kind === 'emom' || group.kind === 'part-emom') {
+            // EMOM: never numbered, never advance the counter. Header shows the
+            // label + rounds; each member shows its time_window as a distinct tag.
+            const members = group.members;
+            const header = `${(group.label ?? 'EMOM').toUpperCase()}${group.rounds ? ` · ${group.rounds} ROUNDS` : ''}`;
+            return (
+              <View key={gi} style={pd.circuitSection}>
+                <Text style={pd.circuitRounds}>{header}</Text>
+                {members.map(({ ex }, mi) => (
+                  <View key={mi} style={pd.emomMemberRow}>
+                    {ex.time_window ? <Text style={pd.emomWindow}>{ex.time_window}</Text> : null}
+                    <View style={{ flex: 1 }}>
+                      {renderExerciseLine(ex, mi, undefined, true)}
+                    </View>
+                  </View>
+                ))}
               </View>
             );
           }
@@ -338,6 +383,18 @@ const pd = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 4,
+  },
+  emomMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  emomWindow: {
+    color: '#e8ff47',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 22,
+    marginRight: 10,
+    minWidth: 34,
   },
   dayHeader: {
     flexDirection: 'row',

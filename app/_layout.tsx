@@ -64,6 +64,11 @@ export type ExerciseItem = {
   circuit_rest?: string | null;
   block_id?: string | null;
   block_name?: string | null;
+  emom_id?: string | null;
+  emom_label?: string | null;
+  emom_rounds?: number | null;
+  emom_total_minutes?: number | null;
+  time_window?: string | null;
 };
 
 export type SessionBlock = {
