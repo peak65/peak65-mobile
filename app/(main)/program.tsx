@@ -1060,6 +1060,7 @@ export default function ProgramScreen() {
         .from('programs')
         .select('*')
         .eq('user_id', session.user.id)
+        .not('is_draft', 'is', true)
         .order('week_number', { ascending: true }),
       supabase
         .from('session_logs')

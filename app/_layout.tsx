@@ -299,6 +299,7 @@ async function resolveAppState(
       .from('programs')
       .select('id')
       .eq('user_id', session.user.id)
+      .not('is_draft', 'is', true)
       .limit(1)
       .maybeSingle(),
     supabase

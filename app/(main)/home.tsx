@@ -481,6 +481,7 @@ export default function HomeScreen() {
 
     const [progsRes, logsRes, profileRes, extStreakRes, cacheRes] = await Promise.all([
       supabase.from('programs').select('*').eq('user_id', uid)
+        .not('is_draft', 'is', true)
         .order('week_number', { ascending: true }),
       supabase.from('session_logs').select('completed_at, completed, session_name, session_time')
         .eq('user_id', uid).eq('completed', true).order('completed_at', { ascending: false }),

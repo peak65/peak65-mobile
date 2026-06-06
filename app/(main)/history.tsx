@@ -465,6 +465,7 @@ function WorkoutDetailModal({
       .from('programs')
       .select('id, week_number, program_data')
       .eq('user_id', session.user.id)
+      .not('is_draft', 'is', true)
       .order('week_number', { ascending: false });
     setPrograms((data ?? []) as any[]);
     setAssignMode(true);

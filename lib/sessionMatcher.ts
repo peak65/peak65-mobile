@@ -69,6 +69,7 @@ export async function detectCandidates(userId: string): Promise<void> {
     .from('programs')
     .select('id, week_number, week_start_date, program_data')
     .eq('user_id', userId)
+    .not('is_draft', 'is', true)
     .order('week_number', { ascending: false })
     .limit(5);
 
