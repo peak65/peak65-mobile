@@ -5,6 +5,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { decode } from 'base64-arraybuffer';
 import type { ProgramSession } from '../app/_layout';
 import { supabase } from '../lib/supabase';
 
@@ -80,8 +82,30 @@ function HRUploadPrompt({
 
   const spin = spinVal.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
+  // Upload a picked image full-quality to the hr-screenshots bucket, returning
+  // the storage path. Throws on failure so analyze() can surface a message.
+  async function uploadFullQuality(img: PickedImage, suffix: 'zone' | 'curve'): Promise<string> {
+    const path = `${userId}/${sessionLogId}-${suffix}.jpg`;
+    const rawBase64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
+    const { error } = await supabase.storage
+      .from('hr-screenshots')
+      .upload(path, decode(rawBase64), { contentType: 'image/jpeg', upsert: true });
+    if (error) throw new Error(`Couldn't save image: ${error.message}`);
+    return path;
+  }
+
+  // Resize + compress for the AI request (small enough to fit the body limit).
+  async function compressForAnalysis(img: PickedImage): Promise<string> {
+    const result = await manipulateAsync(
+      img.uri,
+      [{ resize: { width: 1000 } }],
+      { compress: 0.5, format: SaveFormat.JPEG, base64: true },
+    );
+    return (result.base64 ?? '').replace(/^data:image\/\w+;base64,/, '');
+  }
+
   async function analyze() {
-    if (!sessionLogId) {
+    if (!sessionLogId || !userId) {
       setErrorMsg('Session must be saved before uploading HR data.');
       return;
     }
@@ -95,8 +119,28 @@ function HRUploadPrompt({
         prescribed_zone: prescribed_zone ?? 'unknown',
         wearable_source: wearableSource,
       };
-      if (zoneChart) body.zoneChartBase64 = zoneChart.base64.replace(/^data:image\/\w+;base64,/, '');
-      if (hrCurve)   body.hrCurveBase64  = hrCurve.base64.replace(/^data:image\/\w+;base64,/, '');
+
+      // For each picked image: upload full-quality to storage AND compress for AI.
+      if (zoneChart) {
+        try {
+          body.zoneStoragePath = await uploadFullQuality(zoneChart, 'zone');
+        } catch (err) {
+          console.log('[hr-upload] zone storage upload failed:', String(err));
+          setErrorMsg(String(err instanceof Error ? err.message : err));
+          return;
+        }
+        body.zoneChartBase64 = await compressForAnalysis(zoneChart);
+      }
+      if (hrCurve) {
+        try {
+          body.curveStoragePath = await uploadFullQuality(hrCurve, 'curve');
+        } catch (err) {
+          console.log('[hr-upload] curve storage upload failed:', String(err));
+          setErrorMsg(String(err instanceof Error ? err.message : err));
+          return;
+        }
+        body.hrCurveBase64 = await compressForAnalysis(hrCurve);
+      }
 
       const res = await fetch('https://peak65.vercel.app/api/extract-hr-zones', {
         method: 'POST',
@@ -104,15 +148,32 @@ function HRUploadPrompt({
         body: JSON.stringify(body),
       });
 
-      if (!res.ok) { onNetworkError(); return; }
+      if (!res.ok) {
+        const text = (await res.text().catch(() => '')).slice(0, 200);
+        console.log('[hr-upload] analysis HTTP error:', res.status, text);
+        setErrorMsg(`Analysis failed (${res.status}): ${text}`);
+        onNetworkError();
+        return;
+      }
 
       const data = await res.json();
-      if (!data.success || data.analysis?.image_valid === false) { onInvalid(); return; }
+      if (!data.success || data.analysis?.image_valid === false) {
+        console.log('[hr-upload] analysis invalid:', JSON.stringify(data).slice(0, 300));
+        setErrorMsg(
+          data.analysis?.image_valid === false
+            ? 'Couldn’t read that image clearly — try a clearer screenshot.'
+            : `Analysis couldn’t be completed: ${JSON.stringify(data).slice(0, 150)}`,
+        );
+        onInvalid();
+        return;
+      }
 
       const notes = data.hr_coaching_notes || data.analysis?.hr_coaching_notes || null;
       setCoachingNote(notes);
       setShowCoachingNote(true);
-    } catch {
+    } catch (err) {
+      console.log('[hr-upload] analyze exception:', String(err));
+      setErrorMsg(`Couldn’t complete analysis: ${String(err).slice(0, 300)}`);
       onNetworkError();
     } finally {
       setLoading(false);
@@ -220,9 +281,9 @@ function HRUploadPrompt({
               <Animated.View style={{ transform: [{ rotate: spin }] }}>
                 <Feather name="refresh-cw" size={32} color="#e8ff47" />
               </Animated.View>
-              <Text style={{ color: '#f0ede8', fontSize: 17, marginTop: 12 }}>Analyzing your session...</Text>
+              <Text style={{ color: '#f0ede8', fontSize: 17, marginTop: 12 }}>Uploading and analyzing…</Text>
               <Text style={{ color: '#8a877f', fontSize: 14, marginTop: 4, textAlign: 'center' }}>
-                Your coach is reviewing the data. This takes about 10 seconds.
+                Saving your screenshots and reviewing the data. This takes about 10 seconds.
               </Text>
             </View>
           ) : (
