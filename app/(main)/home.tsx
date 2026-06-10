@@ -260,22 +260,38 @@ async function prefetchTabCaches(uid: string, programs: Program[], profileData: 
 // ─── Daily health cache ───────────────────────────────────────────────────────
 
 async function saveHealthCache(uid: string, rd: WearableHealthData, date: string): Promise<void> {
-  await supabase.from('daily_health_readings').upsert({
-    user_id:                uid,
-    date,
-    hrv:                    rd.hrv?.value             ?? null,
-    hrv_source:             rd.hrv?.source            ?? null,
-    resting_hr:             rd.restingHR?.value       ?? null,
-    resting_hr_source:      rd.restingHR?.source      ?? null,
-    sleep_hours:            rd.sleepHours?.value      ?? null,
-    sleep_source:           rd.sleepHours?.source     ?? null,
-    steps:                  rd.steps?.value           ?? null,
-    steps_source:           rd.steps?.source          ?? null,
-    active_calories:        rd.activeCalories?.value  ?? null,
-    active_calories_source: rd.activeCalories?.source ?? null,
-    total_calories:         rd.totalCalories?.value   ?? null,
-    total_calories_source:  rd.totalCalories?.source  ?? null,
-  }, { onConflict: 'user_id,date' });
+  // Build the payload dynamically: only include a metric (and its _source) when it
+  // has a non-null value. Supabase upsert (INSERT ... ON CONFLICT DO UPDATE) only
+  // updates columns present in the payload, so omitting a null metric leaves any
+  // previously-stored value for that day untouched — a missing reading never wipes
+  // a good one.
+  const payload: Record<string, any> = { user_id: uid, reading_date: date };
+
+  if (rd.hrv?.value != null) {
+    payload.hrv = rd.hrv.value;
+    payload.hrv_source = rd.hrv.source ?? null;
+  }
+  if (rd.restingHR?.value != null) {
+    payload.resting_hr = rd.restingHR.value;
+    payload.resting_hr_source = rd.restingHR.source ?? null;
+  }
+  if (rd.sleepHours?.value != null) {
+    payload.sleep_hours = rd.sleepHours.value;
+    payload.sleep_source = rd.sleepHours.source ?? null;
+  }
+  if (rd.steps?.value != null) {
+    payload.steps = rd.steps.value;
+    payload.steps_source = rd.steps.source ?? null;
+  }
+  if (rd.activeCalories?.value != null) {
+    payload.active_calories = rd.activeCalories.value;
+    payload.active_calories_source = rd.activeCalories.source ?? null;
+  }
+  if (rd.totalCalories?.value != null) {
+    payload.total_calories = rd.totalCalories.value;
+  }
+
+  await supabase.from('daily_health_readings').upsert(payload, { onConflict: 'user_id,reading_date' });
 }
 
 function cacheToReadiness(row: Record<string, any>): WearableHealthData {
@@ -496,7 +512,7 @@ export default function HomeScreen() {
       supabase.from('daily_health_readings')
         .select('*')
         .eq('user_id', uid)
-        .order('date', { ascending: false })
+        .order('reading_date', { ascending: false })
         .limit(1)
         .maybeSingle(),
     ]);
