@@ -410,7 +410,7 @@ export default function ProfileScreen() {
 
       if (!mounted.current) return;
       setHealthData(data);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = new Date().toLocaleDateString('en-CA');
 
       // Override HRV with manual entry if logged today (for Zepp/non-HK wearables)
       const manualHrvToday = (profileData?.manual_hrv_date === today && profileData?.manual_hrv != null)
@@ -419,21 +419,31 @@ export default function ProfileScreen() {
         data.hrv = { value: manualHrvToday, source: 'Zepp (manual)' };
       }
 
-      await supabase.from('daily_health_readings').upsert({
-        user_id: userId,
-        reading_date: today,
-        hrv: data.hrv?.value ?? null,
-        hrv_source: data.hrv?.source ?? null,
-        resting_hr: data.restingHR?.value ?? null,
-        resting_hr_source: data.restingHR?.source ?? null,
-        sleep_hours: data.sleepHours?.value ?? null,
-        sleep_source: data.sleepHours?.source ?? null,
-        steps: data.steps?.value ?? null,
-        steps_source: data.steps?.source ?? null,
-        active_calories: data.activeCalories?.value ?? null,
-        active_calories_source: data.activeCalories?.source ?? null,
-        total_calories: data.totalCalories?.value ?? null,
-      }, { onConflict: 'user_id,reading_date' });
+      const payload: Record<string, any> = { user_id: userId, reading_date: today };
+      if (data.hrv?.value != null) {
+        payload.hrv = data.hrv.value;
+        payload.hrv_source = data.hrv.source ?? null;
+      }
+      if (data.restingHR?.value != null) {
+        payload.resting_hr = data.restingHR.value;
+        payload.resting_hr_source = data.restingHR.source ?? null;
+      }
+      if (data.sleepHours?.value != null) {
+        payload.sleep_hours = data.sleepHours.value;
+        payload.sleep_source = data.sleepHours.source ?? null;
+      }
+      if (data.steps?.value != null) {
+        payload.steps = data.steps.value;
+        payload.steps_source = data.steps.source ?? null;
+      }
+      if (data.activeCalories?.value != null) {
+        payload.active_calories = data.activeCalories.value;
+        payload.active_calories_source = data.activeCalories.source ?? null;
+      }
+      if (data.totalCalories?.value != null) {
+        payload.total_calories = data.totalCalories.value;
+      }
+      await supabase.from('daily_health_readings').upsert(payload, { onConflict: 'user_id,reading_date' });
 
       // Compute and store Peak Score
       await calculatePeakScore(userId, {
@@ -1094,7 +1104,7 @@ export default function ProfileScreen() {
                 onPress={async () => {
                   const v = parseInt(manualHRVInput, 10);
                   if (!v || v < 1 || v > 200) { setManualHRVError('Enter a value between 1 and 200 ms'); return; }
-                  const today = new Date().toISOString().slice(0, 10);
+                  const today = new Date().toLocaleDateString('en-CA');
                   await updateProfile({ manual_hrv: v, manual_hrv_date: today });
                   setManualHRVOpen(false);
                   if (profile?.id) loadHealthData(profile.id);
