@@ -17,7 +17,6 @@ import {
   getTodayHealthData, fetchTodayHealthData, fetchTodayWorkouts,
   type HealthData, type WearableHealthData,
 } from '../../lib/healthKit';
-import { fetchAllWhoopData, mergeWhoopIntoHealthData } from '../../lib/whoopApi';
 import { computeTDEEFromProfile, getActivityMultiplier } from '../../lib/tdee';
 import { calculatePeakScore, type PeakScoreResult } from '../../lib/peakScore';
 import {
@@ -66,8 +65,6 @@ type HomeProfile = {
   chest_strap_tip_shown: boolean | null;
   coached_upsell_dismissed: boolean | null;
   whoop_connected: boolean | null;
-  whoop_access_token: string | null;
-  whoop_refresh_token: string | null;
   garmin_connected: boolean | null;
   coros_connected: boolean | null;
   manual_hrv: number | null;
@@ -502,7 +499,7 @@ export default function HomeScreen() {
       supabase.from('session_logs').select('completed_at, completed, session_name, session_time')
         .eq('user_id', uid).eq('completed', true).order('completed_at', { ascending: false }),
       supabase.from('profiles')
-        .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, whoop_access_token, whoop_refresh_token, garmin_connected, coros_connected, manual_hrv, manual_hrv_date, program_start_date')
+        .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, garmin_connected, coros_connected, manual_hrv, manual_hrv_date, program_start_date')
         .eq('id', uid)
         .maybeSingle(),
       supabase.from('external_workouts')
@@ -582,9 +579,7 @@ export default function HomeScreen() {
     const isHealthConnected =
       profileData?.wearable_connected === true &&
       profileData?.wearable_type === 'apple_health';
-    const isWhoopConnected =
-      profileData?.whoop_connected === true ||
-      !!(profileData?.whoop_access_token || profileData?.whoop_refresh_token);
+    const isWhoopConnected = profileData?.whoop_connected === true;
 
     console.log('[health] wearable state from profile:', {
       wearable_connected: profileData?.wearable_connected,
@@ -633,8 +628,10 @@ export default function HomeScreen() {
     } else {
       console.log('[cache] no cache row — will show shimmer until fresh data arrives');
     }
-    // Show shimmer on metric cards while background fetch runs (only if no cache → no readinessData yet)
-    if (isHealthConnected || isWhoopConnected) setFetchingFresh(true);
+    // Show shimmer on metric cards while the on-device HealthKit fetch runs. Whoop-only
+    // users have no on-device fetch (backend cron writes the row), so they display
+    // straight from the cached read above — no shimmer needed.
+    if (isHealthConnected) setFetchingFresh(true);
 
     detectCandidates(uid)
       .then(() => getPendingCandidates(uid))
@@ -718,26 +715,8 @@ export default function HomeScreen() {
             return;
           }
           console.log('[health] fetchTodayHealthData result:', JSON.stringify(rd));
-          if (isWhoopConnected) {
-            console.log('[health] Whoop also connected — fetching Whoop API to merge over HealthKit...');
-            try {
-              console.log('[whoop-debug] calling fetchAllWhoopData (Apple Health + Whoop path)...');
-              const whoopData = await fetchAllWhoopData(uid);
-              console.log('[whoop-debug] fetchAllWhoopData returned — myId:', myId, 'current:', loadIdRef.current);
-              console.log('[whoop-debug] recovery:', JSON.stringify(whoopData.recovery));
-              console.log('[whoop-debug] sleep:', JSON.stringify(whoopData.sleep));
-              console.log('[whoop-debug] workouts count:', whoopData.workouts.length, JSON.stringify(whoopData.workouts));
-              console.log('[whoop-debug] cycle:', JSON.stringify(whoopData.cycle));
-              if (!mounted.current || myId !== loadIdRef.current) {
-                console.log('[whoop-debug] BAILED after fetchAllWhoopData (Apple Health path) — not setting readinessData');
-                return;
-              }
-              rd = mergeWhoopIntoHealthData(rd, whoopData);
-              console.log('[health] post-Whoop merge result:', JSON.stringify(rd));
-            } catch (e) {
-              console.log('[home] whoop merge error:', e);
-            }
-          }
+          // Whoop data (if any) is written to daily_health_readings by the backend cron
+          // and surfaced via the cached read above — no direct Whoop fetch on-device.
           console.log('[whoop-debug] calling setReadinessData (Apple Health path) — hrv:', rd.hrv?.value, '| sleep:', rd.sleepHours?.value, '| rhr:', rd.restingHR?.value, '| steps:', rd.steps?.value, '| active:', rd.activeCalories?.value, '| total:', rd.totalCalories?.value);
           setReadinessData(rd);
           setFetchingFresh(false);
@@ -760,75 +739,10 @@ export default function HomeScreen() {
         })
         .catch(e => { console.log('[home] readiness fetch error:', e); setFetchingFresh(false); });
 
-    } else if (isWhoopConnected) {
-      console.log('[health] Apple Health not connected — running Whoop-only path');
-      (async () => {
-        console.log('[whoop-debug] IIFE started — myId:', myId, 'current:', loadIdRef.current, 'mounted:', mounted.current);
-        try {
-          if (!mounted.current || myId !== loadIdRef.current) {
-            console.log('[whoop-debug] BAILED before fetch — myId:', myId, 'current:', loadIdRef.current);
-            return;
-          }
-          console.log('[whoop-debug] calling fetchAllWhoopData (Whoop-only path)...');
-          const whoopData = await fetchAllWhoopData(uid);
-          console.log('[whoop-debug] fetchAllWhoopData returned — myId:', myId, 'current:', loadIdRef.current, 'mounted:', mounted.current);
-          console.log('[whoop-debug] recovery:', JSON.stringify(whoopData.recovery));
-          console.log('[whoop-debug] sleep:', JSON.stringify(whoopData.sleep));
-          console.log('[whoop-debug] workouts count:', whoopData.workouts.length, JSON.stringify(whoopData.workouts));
-          console.log('[whoop-debug] cycle:', JSON.stringify(whoopData.cycle));
-          if (!mounted.current || myId !== loadIdRef.current) {
-            console.log('[whoop-debug] BAILED after fetch — myId:', myId, 'current:', loadIdRef.current);
-            return;
-          }
-          const empty: WearableHealthData = {
-            hrv: null, restingHR: null, sleepHours: null,
-            steps: null, activeCalories: null, basalCalories: null, totalCalories: null,
-          };
-          const rd = mergeWhoopIntoHealthData(empty, whoopData);
-          console.log('[whoop-debug] merge complete — hrv:', rd.hrv?.value, '| sleep:', rd.sleepHours?.value, '| rhr:', rd.restingHR?.value, '| steps:', rd.steps?.value, '| active:', rd.activeCalories?.value, '| total:', rd.totalCalories?.value);
-          console.log('[whoop-debug] calling setReadinessData...');
-          setReadinessData(rd);
-          setFetchingFresh(false);
-          saveHealthCache(uid, rd, new Date().toLocaleDateString('en-CA')).catch(() => {});
-          setHealthData({
-            steps:             rd.steps?.value         ?? null,
-            activeCalories:    rd.activeCalories?.value ?? null,
-            totalCalories:     rd.totalCalories?.value  ?? null,
-            restingHR:         rd.restingHR?.value      ?? null,
-            hrv:               rd.hrv?.value            ?? null,
-            sleepHours:        rd.sleepHours?.value     ?? null,
-            exerciseMinutes:   null,
-            lastActiveCalSync: null,
-          });
-          if (profileData) {
-            const tdee = computeTDEEFromProfile(profileData);
-            if (tdee.ok) {
-              setTdeeBase(tdee.value);
-              const tDays = profileData.current_training_days != null
-                ? (parseInt(profileData.current_training_days, 10) || 4)
-                : profileData.rest_days != null ? Math.max(0, 7 - profileData.rest_days) : 4;
-              setBmr(Math.round(tdee.value / getActivityMultiplier(tDays)));
-            }
-            const wearables = getConnectedWearables(profileData);
-            const base = tdee.ok ? tdee.value : null;
-            const tDays2 = profileData.current_training_days != null
-              ? (parseInt(profileData.current_training_days, 10) || 4)
-              : profileData.rest_days != null ? Math.max(0, 7 - profileData.rest_days) : 4;
-            const localBmr = base != null ? Math.round(base / getActivityMultiplier(tDays2)) : null;
-            const sources = resolveAllSources(wearables, rd, profileData, base, localBmr);
-            console.log('[home] Whoop-only totalCal final:', sources.totalCal.value, '| source:', sources.totalCal.source);
-          }
-          const hrv   = rd.hrv?.value       ?? null;
-          const sleep = rd.sleepHours?.value ?? null;
-          const rhr   = rd.restingHR?.value  ?? null;
-          console.log('[home] Whoop-only readiness row final values:', { hrv, sleep, rhr });
-        } catch (e) {
-          console.log('[whoop-debug] EXCEPTION in Whoop-only IIFE:', String(e));
-          setFetchingFresh(false);
-        }
-      })();
     } else {
-      console.log('[health] no wearable connected — all metrics will show "--"');
+      // Whoop-only users (no Apple Health) display from the cached daily_health_readings
+      // read above, which the backend cron keeps current — no on-device Whoop fetch.
+      console.log('[health] Apple Health not connected — health metrics come from backend-written daily_health_readings');
     }
 
     if (prog?.week_number === 1 && !week2Exists && !week2TriggeredRef.current) {
@@ -929,7 +843,7 @@ export default function HomeScreen() {
     : sessions.map(s => s.name).filter(Boolean).join(' + ');
   const workoutSummary = todayDay ? buildWorkoutSummary(todayDay) : '';
 
-  const hasWearable = healthConnected || !!(storedProfile?.whoop_connected || storedProfile?.whoop_access_token || storedProfile?.whoop_refresh_token);
+  const hasWearable = healthConnected || storedProfile?.whoop_connected === true;
 
   const hasWearableData = hasWearable && !!readinessData;
   const hrvR   = hasWearableData ? selectHRVSource(readinessData!, storedProfile ?? {}) : null;

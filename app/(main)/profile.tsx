@@ -14,10 +14,7 @@ import { fetchTodayHealthData, fetchTodayWorkouts, type WearableHealthData } fro
 import { computeTDEEFromProfile, type TDEEResult } from '../../lib/tdee';
 import { calculatePeakScore } from '../../lib/peakScore';
 import { getConnectedWearables, resolveAllSources } from '../../lib/wearablePriority';
-import {
-  getWhoopAuthUrl, getPendingOAuthState, exchangeWhoopCode,
-  fetchAllWhoopData, upsertWhoopWorkouts, mergeWhoopIntoHealthData,
-} from '../../lib/whoopApi';
+import { getWhoopAuthUrl } from '../../lib/whoopApi';
 import SliderInput from '../../components/SliderInput';
 import { Colors, Fonts } from '../../lib/theme';
 import { Feather } from '@expo/vector-icons';
@@ -350,38 +347,9 @@ export default function ProfileScreen() {
     setHealthLoading(true);
     try {
       console.log('[profile] calling fetchTodayHealthData');
-      let data = await fetchTodayHealthData();
-
-      // Fetch fresh Whoop fields directly — never rely on possibly-stale component state
-      const { data: freshWhoopProfile } = await supabase
-        .from('profiles')
-        .select('whoop_connected, whoop_access_token, whoop_token_expiry')
-        .eq('id', userId)
-        .maybeSingle();
-
-      console.log('[whoop] profile whoop fields:', {
-        whoop_connected:   freshWhoopProfile?.whoop_connected,
-        has_access_token:  !!(freshWhoopProfile?.whoop_access_token),
-        token_expiry:      freshWhoopProfile?.whoop_token_expiry,
-      });
-      console.log('[whoop] checking whoop connection - profile.whoop_connected:', freshWhoopProfile?.whoop_connected);
-
-      if (freshWhoopProfile?.whoop_connected === true) {
-        console.log('[whoop] whoop is connected, calling fetchAllWhoopData');
-        try {
-          const whoopData = await fetchAllWhoopData(userId);
-          console.log('[whoop] fetchAllWhoopData result:', JSON.stringify(whoopData));
-          if (whoopData?.recovery) console.log('[whoop] recovery data:', JSON.stringify(whoopData.recovery));
-          if (whoopData?.sleep)    console.log('[whoop] sleep data:', JSON.stringify(whoopData.sleep));
-          data = mergeWhoopIntoHealthData(data, whoopData);
-          await upsertWhoopWorkouts(userId, whoopData.workouts);
-          console.log('[whoop] merged into healthData:', JSON.stringify({ hrv: data.hrv, rhr: data.restingHR, sleep: data.sleepHours }));
-        } catch (e) {
-          console.log('[whoop] fetchAllWhoopData error:', e);
-        }
-      } else {
-        console.log('[whoop] whoop not connected or profile not loaded yet');
-      }
+      // Whoop data is fetched and written to daily_health_readings by the backend
+      // cron now — mobile only reads HealthKit here and reads the table for display.
+      const data = await fetchTodayHealthData();
       console.log('[profile] got health data:', JSON.stringify(data));
 
       // Calculate TDEE from profile and override basal/total calories
@@ -418,32 +386,6 @@ export default function ProfileScreen() {
       if (manualHrvToday != null && data.hrv == null) {
         data.hrv = { value: manualHrvToday, source: 'Zepp (manual)' };
       }
-
-      const payload: Record<string, any> = { user_id: userId, reading_date: today };
-      if (data.hrv?.value != null) {
-        payload.hrv = data.hrv.value;
-        payload.hrv_source = data.hrv.source ?? null;
-      }
-      if (data.restingHR?.value != null) {
-        payload.resting_hr = data.restingHR.value;
-        payload.resting_hr_source = data.restingHR.source ?? null;
-      }
-      if (data.sleepHours?.value != null) {
-        payload.sleep_hours = data.sleepHours.value;
-        payload.sleep_source = data.sleepHours.source ?? null;
-      }
-      if (data.steps?.value != null) {
-        payload.steps = data.steps.value;
-        payload.steps_source = data.steps.source ?? null;
-      }
-      if (data.activeCalories?.value != null) {
-        payload.active_calories = data.activeCalories.value;
-        payload.active_calories_source = data.activeCalories.source ?? null;
-      }
-      if (data.totalCalories?.value != null) {
-        payload.total_calories = data.totalCalories.value;
-      }
-      await supabase.from('daily_health_readings').upsert(payload, { onConflict: 'user_id,reading_date' });
 
       // Compute and store Peak Score
       await calculatePeakScore(userId, {
@@ -526,13 +468,6 @@ export default function ProfileScreen() {
 
     const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
     if (!mounted.current || myId !== loadIdRef.current) { setLoading(false); return; }
-
-    if ((data?.whoop_access_token || data?.whoop_refresh_token) && !data?.whoop_connected) {
-      await supabase.from('profiles').update({ whoop_connected: true }).eq('id', session.user.id);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (data) (data as any).whoop_connected = true;
-      console.log('[whoop] auto-restored whoop_connected from saved tokens');
-    }
 
     setProfile(data);
     setLoading(false);
@@ -636,7 +571,16 @@ export default function ProfileScreen() {
 
   async function connectWhoop() {
     setWhoopConnecting(true);
-    const url = await getWhoopAuthUrl();
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    if (!userId) {
+      Alert.alert('Error', 'Could not start Whoop connection. Please sign in again.');
+      setWhoopConnecting(false);
+      return;
+    }
+    // state carries the userId; the backend redirect (getpeak65.com/api/whoop/connect)
+    // performs the code exchange and stores tokens server-side.
+    const url = getWhoopAuthUrl(userId);
     Linking.openURL(url).catch(e => {
       console.log('[whoop] openURL error:', e);
       Alert.alert('Error', 'Could not open Whoop authorization page.');
@@ -672,69 +616,28 @@ export default function ProfileScreen() {
     );
   }
 
-  // Deep link handler — handles peak65://auth/whoop/callback?code=XXX or #code=XXX
+  // Deep link handler — the backend redirects to
+  // peak65://auth/whoop/callback?status=success|error after it has exchanged the
+  // code and stored tokens server-side. Mobile just refreshes its connected state.
   useEffect(() => {
     const handleUrl = async ({ url }: { url: string }) => {
       if (!url.startsWith('peak65://auth/whoop/callback')) return;
       console.log('[whoop] deep link received:', url);
-      try {
-        // Try query string first, then hash fragment (Whoop may use either)
-        let code: string | null = null;
-        const queryIdx = url.indexOf('?');
-        const hashIdx  = url.indexOf('#');
-        if (queryIdx !== -1) {
-          const qs = url.slice(queryIdx + 1).split('#')[0];
-          code = new URLSearchParams(qs).get('code');
-          if (code) console.log('[whoop] code found in: query');
-        }
-        if (!code && hashIdx !== -1) {
-          code = new URLSearchParams(url.slice(hashIdx + 1)).get('code');
-          if (code) console.log('[whoop] code found in: hash');
-        }
-        if (!code) {
-          console.log('[whoop] no code found in URL:', url);
-          return;
-        }
-        console.log('[whoop] extracted code:', code.substring(0, 10) + '...');
+      const queryIdx = url.indexOf('?');
+      const status = queryIdx !== -1
+        ? new URLSearchParams(url.slice(queryIdx + 1)).get('status')
+        : null;
 
-        // Validate state to guard against CSRF
-        let callbackState: string | null = null;
-        if (queryIdx !== -1) {
-          callbackState = new URLSearchParams(url.slice(queryIdx + 1).split('#')[0]).get('state');
-        }
-        if (!callbackState && hashIdx !== -1) {
-          callbackState = new URLSearchParams(url.slice(hashIdx + 1)).get('state');
-        }
-        const expectedState = await getPendingOAuthState();
-        console.log('[whoop] state validation:', callbackState === expectedState ? 'passed' : 'FAILED');
-        if (callbackState !== expectedState) {
-          console.log('[whoop] state mismatch — aborting. got:', callbackState, 'expected:', expectedState);
-          Alert.alert('Error', 'OAuth state mismatch. Please try connecting again.');
-          return;
-        }
-        await AsyncStorage.removeItem('whoop_oauth_state');
-
-        const { data: { session: authSession } } = await supabase.auth.getSession();
-        if (!authSession?.user) return;
+      if (status === 'success') {
         setWhoopConnecting(true);
-
         try {
-          await exchangeWhoopCode(code, authSession.user.id);
-          console.log('[whoop] token exchange succeeded');
-        } catch (error) {
-          console.log('[whoop] token exchange error:', error);
-          throw error;
+          await load(); // re-read profile so whoop_connected flips to true in the UI
+        } finally {
+          setWhoopConnecting(false);
         }
-
-        load();
-        const whoopData = await fetchAllWhoopData(authSession.user.id);
-        await upsertWhoopWorkouts(authSession.user.id, whoopData.workouts);
-        Alert.alert('Whoop Connected', 'Your Whoop data has been synced successfully.');
-      } catch (e) {
-        console.log('[whoop] deep link error:', e);
+        Alert.alert('Whoop Connected', 'Your Whoop data will sync automatically.');
+      } else {
         Alert.alert('Error', 'Could not connect Whoop. Please try again.');
-      } finally {
-        setWhoopConnecting(false);
       }
     };
 
