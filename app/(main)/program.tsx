@@ -547,7 +547,7 @@ function DayCard({
   profile: TimeTrialProfile | null;
   completedSessionKeys: Set<string>;
 }) {
-  const isRest = day.type === 'rest' || !day.sessions?.length;
+  const isRest = day.type !== 'race' && (day.type === 'rest' || !day.sessions?.length);
   const [expanded, setExpanded] = React.useState(isToday);
   console.log('[today check]', day.day, isToday);
 
@@ -848,7 +848,7 @@ function DayCard({
     <>
       <Text style={pd.dayName}>{day.day.toUpperCase()}</Text>
       <Text style={[pd.dayType, {
-        color: day.type === 'hard' ? '#e8ff47' : day.type === 'easy' ? '#00d4aa' : day.type === 'trial' ? '#e8ff47' : '#3a3a3a'
+        color: day.type === 'hard' ? '#e8ff47' : day.type === 'easy' ? '#00d4aa' : day.type === 'trial' ? '#e8ff47' : day.type === 'race' ? '#00d4aa' : '#3a3a3a'
       }]}>
         {(day.type ?? 'rest').toUpperCase()}
       </Text>

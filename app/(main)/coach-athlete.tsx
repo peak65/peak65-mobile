@@ -471,7 +471,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
                       ? 'Rest'
                       : day.sessions[0]?.name ?? '—'}
                   </Text>
-                  <Text style={styles.overviewType}>{day.type}</Text>
+                  <Text style={styles.overviewType}>{day.type === 'race' ? 'Race' : day.type}</Text>
                 </View>
               ))
             )}

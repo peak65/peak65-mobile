@@ -831,7 +831,7 @@ export default function HomeScreen() {
   }
 
   const sessions  = todayDay?.sessions ?? [];
-  const isRestDay = todayDay?.type === 'rest' || sessions.length === 0;
+  const isRestDay = todayDay?.type !== 'race' && (todayDay?.type === 'rest' || sessions.length === 0);
 
   const dayIndex = program?.program_data?.days?.findIndex(d => d.day === todayDay?.day) ?? -1;
   const dayLabel = dayIndex >= 0 ? `Day ${dayIndex + 1}` : (todayDay?.day ?? '');
@@ -1024,11 +1024,13 @@ export default function HomeScreen() {
                 <View style={[styles.typeBadge, {
                   backgroundColor: todayDay!.type === 'hard' || todayDay!.type === 'trial' ? 'rgba(232,255,71,0.15)' :
                                    todayDay!.type === 'easy' ? 'rgba(0,212,170,0.15)' :
+                                   todayDay!.type === 'race' ? 'rgba(0,212,170,0.15)' :
                                    'rgba(138,135,127,0.15)',
                 }]}>
                   <Text style={[styles.typeBadgeText, {
                     color: todayDay!.type === 'hard' || todayDay!.type === 'trial' ? '#e8ff47' :
                            todayDay!.type === 'easy' ? '#00d4aa' :
+                           todayDay!.type === 'race' ? '#00d4aa' :
                            '#8a877f',
                   }]}>{typeLabel.toUpperCase()}</Text>
                 </View>
