@@ -15,6 +15,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList, ProgramDay, ProgramSession } from '../_layout';
+import TrendLineChart from '../components/TrendLineChart';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CoachAthleteDetail'>;
 
@@ -127,6 +128,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
   const [program, setProgram]           = useState<{ id: string; week_number: number; week_start_date: string; days: ProgramDay[] } | null>(null);
   const [sessionLogs, setSessionLogs]   = useState<SessionLogRow[]>([]);
   const [scores, setScores]             = useState<ScoreRow[]>([]);
+  const [healthReadings, setHealthReadings] = useState<any[]>([]);
   const [messages, setMessages]         = useState<MessageRow[]>([]);
   const [notes, setNotes]               = useState('');
   const [coachAthleteId, setCoachAthleteId] = useState<string | null>(null);
@@ -209,6 +211,18 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
     if (!mounted.current) return;
     if (!scoreRes.error) setScores(scoreRes.data ?? []);
 
+    // Health readings (last 30 days) — RLS now permits a coach to read their athletes'
+    const thirtyAgo = new Date();
+    thirtyAgo.setDate(thirtyAgo.getDate() - 29);
+    const healthRes = await supabase
+      .from('daily_health_readings')
+      .select('hrv, resting_hr, sleep_hours, reading_date')
+      .eq('user_id', athleteId)
+      .gte('reading_date', thirtyAgo.toISOString().split('T')[0])
+      .order('reading_date', { ascending: true });
+    if (!mounted.current) return;
+    if (!healthRes.error) setHealthReadings(healthRes.data ?? []);
+
     // Messages thread
     const msgRes = await supabase
       .from('messages')
@@ -283,6 +297,11 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
   const tierLabel = TIER_LABELS[profile?.tier ?? ''] ?? profile?.tier ?? '';
   const last7     = getLast7Days();
   const scoreByDate = Object.fromEntries(scores.map(s => [s.date, s]));
+
+  // Health trend data (30 days) — nulls preserved; TrendLineChart is gap-tolerant.
+  const hrvData   = healthReadings.map(r => ({ date: r.reading_date, value: r.hrv ?? null }));
+  const rhrData   = healthReadings.map(r => ({ date: r.reading_date, value: r.resting_hr ?? null }));
+  const sleepData = healthReadings.map(r => ({ date: r.reading_date, value: r.sleep_hours ?? null }));
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -380,6 +399,28 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
                   );
                 })}
               </View>
+            </View>
+          </View>
+
+          {/* ── 3b. HEALTH TRENDS (30 days) ───────────────────────────────── */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>HRV — Last 30 Days</Text>
+            <View style={styles.chartCard}>
+              <TrendLineChart data={hrvData} color={YELLOW} unit=" ms" label="HRV" />
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Resting HR — Last 30 Days</Text>
+            <View style={styles.chartCard}>
+              <TrendLineChart data={rhrData} color="#5b8def" unit=" bpm" label="RHR" />
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Sleep — Last 30 Days</Text>
+            <View style={styles.chartCard}>
+              <TrendLineChart data={sleepData} color={GREEN} unit=" h" label="Sleep" formatValue={(v) => v.toFixed(1)} />
             </View>
           </View>
 
