@@ -16,7 +16,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { supabase } from '../../lib/supabase';
 import type { AuthStackParamList } from '../_layout';
-import { Colors, Fonts } from '../../lib/theme';
+import { Colors } from '../../lib/theme';
 import { Logo } from '../../components/Logo';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
@@ -54,7 +54,7 @@ export default function LoginScreen({ navigation }: Props) {
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.inner}>
-          <Logo width={200} />
+          <Logo width={200} style={{ marginBottom: 32 }} />
 
           <View style={styles.form}>
         <TextInput
@@ -111,13 +111,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
-  },
-  logo: {
-    fontSize: 48,
-    fontFamily: Fonts.metricHeavy,
-    color: Colors.accent,
-    marginBottom: 48,
-    letterSpacing: -1,
   },
   form: {
     width: '100%',
