@@ -286,8 +286,8 @@ async function resolveAppState(
     return { state: 'unauthenticated', isCoach: false };
   }
 
-  if (profile?.role === 'admin' || profile?.role === 'coach') {
-    return { state: 'authenticated', isCoach: profile.role === 'coach' };
+  if (profile?.role === 'coach') {
+    return { state: 'authenticated', isCoach: true };
   }
 
   if (!profile?.first_name) return { state: 'onboarding', isCoach: false };
