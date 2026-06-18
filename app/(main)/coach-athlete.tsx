@@ -46,6 +46,7 @@ type Profile = {
 type SessionLogRow = {
   id: string;
   day_index: number;
+  day_name: string | null;
   session_name: string;
   completed: boolean;
   completed_at: string | null;
@@ -107,11 +108,15 @@ function dayOfWeekLabel(dateStr: string): string {
 }
 
 function getDayStatus(
+  dayName: string,
   dayIndex: number,
   weekStartDate: string,
   logs: SessionLogRow[],
 ): DayStatus {
-  const logsForDay = logs.filter(l => l.day_index === dayIndex);
+  // Match logs by day_name — day_index is never written to session_logs (null in
+  // every row), whereas day_name is reliably populated. dayIndex is still used
+  // below to compute the day's calendar date for the missed/upcoming check.
+  const logsForDay = logs.filter(l => l.day_name === dayName);
   if (logsForDay.some(l => l.completed)) return 'completed';
 
   const weekStart = new Date(weekStartDate);
@@ -266,7 +271,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
     (async () => {
       const logsRes = await supabase
         .from('session_logs')
-        .select('id, day_index, session_name, completed, completed_at, rpe, log_value, log_field, notes')
+        .select('id, day_index, day_name, session_name, completed, completed_at, rpe, log_value, log_field, notes')
         .eq('user_id', athleteId)
         .eq('week_number', selectedWeekNumber);
       if (active && mounted.current) setSessionLogs(logsRes.data ?? []);
@@ -390,8 +395,8 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
               <Text style={styles.emptyText}>No program yet.</Text>
             ) : (
               program.days.map((day, i) => {
-                const status = getDayStatus(day.day_index ?? i, program.week_start_date, sessionLogs);
-                const logsForDay = sessionLogs.filter(l => l.day_index === (day.day_index ?? i));
+                const status = getDayStatus(day.day, day.day_index ?? i, program.week_start_date, sessionLogs);
+                const logsForDay = sessionLogs.filter(l => l.day_name === day.day);
                 const expanded = expandedSession === `day-${i}`;
 
                 return (
