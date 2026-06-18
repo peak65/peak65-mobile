@@ -79,7 +79,7 @@ type StepKey =
   | 'trainingDays' | 'hyroxAvailability' | 'hyroxDoubles' | 'wearable' | 'referral'
   | 'gfClosing' | 'onboardingSummary';
 
-type ClosingPhase = null | 'loading' | 'assessment' | 'startdate';
+type ClosingPhase = null | 'assessment' | 'startdate';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -112,14 +112,6 @@ const CHECKLIST_ITEMS = [
   'Targeting your weakest stations',
   'Individualizing your program...',
 ];
-
-const GENERATING_TIPS = [
-  'Threshold sessions are programmed before strength — always.',
-  'Your weakest station gets extra attention in week one.',
-  'Every run in your program traces back to your time trial.',
-  'Recovery days are part of the program, not a break from it.',
-];
-
 
 // ─── Step Logic ───────────────────────────────────────────────────────────────
 
@@ -293,7 +285,6 @@ export default function OnboardingScreen({ navigation }: Props) {
   const [goalPickerKey, setGoalPickerKey] = useState(0);
   const [referralOther, setReferralOther] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatingTipIdx, setGeneratingTipIdx] = useState(0);
 
   const stepOpacity = useRef(new Animated.Value(1)).current;
 
@@ -332,28 +323,20 @@ export default function OnboardingScreen({ navigation }: Props) {
   }, [currentKey]);
 
 
-  // Loading checklist ticker — auto-advances to 'assessment' when complete
-  useEffect(() => {
-    if (closingPhase !== 'loading') return;
-    if (checklistStep >= CHECKLIST_ITEMS.length) {
-      const t = setTimeout(() => setClosingPhase('assessment'), 600);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => setChecklistStep(s => s + 1), 1800);
-    return () => clearTimeout(t);
-  }, [closingPhase, checklistStep]);
-
-  // Loading card rotator
-  useEffect(() => {
-    if (closingPhase !== 'loading') return;
-    const t = setInterval(() => setCardIdx(i => (i + 1) % COACHING_CARDS.length), 3000);
-    return () => clearInterval(t);
-  }, [closingPhase]);
-
-  // Generating tip rotator
+  // Checklist ticker — runs during the real generation. Advances every 1800ms
+  // and STOPS once all items are checked. Does NOT auto-advance the phase;
+  // navigation is driven by the API success in callGenerateAssessment.
   useEffect(() => {
     if (!isGenerating) return;
-    const t = setInterval(() => setGeneratingTipIdx(i => (i + 1) % GENERATING_TIPS.length), 2000);
+    if (checklistStep >= CHECKLIST_ITEMS.length) return;
+    const t = setTimeout(() => setChecklistStep(s => s + 1), 1800);
+    return () => clearTimeout(t);
+  }, [isGenerating, checklistStep]);
+
+  // Coaching card rotator (runs during generation)
+  useEffect(() => {
+    if (!isGenerating) return;
+    const t = setInterval(() => setCardIdx(i => (i + 1) % COACHING_CARDS.length), 3000);
     return () => clearInterval(t);
   }, [isGenerating]);
 
@@ -623,9 +606,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       return;
     }
 
-    setChecklistStep(0);
-    setCardIdx(0);
-    setClosingPhase('loading');
+    setClosingPhase('assessment');
   }
 
   // ── Step renders ──────────────────────────────────────────────────────────────
@@ -1595,55 +1576,6 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   // ── Closing phase renders ─────────────────────────────────────────────────────
 
-  if (closingPhase === 'loading') {
-    return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <Logo width={150} />
-        <View style={{ flex: 1, paddingHorizontal: 24, justifyContent: 'center' }}>
-          <Text style={{
-            fontSize: 32,
-            fontWeight: '800',
-            color: '#f0ede8',
-            marginBottom: 8,
-            fontFamily: 'BarlowCondensed_700Bold',
-          }}>
-            {`${data.first_name || 'Athlete'}, your program\nis being built.`}
-          </Text>
-          <Text style={{ fontSize: 14, color: '#8a877f', marginBottom: 40, lineHeight: 20 }}>
-            This takes a few seconds.
-          </Text>
-          {CHECKLIST_ITEMS.map((item, idx) => {
-            const done = checklistStep > idx;
-            const active = checklistStep === idx;
-            return (
-              <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <View style={{
-                  width: 22, height: 22, borderRadius: 11,
-                  backgroundColor: done ? '#e8ff47' : '#1a1a1a',
-                  borderWidth: 1,
-                  borderColor: done ? '#e8ff47' : active ? '#e8ff47' : '#333',
-                  alignItems: 'center', justifyContent: 'center',
-                }}>
-                  {done && <Text style={{ color: '#080808', fontSize: 12, fontWeight: '900' }}>✓</Text>}
-                  {active && !done && <ActivityIndicator size="small" color="#e8ff47" />}
-                </View>
-                <Text style={{
-                  fontSize: 14,
-                  color: done ? '#f0ede8' : active ? '#f0ede8' : '#8a877f',
-                  fontWeight: done || active ? '600' : '400',
-                  flex: 1,
-                }}>{item}</Text>
-              </View>
-            );
-          })}
-          <View style={[styles.coachingCard, { marginTop: 32 }]}>
-            <Text style={[styles.coachingText, { textAlign: 'center' }]}>{COACHING_CARDS[cardIdx]}</Text>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   if (closingPhase === 'assessment') {
     const isHyrox = data.goal === 'hyrox';
     const dayOrder = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
@@ -1980,6 +1912,8 @@ export default function OnboardingScreen({ navigation }: Props) {
 
     const handleBuildProgram = async () => {
       if (!selectedStartDate) return;
+      setChecklistStep(0);
+      setCardIdx(0);
       setIsGenerating(true);
       const { data: auth } = await supabase.auth.getUser();
       if (!auth?.user) return;
@@ -1989,7 +1923,6 @@ export default function OnboardingScreen({ navigation }: Props) {
         program_start_date: formattedDate,
         timezone: tz,
       }).eq('id', auth.user.id);
-      setChecklistStep(0);
       callGenerateAssessment();
     };
 
@@ -1997,26 +1930,45 @@ export default function OnboardingScreen({ navigation }: Props) {
       return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
           <Logo width={150} />
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 }}>
+          <View style={{ flex: 1, paddingHorizontal: 24, justifyContent: 'center' }}>
             <Text style={{
-              fontSize: 38,
+              fontSize: 32,
               fontWeight: '800',
               color: '#f0ede8',
+              marginBottom: 8,
               fontFamily: 'BarlowCondensed_700Bold',
-              textAlign: 'center',
-              marginBottom: 12,
-              lineHeight: 44,
             }}>
-              Building your program.
+              {data.first_name ? `${data.first_name}, your program\nis being built.` : 'Your program\nis being built.'}
             </Text>
-            <Text style={{ fontSize: 14, color: '#8a877f', marginBottom: 40, textAlign: 'center' }}>
-              This takes about 10 seconds.
+            <Text style={{ fontSize: 14, color: '#8a877f', marginBottom: 40, lineHeight: 20 }}>
+              This takes a few seconds.
             </Text>
-            <ActivityIndicator size="large" color="#e8ff47" />
-            <View style={{ marginTop: 48, paddingHorizontal: 8 }}>
-              <Text style={{ color: '#8a877f', fontSize: 14, textAlign: 'center', lineHeight: 22 }}>
-                {GENERATING_TIPS[generatingTipIdx]}
-              </Text>
+            {CHECKLIST_ITEMS.map((item, idx) => {
+              const done = checklistStep > idx;
+              const active = checklistStep === idx;
+              return (
+                <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                  <View style={{
+                    width: 22, height: 22, borderRadius: 11,
+                    backgroundColor: done ? '#e8ff47' : '#1a1a1a',
+                    borderWidth: 1,
+                    borderColor: done ? '#e8ff47' : active ? '#e8ff47' : '#333',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {done && <Text style={{ color: '#080808', fontSize: 12, fontWeight: '900' }}>✓</Text>}
+                    {active && !done && <ActivityIndicator size="small" color="#e8ff47" />}
+                  </View>
+                  <Text style={{
+                    fontSize: 14,
+                    color: done ? '#f0ede8' : active ? '#f0ede8' : '#8a877f',
+                    fontWeight: done || active ? '600' : '400',
+                    flex: 1,
+                  }}>{item}</Text>
+                </View>
+              );
+            })}
+            <View style={[styles.coachingCard, { marginTop: 32 }]}>
+              <Text style={[styles.coachingText, { textAlign: 'center' }]}>{COACHING_CARDS[cardIdx]}</Text>
             </View>
           </View>
         </SafeAreaView>
