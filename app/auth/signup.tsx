@@ -62,7 +62,7 @@ export default function SignupScreen({ navigation }: Props) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.inner}>
-          <Logo width={200} />
+          <Logo width={200} style={{ marginLeft: 0 }} />
           <Text style={styles.successTitle}>Check your email</Text>
           <Text style={styles.successBody}>
             We sent a confirmation link to {email}. Click it to activate your account,
@@ -84,7 +84,7 @@ export default function SignupScreen({ navigation }: Props) {
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.inner}>
-          <Logo width={200} />
+          <Logo width={200} style={{ marginLeft: 0 }} />
 
           <View style={styles.form}>
         <TextInput

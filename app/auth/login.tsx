@@ -54,7 +54,7 @@ export default function LoginScreen({ navigation }: Props) {
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.inner}>
-          <Logo width={200} style={{ marginBottom: 32 }} />
+          <Logo width={200} style={{ marginBottom: 32, marginLeft: 0 }} />
 
           <View style={styles.form}>
         <TextInput

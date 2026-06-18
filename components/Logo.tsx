@@ -7,7 +7,7 @@ export function Logo({ width = 120, style }: { width?: number; style?: StyleProp
   return (
     <Image
       source={require('../assets/peak65-logo.png')}
-      style={[{ width, height: undefined, aspectRatio: 1.95, resizeMode: 'contain' }, style]}
+      style={[{ width, height: undefined, aspectRatio: 1.95, resizeMode: 'contain', marginLeft: 16 }, style]}
     />
   );
 }
