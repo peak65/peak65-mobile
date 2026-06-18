@@ -507,7 +507,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   const callGenerateAssessment = useCallback(async () => {
     setApiError(false);
     const { data: authData } = await supabase.auth.getUser();
-    if (!authData.user) { setApiError(true); return; }
+    if (!authData.user) { setApiError(true); setIsGenerating(false); return; }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
     try {
@@ -523,6 +523,7 @@ export default function OnboardingScreen({ navigation }: Props) {
     } catch {
       clearTimeout(timeout);
       setApiError(true);
+      setIsGenerating(false);
     }
   }, []);
 
@@ -1925,6 +1926,28 @@ export default function OnboardingScreen({ navigation }: Props) {
       }).eq('id', auth.user.id);
       callGenerateAssessment();
     };
+
+    if (apiError) {
+      return (
+        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+          <Logo width={150} />
+          <View style={{ flex: 1, paddingHorizontal: 24, justifyContent: 'center', alignItems: 'center' }}>
+            <Text style={{ fontSize: 32, fontWeight: '800', color: '#f0ede8', marginBottom: 12, fontFamily: 'BarlowCondensed_700Bold', textAlign: 'center' }}>
+              Let's try that again.
+            </Text>
+            <Text style={{ fontSize: 14, color: '#8a877f', marginBottom: 40, lineHeight: 20, textAlign: 'center' }}>
+              Looks like a connection hiccup. Your answers are saved — tap to pick back up.
+            </Text>
+            <TouchableOpacity
+              onPress={() => { setApiError(false); handleBuildProgram(); }}
+              style={{ backgroundColor: '#e8ff47', borderRadius: 16, paddingVertical: 18, paddingHorizontal: 48, width: '100%', alignItems: 'center' }}
+            >
+              <Text style={{ color: '#080808', fontSize: 16, fontWeight: '800' }}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      );
+    }
 
     if (isGenerating) {
       return (
