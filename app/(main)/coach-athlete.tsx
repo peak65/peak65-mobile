@@ -14,8 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { supabase } from '../../lib/supabase';
-import type { MainStackParamList, ProgramDay, ProgramSession } from '../_layout';
+import type { MainStackParamList, ProgramDay, ProgramSession, ExerciseItem } from '../_layout';
 import TrendLineChart from '../components/TrendLineChart';
+import { groupBySuperset } from '../../lib/programGrouping';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CoachAthleteDetail'>;
 
@@ -506,7 +507,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
             ) : (
               program.days.map((day, i) => (
                 <View key={i} style={styles.overviewRow}>
-                  <Text style={styles.overviewDay}>{day.day}</Text>
+                  <Text style={styles.overviewDay} numberOfLines={1}>{day.day}</Text>
                   <Text style={styles.overviewSession} numberOfLines={1}>
                     {day.is_rest
                       ? 'Rest'
@@ -539,6 +540,20 @@ function StatusBadge({ status }: { status: DayStatus }) {
   );
 }
 
+// One exercise line in the coach view's compact style. Preserves the existing
+// sets×reps / distance / zone formatting; `prefix` carries superset letters or
+// an EMOM time window.
+function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string) {
+  return (
+    <Text key={key} style={styles.detailExercise}>
+      {prefix ? `${prefix} ` : ''}{ex.name}
+      {ex.sets ? `  ${ex.sets}×${ex.reps ?? ''}` : ''}
+      {ex.distance ? `  ${ex.distance}` : ''}
+      {ex.zone ? `  Z${ex.zone}` : ''}
+    </Text>
+  );
+}
+
 function SessionDetail({ day, logs }: { day: ProgramDay; logs: SessionLogRow[] }) {
   const sessions: ProgramSession[] = day.sessions ?? [];
   const completedLog = logs.find(l => l.completed);
@@ -553,14 +568,59 @@ function SessionDetail({ day, logs }: { day: ProgramDay; logs: SessionLogRow[] }
               {block.block_name !== '' && (
                 <Text style={styles.detailBlockName}>{block.block_name}</Text>
               )}
-              {block.exercises?.map((ex, ei) => (
-                <Text key={ei} style={styles.detailExercise}>
-                  {ex.name}
-                  {ex.sets ? `  ${ex.sets}×${ex.reps ?? ''}` : ''}
-                  {ex.distance ? `  ${ex.distance}` : ''}
-                  {ex.zone ? `  Z${ex.zone}` : ''}
-                </Text>
-              ))}
+              {groupBySuperset(block.exercises ?? []).map((group, gi) => {
+                if (group.kind === 'circuit' || group.kind === 'part-circuit') {
+                  const timeCap = (group.members[0]?.ex as any)?.time_cap;
+                  return (
+                    <View key={gi} style={styles.detailGroup}>
+                      {group.kind === 'part-circuit' && group.blockName ? (
+                        <Text style={styles.detailSubBlockName}>{group.blockName}</Text>
+                      ) : null}
+                      <Text style={styles.detailGroupHeader}>
+                        {timeCap ? `${timeCap} AMRAP:` : `${group.rounds} Rounds:`}
+                      </Text>
+                      {group.members.map((m, mi) => coachExerciseLine(m.ex, mi))}
+                      {!!group.rest && (
+                        <Text style={styles.detailRest}>{group.rest} rest between rounds</Text>
+                      )}
+                    </View>
+                  );
+                }
+                if (group.kind === 'emom' || group.kind === 'part-emom') {
+                  const header = `${(group.label ?? 'EMOM').toUpperCase()}${group.rounds ? ` · ${group.rounds} ROUNDS` : ''}`;
+                  return (
+                    <View key={gi} style={styles.detailGroup}>
+                      {group.kind === 'part-emom' && group.blockName ? (
+                        <Text style={styles.detailSubBlockName}>{group.blockName}</Text>
+                      ) : null}
+                      <Text style={styles.detailGroupHeader}>{header}</Text>
+                      {group.members.map((m, mi) => coachExerciseLine(m.ex, mi, m.ex.time_window ?? undefined))}
+                    </View>
+                  );
+                }
+                if (group.kind === 'superset' || group.kind === 'part-superset') {
+                  return (
+                    <View key={gi} style={styles.detailGroup}>
+                      {group.kind === 'part-superset' && group.blockName ? (
+                        <Text style={styles.detailSubBlockName}>{group.blockName}</Text>
+                      ) : null}
+                      {group.members.map((m, mi) => coachExerciseLine(m.ex, mi, `${String.fromCharCode(65 + mi)})`))}
+                    </View>
+                  );
+                }
+                if (group.kind === 'block') {
+                  return (
+                    <View key={gi} style={styles.detailGroup}>
+                      {group.blockName ? (
+                        <Text style={styles.detailSubBlockName}>{group.blockName}</Text>
+                      ) : null}
+                      {group.members.map((m, mi) => coachExerciseLine(m.ex, mi))}
+                    </View>
+                  );
+                }
+                // single
+                return coachExerciseLine(group.ex, gi);
+              })}
             </View>
           ))}
         </View>
@@ -733,6 +793,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  detailGroup: {
+    gap: 2,
+    marginTop: 2,
+    paddingLeft: 8,
+    borderLeftWidth: 2,
+    borderLeftColor: '#2a2a2a',
+  },
+  detailGroupHeader: {
+    color: YELLOW,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 1,
+  },
+  detailSubBlockName: {
+    color: GREY,
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  detailRest: {
+    color: GREY,
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
   detailLogRow: {
     borderTopWidth: 1,
     borderTopColor: '#2a2a2a',
@@ -887,7 +972,7 @@ const styles = StyleSheet.create({
     color: GREY,
     fontSize: 12,
     fontWeight: '600',
-    width: 36,
+    width: 92,
     textTransform: 'uppercase',
   },
   overviewSession: {
