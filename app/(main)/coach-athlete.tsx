@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList, ProgramDay, ProgramSession, ExerciseItem } from '../_layout';
@@ -52,6 +53,13 @@ type SessionLogRow = {
   log_value: string | null;
   log_field: string | null;
   notes: string | null;
+};
+
+type ProgramWeek = {
+  id: string;
+  week_number: number;
+  week_start_date: string;
+  days: ProgramDay[];
 };
 
 type ScoreRow = {
@@ -126,7 +134,8 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
   const { athleteId } = route.params;
 
   const [profile, setProfile]           = useState<Profile | null>(null);
-  const [program, setProgram]           = useState<{ id: string; week_number: number; week_start_date: string; days: ProgramDay[] } | null>(null);
+  const [weeks, setWeeks]               = useState<ProgramWeek[]>([]);
+  const [selectedWeekIdx, setSelectedWeekIdx] = useState(0);
   const [sessionLogs, setSessionLogs]   = useState<SessionLogRow[]>([]);
   const [scores, setScores]             = useState<ScoreRow[]>([]);
   const [healthReadings, setHealthReadings] = useState<any[]>([]);
@@ -138,6 +147,11 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
   const [sending, setSending]           = useState(false);
   const [loading, setLoading]           = useState(true);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
+
+  // Currently-displayed week, derived from the selected index. Defaults to the
+  // latest week (set in load), so the screen opens on the current week as before.
+  const program = weeks[selectedWeekIdx] ?? null;
+  const selectedWeekNumber = program?.week_number ?? null;
 
   const notesTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesRef  = useRef<ScrollView>(null);
@@ -172,9 +186,8 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
         .from('programs')
         .select('id, week_number, week_start_date, program_data')
         .eq('user_id', athleteId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+        .not('is_draft', 'is', true)
+        .order('week_number', { ascending: true }),
     ]);
 
     if (!mounted.current) return;
@@ -185,20 +198,17 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
       setNotes(caRes.data.notes ?? '');
     }
 
-    const prog = programRes.data;
-    if (prog) {
-      const days: ProgramDay[] = prog.program_data?.days ?? [];
-      setProgram({ id: prog.id, week_number: prog.week_number, week_start_date: prog.week_start_date, days });
-
-      // Session logs for this program week
-      const logsRes = await supabase
-        .from('session_logs')
-        .select('id, day_index, session_name, completed, completed_at, rpe, log_value, log_field, notes')
-        .eq('user_id', athleteId)
-        .eq('week_number', prog.week_number);
-      if (!mounted.current) return;
-      setSessionLogs(logsRes.data ?? []);
-    }
+    // All non-draft weeks, ascending by week_number. Default the selected week to
+    // the latest (last in the ascending list) so the initial view is unchanged.
+    // Session logs for the selected week are loaded by a dedicated effect below.
+    const mappedWeeks: ProgramWeek[] = (programRes.data ?? []).map((p: any) => ({
+      id:              p.id,
+      week_number:     p.week_number,
+      week_start_date: p.week_start_date,
+      days:            (p.program_data?.days ?? []) as ProgramDay[],
+    }));
+    setWeeks(mappedWeeks);
+    setSelectedWeekIdx(mappedWeeks.length > 0 ? mappedWeeks.length - 1 : 0);
 
     // 65 scores (last 7 days) — graceful fallback if table doesn't exist
     const sevenAgo = new Date();
@@ -247,6 +257,22 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
   useEffect(() => {
     load().finally(() => setLoading(false));
   }, [load]);
+
+  // Re-query session logs whenever the selected week changes, so completion and
+  // HR data follow the week currently shown.
+  useEffect(() => {
+    if (selectedWeekNumber == null) { setSessionLogs([]); return; }
+    let active = true;
+    (async () => {
+      const logsRes = await supabase
+        .from('session_logs')
+        .select('id, day_index, session_name, completed, completed_at, rpe, log_value, log_field, notes')
+        .eq('user_id', athleteId)
+        .eq('week_number', selectedWeekNumber);
+      if (active && mounted.current) setSessionLogs(logsRes.data ?? []);
+    })();
+    return () => { active = false; };
+  }, [athleteId, selectedWeekNumber]);
 
   // Auto-save notes after 2 s of inactivity
   function handleNotesChange(text: string) {
@@ -332,7 +358,23 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
               )}
               <View style={styles.headerMeta}>
                 {program && (
-                  <Text style={styles.metaChip}>Week {program.week_number}</Text>
+                  <View style={styles.weekNav}>
+                    <TouchableOpacity
+                      onPress={() => setSelectedWeekIdx(i => Math.max(0, i - 1))}
+                      disabled={selectedWeekIdx <= 0}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <ChevronLeft size={18} color={selectedWeekIdx <= 0 ? GREY : YELLOW} />
+                    </TouchableOpacity>
+                    <Text style={styles.weekNavLabel}>Week {program.week_number}</Text>
+                    <TouchableOpacity
+                      onPress={() => setSelectedWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
+                      disabled={selectedWeekIdx >= weeks.length - 1}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <ChevronRight size={18} color={selectedWeekIdx >= weeks.length - 1 ? GREY : YELLOW} />
+                    </TouchableOpacity>
+                  </View>
                 )}
                 {profile?.race_date && profile?.goal === 'hyrox' && (
                   <Text style={styles.metaChip}>Race {fmtDate(profile.race_date)}</Text>
@@ -716,6 +758,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 6,
+  },
+  weekNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: DIM,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  weekNavLabel: {
+    color: OFF_WHITE,
+    fontSize: 13,
+    fontWeight: '600',
+    minWidth: 56,
+    textAlign: 'center',
   },
 
   // ── This Week
