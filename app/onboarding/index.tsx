@@ -1579,35 +1579,6 @@ export default function OnboardingScreen({ navigation }: Props) {
 
   if (closingPhase === 'assessment') {
     const isHyrox = data.goal === 'hyrox';
-    const dayOrder = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-    const trainingDays = Array.isArray(data.training_days)
-      ? [...data.training_days]
-          .map((d: string) => d.charAt(0).toUpperCase() + d.slice(1))
-          .sort((a: string, b: string) => dayOrder.indexOf(a) - dayOrder.indexOf(b))
-      : [];
-    const restDays = dayOrder.filter(d => !trainingDays.includes(d));
-
-    // Build session schedule based on actual training days
-    // Hard 1, Easy 1, Hard 2, Easy 2, Hard 3, Easy 3, then rest days
-    const sessionTypes = isHyrox
-      ? ['Run Time Trial', 'Easy Recovery', 'Ski Erg + Strength', 'Easy Recovery', 'Work Capacity AMRAP', 'Easy Recovery']
-      : ['Run Time Trial', 'Easy Recovery', 'Strength Baseline', 'Easy Recovery', 'Work Capacity AMRAP', 'Easy Recovery'];
-
-    const schedule: { day: string; session: string; isHard: boolean; isRest: boolean }[] = [];
-    let sessionIndex = 0;
-
-    for (const day of dayOrder) {
-      if (restDays.includes(day)) {
-        schedule.push({ day, session: 'Rest', isHard: false, isRest: true });
-      } else if (sessionIndex < sessionTypes.length) {
-        const session = sessionTypes[sessionIndex];
-        const isHard = sessionIndex % 2 === 0;
-        schedule.push({ day, session, isHard, isRest: false });
-        sessionIndex++;
-      } else {
-        schedule.push({ day, session: 'Easy Recovery', isHard: false, isRest: false });
-      }
-    }
 
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -1633,7 +1604,7 @@ export default function OnboardingScreen({ navigation }: Props) {
             lineHeight: 22,
             letterSpacing: 0.2,
           }}>
-            Assess. Real data. A program built for you.
+            First, we assess.
           </Text>
 
           {/* Hard session cards */}
@@ -1878,7 +1849,7 @@ export default function OnboardingScreen({ navigation }: Props) {
             marginBottom: 16,
             lineHeight: 44,
           }}>
-            Three sessions.{'\n'}Real data.{'\n'}Then we build your 65.
+            The work starts now.
           </Text>
         </ScrollView>
 
