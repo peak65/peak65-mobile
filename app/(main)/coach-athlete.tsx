@@ -61,6 +61,7 @@ type ProgramWeek = {
   week_number: number;
   week_start_date: string;
   days: ProgramDay[];
+  phase: string | null;
 };
 
 type ScoreRow = {
@@ -189,7 +190,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
         .maybeSingle(),
       supabase
         .from('programs')
-        .select('id, week_number, week_start_date, program_data')
+        .select('id, week_number, week_start_date, program_data, phase')
         .eq('user_id', athleteId)
         .not('is_draft', 'is', true)
         .order('week_number', { ascending: true }),
@@ -211,6 +212,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
       week_number:     p.week_number,
       week_start_date: p.week_start_date,
       days:            (p.program_data?.days ?? []) as ProgramDay[],
+      phase:           p.phase ?? p.program_data?.phase ?? null,
     }));
     setWeeks(mappedWeeks);
     setSelectedWeekIdx(mappedWeeks.length > 0 ? mappedWeeks.length - 1 : 0);
@@ -381,6 +383,9 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
                     </TouchableOpacity>
                   </View>
                 )}
+                {program?.phase === 'reset' && (
+                  <Text style={[styles.metaChip, { color: '#8a877f' }]}>RESET</Text>
+                )}
                 {profile?.race_date && profile?.goal === 'hyrox' && (
                   <Text style={styles.metaChip}>Race {fmtDate(profile.race_date)}</Text>
                 )}
@@ -396,6 +401,9 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
             ) : (
               program.days.map((day, i) => {
                 const status = getDayStatus(day.day, day.day_index ?? i, program.week_start_date, sessionLogs);
+                // Reset weeks are intentionally optional — downgrade a 'missed' day to
+                // the calm 'upcoming' (grey ·) state. Completed days stay green ✓.
+                const shownStatus = (program.phase === 'reset' && status === 'missed') ? 'upcoming' : status;
                 const logsForDay = sessionLogs.filter(l => l.day_name === day.day);
                 const expanded = expandedSession === `day-${i}`;
 
@@ -412,7 +420,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
                           {day.sessions[0]?.name ?? (day.is_rest ? 'Rest' : '—')}
                         </Text>
                       </View>
-                      <StatusBadge status={status} />
+                      <StatusBadge status={shownStatus} />
                     </TouchableOpacity>
 
                     {expanded && (
