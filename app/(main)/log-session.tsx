@@ -63,7 +63,9 @@ export default function LogSessionScreen() {
       const payload = {
         user_id:              userId,
         program_id:           programId,
+        day:                  dayName,
         day_name:             dayName,
+        session_type:         session.session_type ?? null,
         session_name:         session.name,
         session_time:         session.time ?? null,
         session_type_context: sessionType,
