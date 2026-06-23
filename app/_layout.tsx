@@ -85,6 +85,7 @@ export type ProgramSession = {
   log_result?: boolean;
   log_label?: string;
   log_field?: string;
+  session_type?: string;   // per-session, web vocabulary ('total_body_strength','zone2','threshold',etc.)
 };
 
 export type ProgramDay = {

@@ -479,6 +479,7 @@ function WorkoutDetailModal({
       user_id:      session.user.id,
       program_id:   programId,
       week_number:  weekNumber,
+      day:          dayName,
       day_name:     dayName,
       session_name: sessionName,
       log_field:    'assigned_workout',

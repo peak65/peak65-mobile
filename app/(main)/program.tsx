@@ -572,7 +572,9 @@ function DayCard({
     const { error } = await supabase.from('session_logs').insert({
       user_id:      userId,
       program_id:   programId,
+      day:          day.day,
       day_name:     day.day,
+      session_type: session.session_type ?? null,
       week_number:  weekNumber,
       session_name: session.name,
       session_time: session.time ?? null,
@@ -693,7 +695,9 @@ function DayCard({
     const { error } = await supabase.from('session_logs').insert({
       user_id:      userId,
       program_id:   programId,
+      day:          day.day,
       day_name:     day.day,
+      session_type: day.sessions?.[si]?.session_type ?? null,
       week_number:  weekNumber,
       session_name: sessionName,
       session_time: day.sessions?.[si]?.time ?? null,
