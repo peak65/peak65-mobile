@@ -775,11 +775,11 @@ function DayCard({
         <TouchableOpacity style={pd.dayHeader} onPress={() => setExpanded(e => !e)}>{headerInner}</TouchableOpacity>
       )}
 
-      {expanded && !isRest && (day.sessions ?? []).map((session, si) => {
+      {expanded && !isRest && [...(day.sessions ?? [])].sort((a, b) => (a.time === 'PM' ? 1 : 0) - (b.time === 'PM' ? 1 : 0)).map((session, si) => {
         const sessionKey  = `${weekNumber}|${day.day}|${session.name}|${session.time ?? ''}`;
         const sessionDone = completedSessionKeys.has(sessionKey);
         return (
-        <View key={si}>
+        <View key={`${session.name}|${session.time ?? ''}`}>
           <SessionDocument session={session} />
           {(session.log_result !== false) && (
             sessionDone ? (
