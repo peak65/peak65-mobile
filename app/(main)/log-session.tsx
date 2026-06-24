@@ -47,6 +47,8 @@ export default function LogSessionScreen() {
   const [rounds, setRounds] = useState(0);
   const [rpe, setRpe] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
+  const [wasModified, setWasModified] = useState(false);
+  const [modificationText, setModificationText] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [sessionLogId, setSessionLogId] = useState<string | null>(null);
@@ -58,6 +60,10 @@ export default function LogSessionScreen() {
 
   async function saveSession() {
     if (!userId) return;
+    if (wasModified && !modificationText.trim()) {
+      Alert.alert('One more thing', 'Tell your coach what you changed and why.');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -73,6 +79,8 @@ export default function LogSessionScreen() {
         log_value:            sessionType === 'time_trial' ? trialValue : sessionType === 'amrap' ? String(rounds) : 'true',
         rpe_logged:           rpe ? String(rpe) : null,
         notes:                notes || null,
+        was_modified:         wasModified,
+        modification_note:    wasModified ? (modificationText.trim() || null) : null,
         week_number:          weekNumber,
         completed:            true,
         completed_at:         new Date().toISOString(),
@@ -198,12 +206,48 @@ export default function LogSessionScreen() {
             </View>
           )}
 
+          {/* Prescribed vs modified */}
+          {!saved && (
+            <View style={ls.section}>
+              <Text style={ls.label}>DID THIS GO AS PRESCRIBED?</Text>
+              <View style={ls.modRow}>
+                <TouchableOpacity
+                  style={[ls.modOption, !wasModified && ls.modOptionSelected]}
+                  onPress={() => setWasModified(false)}
+                >
+                  <Text style={[ls.modOptionTxt, !wasModified && ls.modOptionTxtSelected]}>Did it as prescribed</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[ls.modOption, wasModified && ls.modOptionSelected]}
+                  onPress={() => setWasModified(true)}
+                >
+                  <Text style={[ls.modOptionTxt, wasModified && ls.modOptionTxtSelected]}>Had to modify</Text>
+                </TouchableOpacity>
+              </View>
+              {wasModified && (
+                <View style={ls.modTextWrap}>
+                  <Text style={ls.label}>WHAT DID YOU CHANGE, AND WHY?</Text>
+                  <TextInput
+                    style={[ls.input, ls.notesInput]}
+                    value={modificationText}
+                    onChangeText={setModificationText}
+                    placeholder="e.g. Pulled the last round — was in Zone 5 and it would've been junk volume. Tell your coach what happened."
+                    placeholderTextColor={Colors.textSecondary}
+                    multiline
+                    numberOfLines={3}
+                    textAlignVertical="top"
+                  />
+                </View>
+              )}
+            </View>
+          )}
+
           {/* Save button — FIX 4: explicit #e8ff47 / #080808 */}
           {!saved && (
             <TouchableOpacity
-              style={[ls.saveBtn, (saving || (sessionType === 'time_trial' && !trialValue.trim())) && ls.saveBtnDisabled]}
+              style={[ls.saveBtn, (saving || (sessionType === 'time_trial' && !trialValue.trim()) || (wasModified && !modificationText.trim())) && ls.saveBtnDisabled]}
               onPress={saveSession}
-              disabled={saving || (sessionType === 'time_trial' && !trialValue.trim())}
+              disabled={saving || (sessionType === 'time_trial' && !trialValue.trim()) || (wasModified && !modificationText.trim())}
             >
               <Text style={ls.saveBtnTxt}>{saving ? 'SAVING...' : 'SAVE SESSION →'}</Text>
             </TouchableOpacity>
@@ -260,6 +304,12 @@ const ls = StyleSheet.create({
   rpeTxt:          { color: '#f0ede8', fontSize: 14, fontWeight: '600' },
   rpeTxtSelected:  { color: '#080808' },
   rpeLabel:        { color: Colors.textSecondary, fontSize: 13, marginTop: 10 },
+  modRow:          { flexDirection: 'row', gap: 12 },
+  modOption:       { flex: 1, paddingVertical: 16, paddingHorizontal: 12, backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+  modOptionSelected: { backgroundColor: '#e8ff47', borderColor: '#e8ff47' },
+  modOptionTxt:    { color: '#f0ede8', fontSize: 14, fontWeight: '600', textAlign: 'center' },
+  modOptionTxtSelected: { color: '#080808' },
+  modTextWrap:     { marginTop: 20 },
   // FIX 4: explicit #e8ff47 / #080808
   saveBtn:         { marginHorizontal: 20, backgroundColor: '#e8ff47', paddingVertical: 20, alignItems: 'center' },
   saveBtnDisabled: { opacity: 0.4 },
