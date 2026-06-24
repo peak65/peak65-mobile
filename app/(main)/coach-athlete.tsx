@@ -54,6 +54,8 @@ type SessionLogRow = {
   log_value: string | null;
   log_field: string | null;
   notes: string | null;
+  was_modified: boolean | null;
+  modification_note: string | null;
 };
 
 type ProgramWeek = {
@@ -273,7 +275,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
     (async () => {
       const logsRes = await supabase
         .from('session_logs')
-        .select('id, day_index, day_name, session_name, completed, completed_at, rpe, log_value, log_field, notes')
+        .select('id, day_index, day_name, session_name, completed, completed_at, rpe, log_value, log_field, notes, was_modified, modification_note')
         .eq('user_id', athleteId)
         .eq('week_number', selectedWeekNumber);
       if (active && mounted.current) setSessionLogs(logsRes.data ?? []);
@@ -420,7 +422,14 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
                           {day.sessions[0]?.name ?? (day.is_rest ? 'Rest' : '—')}
                         </Text>
                       </View>
-                      <StatusBadge status={shownStatus} />
+                      <View style={styles.sessionRight}>
+                        {logsForDay.some(l => l.was_modified) && (
+                          <View style={styles.modifiedChip}>
+                            <Text style={styles.modifiedChipText}>Modified</Text>
+                          </View>
+                        )}
+                        <StatusBadge status={shownStatus} />
+                      </View>
                     </TouchableOpacity>
 
                     {expanded && (
@@ -697,6 +706,16 @@ function SessionDetail({ day, logs }: { day: ProgramDay; logs: SessionLogRow[] }
               Note: <Text style={{ color: OFF_WHITE }}>{completedLog.notes}</Text>
             </Text>
           )}
+          {completedLog.was_modified && (
+            <Text style={styles.detailLogItem}>
+              <Text style={{ color: ORANGE, fontWeight: '700' }}>Modified: </Text>
+              <Text style={{ color: OFF_WHITE }}>
+                {completedLog.modification_note && completedLog.modification_note.trim() !== ''
+                  ? completedLog.modification_note
+                  : 'Athlete marked this session modified (no detail given).'}
+              </Text>
+            </Text>
+          )}
         </View>
       )}
     </View>
@@ -803,6 +822,22 @@ const styles = StyleSheet.create({
   sessionLeft: {
     flex: 1,
     gap: 2,
+  },
+  sessionRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  modifiedChip: {
+    backgroundColor: 'rgba(255,153,68,0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  modifiedChipText: {
+    color: ORANGE,
+    fontSize: 11,
+    fontWeight: '700',
   },
   sessionDay: {
     color: GREY,
