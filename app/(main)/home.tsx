@@ -830,7 +830,7 @@ export default function HomeScreen() {
     );
   }
 
-  const sessions  = todayDay?.sessions ?? [];
+  const sessions  = [...(todayDay?.sessions ?? [])].sort((a, b) => (a.time === 'PM' ? 1 : 0) - (b.time === 'PM' ? 1 : 0));
   const isRestDay = todayDay?.type !== 'race' && (todayDay?.type === 'rest' || sessions.length === 0);
 
   const dayIndex = program?.program_data?.days?.findIndex(d => d.day === todayDay?.day) ?? -1;
