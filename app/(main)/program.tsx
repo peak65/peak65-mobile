@@ -75,10 +75,19 @@ function SessionDocument({ session }: { session: ProgramSession }) {
     const name = prefix ? `${prefix} ${ex.name}` : ex.name;
     const duration = (ex as any).duration as string | undefined;
     const loadNote = (ex as any).load_note as string | undefined;
-    const note = ex.notes || (ex as any).note as string | undefined;
-    const firstSentence = note
-      ? (note.split(/[.!?]/)[0]?.trim() ?? '').slice(0, 60)
-      : '';
+    const rawNote = (ex.notes || (ex as any).note || '').trim();
+    let loadPart = '';
+    let cuePart = '';
+    if (rawNote) {
+      const pipeIdx = rawNote.indexOf('|');
+      if (pipeIdx >= 0) {
+        loadPart = rawNote.slice(0, pipeIdx).trim();      // e.g. "Load: RPE 8"
+        cuePart = rawNote.slice(pipeIdx + 1).trim();      // e.g. "Elbows stay tight... don't let them flare"
+      } else {
+        // no pipe — treat the whole note as the cue (no load prefix)
+        cuePart = rawNote;
+      }
+    }
 
     const parts: string[] = [];
 
@@ -96,7 +105,7 @@ function SessionDocument({ session }: { session: ProgramSession }) {
       parts.push(`${ex.rest} rest`);
     }
 
-    if (firstSentence) parts.push(firstSentence);
+    if (loadPart) parts.push(loadPart);
 
     const detail = parts.join(' · ');
 
@@ -104,6 +113,7 @@ function SessionDocument({ session }: { session: ProgramSession }) {
       <View key={`ex-${index}-${prefix ?? ''}`} style={pd.exerciseLine}>
         <Text style={pd.exerciseName}>{name}</Text>
         {detail ? <Text style={pd.exerciseDetail}>{detail}</Text> : null}
+        {cuePart ? <Text style={pd.exerciseCue}>{cuePart}</Text> : null}
       </View>
     );
   }
@@ -289,6 +299,14 @@ const pd = StyleSheet.create({
     lineHeight: 20,
     marginTop: 1,
     marginLeft: 14,   // indent details under the name for the clean coaching-sheet look
+  },
+  exerciseCue: {
+    color: '#8a877f',
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 3,
+    marginLeft: 14,
+    fontStyle: 'italic',
   },
   circuitSection: {
     marginBottom: 8,
