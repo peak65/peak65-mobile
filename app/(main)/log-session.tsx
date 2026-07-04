@@ -42,6 +42,12 @@ export default function LogSessionScreen() {
   const { sessionJson, programId, weekNumber, dayName } = route.params;
   const session: ProgramSession = JSON.parse(sessionJson);
   const sessionType = detectSessionType(session);
+  // Gate HR upload OFF for strength sessions (HR is meaningless for lifts).
+  // Trust the authoritative program value first; fall back to the heuristic,
+  // which only ever over-detects strength (never flags real cardio as strength).
+  const isStrengthSession =
+    (session.session_type?.toLowerCase().includes('strength') ?? false) ||
+    sessionType === 'strength';
 
   const [trialValue, setTrialValue] = useState('');
   const [rounds, setRounds] = useState(0);
@@ -253,8 +259,20 @@ export default function LogSessionScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Saved state + HR upload */}
-          {saved && (
+          {/* Saved state — strength skips HR upload (HR is meaningless for lifts) */}
+          {saved && isStrengthSession && (
+            <View style={ls.savedContainer}>
+              <View style={ls.strengthDoneCard}>
+                <Text style={ls.strengthDoneTxt}>SESSION LOGGED ✓</Text>
+              </View>
+              <TouchableOpacity style={ls.saveBtn} onPress={() => navigation.goBack()}>
+                <Text style={ls.saveBtnTxt}>DONE</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Saved state + HR upload (cardio) */}
+          {saved && !isStrengthSession && (
             <View style={ls.savedContainer}>
               <HRUploadPrompt
                 sessionLogId={sessionLogId}
@@ -316,4 +334,6 @@ const ls = StyleSheet.create({
   saveBtnTxt:      { color: '#080808', fontSize: 16, fontWeight: '700', letterSpacing: 1 },
   savedContainer:  { paddingTop: 16 },
   hrHeading:       { color: '#e8ff47', fontSize: 13, fontWeight: '700', letterSpacing: 2, textTransform: 'uppercase', textAlign: 'center', marginBottom: 0 },
+  strengthDoneCard:{ marginHorizontal: 20, marginBottom: 16, paddingVertical: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.card },
+  strengthDoneTxt: { color: '#e8ff47', fontSize: 20, fontWeight: '700', letterSpacing: 2, fontFamily: Fonts.metric },
 });
