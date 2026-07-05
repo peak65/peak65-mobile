@@ -1,5 +1,4 @@
 import { supabase } from './supabase';
-import { calculateSessionOutcome } from './sessionOutcome';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -238,22 +237,12 @@ export async function snoozeCandidate(candidateId: string): Promise<void> {
 }
 
 // ─── confirmMatch ─────────────────────────────────────────────────────────────
-// Marks candidate confirmed and asynchronously calculates the session outcome.
+// Marks the candidate confirmed, recording the confirmed session name.
 
 export async function confirmMatch(
   candidateId: string,
   confirmedSessionName?: string,
 ): Promise<void> {
-  const { data: candidate } = await supabase
-    .from('session_match_candidates')
-    .select('program_session_name')
-    .eq('id', candidateId)
-    .maybeSingle();
-
-  const isSubstitution =
-    !!confirmedSessionName &&
-    confirmedSessionName !== (candidate?.program_session_name as string | null);
-
   const update: Record<string, unknown> = {
     status:       'confirmed',
     confirmed_at: new Date().toISOString(),
@@ -264,8 +253,4 @@ export async function confirmMatch(
     .from('session_match_candidates')
     .update(update)
     .eq('id', candidateId);
-
-  calculateSessionOutcome(candidateId, isSubstitution).catch(e =>
-    console.log('[sessionMatcher] outcome calc error:', e),
-  );
 }
