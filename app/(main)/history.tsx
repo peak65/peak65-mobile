@@ -258,7 +258,7 @@ function SessionDetailModal({
   return (
     <Modal transparent animationType="slide" visible onRequestClose={onClose}>
       <View style={styles.detailBackdrop}>
-        <View style={styles.detailSheet}>
+        <View style={[styles.detailSheet, styles.sessionDetailSheet]}>
           <View style={styles.detailHeader}>
             <Text style={styles.detailTitle}>{getSessionTitle(log)}</Text>
             <TouchableOpacity onPress={onClose} style={styles.detailCloseBtn}>
@@ -1066,6 +1066,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
     padding: 24, paddingBottom: 48, maxHeight: '80%',
   },
+  // Session detail only: floor the height so sparse (no-HR) sessions don't
+  // collapse the sheet. Keeps the shared maxHeight:'80%' ceiling.
+  sessionDetailSheet: { minHeight: '55%' },
   detailHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6,
   },
