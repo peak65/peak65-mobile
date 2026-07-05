@@ -662,6 +662,18 @@ function SessionDetail({ day, logs }: { day: ProgramDay; logs: SessionLogRow[] }
                     </View>
                   );
                 }
+                if (group.kind === 'amrap' || group.kind === 'part-amrap') {
+                  const header = `${(group.label ?? 'AMRAP').toUpperCase()}${group.timeCap ? ` · ${group.timeCap} MIN` : ''}`;
+                  return (
+                    <View key={gi} style={styles.detailGroup}>
+                      {group.kind === 'part-amrap' && group.blockName ? (
+                        <Text style={styles.detailSubBlockName}>{group.blockName}</Text>
+                      ) : null}
+                      <Text style={styles.detailGroupHeader}>{header}</Text>
+                      {group.members.map((m, mi) => coachExerciseLine(m.ex, mi, m.ex.time_window ?? undefined))}
+                    </View>
+                  );
+                }
                 if (group.kind === 'superset' || group.kind === 'part-superset') {
                   return (
                     <View key={gi} style={styles.detailGroup}>

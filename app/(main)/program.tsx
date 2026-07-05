@@ -200,6 +200,29 @@ function SessionDocument({ session }: { session: ProgramSession }) {
               </View>
             );
           }
+          if (group.kind === 'amrap' || group.kind === 'part-amrap') {
+            // AMRAP: never numbered, never advance the counter. Header shows the
+            // label + TIME CAP (as many rounds as possible within the cap) — this
+            // is the key difference from EMOM, which shows rounds.
+            const members = group.members;
+            const header = `${(group.label ?? 'AMRAP').toUpperCase()}${group.timeCap ? ` · ${group.timeCap} MIN` : ''}`;
+            return (
+              <View key={gi} style={pd.circuitSection}>
+                {group.kind === 'part-amrap' && group.blockName ? (
+                  <Text style={pd.subBlockLabel}>{group.blockName}</Text>
+                ) : null}
+                <Text style={pd.circuitRounds}>{header}</Text>
+                {members.map(({ ex }, mi) => (
+                  <View key={mi} style={pd.emomMemberRow}>
+                    {ex.time_window ? <Text style={pd.emomWindow}>{ex.time_window}</Text> : null}
+                    <View style={{ flex: 1 }}>
+                      {renderExerciseLine(ex, mi, undefined, true)}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            );
+          }
           if (group.kind === 'superset' || group.kind === 'part-superset') {
             const members = group.members;
             // MAIN: the whole superset shares one running number with letter

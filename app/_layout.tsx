@@ -68,6 +68,9 @@ export type ExerciseItem = {
   emom_label?: string | null;
   emom_rounds?: number | null;
   emom_total_minutes?: number | null;
+  amrap_id?: string | null;
+  amrap_label?: string | null;
+  amrap_time_cap?: number | null;
   time_window?: string | null;
 };
 

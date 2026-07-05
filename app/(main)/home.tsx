@@ -1099,6 +1099,24 @@ export default function HomeScreen() {
                                 ))}
                               </View>,
                             );
+                          } else if (ex.amrap_id) {
+                            const aId = ex.amrap_id;
+                            const members: ExerciseItem[] = [];
+                            while (j < slice.length && slice[j].amrap_id === aId) { members.push(slice[j]); j++; }
+                            const label   = (members[0].amrap_label ?? 'AMRAP').toUpperCase();
+                            const timeCap = members[0].amrap_time_cap;
+                            const header  = `${label}${timeCap ? ` · ${timeCap} MIN` : ''}`;
+                            nodes.push(
+                              <View key={`${kp}-amrap-${j}`}>
+                                <Text style={styles.circuitRoundsLabel}>{header}</Text>
+                                {members.map((m, mi) => (
+                                  <View key={`${kp}-am-${j}-${mi}`} style={styles.emomMemberRow}>
+                                    {m.time_window ? <Text style={styles.emomWindow}>{m.time_window}</Text> : null}
+                                    <View style={{ flex: 1 }}>{line(m, `${kp}-aml-${j}-${mi}`, true, false)}</View>
+                                  </View>
+                                ))}
+                              </View>,
+                            );
                           } else if (ex.circuit_id) {
                             const cId = ex.circuit_id;
                             const members: ExerciseItem[] = [];

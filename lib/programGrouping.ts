@@ -13,7 +13,9 @@ export type ExGroup =
   | { kind: 'part-circuit'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number; rest: string | null }
   | { kind: 'part-superset'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] }
   | { kind: 'emom'; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; rounds: number | null; totalMinutes: number | null }
-  | { kind: 'part-emom'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; rounds: number | null; totalMinutes: number | null };
+  | { kind: 'part-emom'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; rounds: number | null; totalMinutes: number | null }
+  | { kind: 'amrap'; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; timeCap: number | null }
+  | { kind: 'part-amrap'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; timeCap: number | null };
 
 export function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
   const groups: ExGroup[] = [];
@@ -29,12 +31,17 @@ export function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
         i++;
       }
       const firstEmomId = members[0].ex.emom_id;
+      const firstAmrapId = members[0].ex.amrap_id;
       const firstCircuitId = members[0].ex.circuit_id;
       if (firstEmomId && members.every((m) => m.ex.emom_id === firstEmomId)) {
         groups.push({ kind: 'part-emom', blockName, members,
           label: members[0].ex.emom_label ?? null,
           rounds: members[0].ex.emom_rounds ?? null,
           totalMinutes: members[0].ex.emom_total_minutes ?? null });
+      } else if (firstAmrapId && members.every((m) => m.ex.amrap_id === firstAmrapId)) {
+        groups.push({ kind: 'part-amrap', blockName, members,
+          label: members[0].ex.amrap_label ?? null,
+          timeCap: members[0].ex.amrap_time_cap ?? null });
       } else if (firstCircuitId && members.every((m) => m.ex.circuit_id === firstCircuitId)) {
         groups.push({ kind: 'part-circuit', blockName, members, rounds: members[0].ex.circuit_rounds ?? 4, rest: members[0].ex.circuit_rest ?? null });
       } else {
@@ -61,6 +68,23 @@ export function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
           label: members[0].ex.emom_label ?? null,
           rounds: members[0].ex.emom_rounds ?? null,
           totalMinutes: members[0].ex.emom_total_minutes ?? null,
+        });
+      }
+    } else if (ex.amrap_id) {
+      const aId = ex.amrap_id;
+      const members: { ex: ExerciseItem; origIdx: number }[] = [];
+      while (i < exercises.length && exercises[i].amrap_id === aId) {
+        members.push({ ex: exercises[i], origIdx: i });
+        i++;
+      }
+      if (members.length === 1) {
+        groups.push({ kind: 'single', ex: members[0].ex, origIdx: members[0].origIdx });
+      } else {
+        groups.push({
+          kind: 'amrap',
+          members,
+          label: members[0].ex.amrap_label ?? null,
+          timeCap: members[0].ex.amrap_time_cap ?? null,
         });
       }
     } else if (ex.circuit_id) {
