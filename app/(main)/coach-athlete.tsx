@@ -45,7 +45,6 @@ type Profile = {
 
 type SessionLogRow = {
   id: string;
-  day_index: number;
   day_name: string | null;
   session_name: string;
   completed: boolean;
@@ -275,9 +274,12 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
     (async () => {
       const logsRes = await supabase
         .from('session_logs')
-        .select('id, day_index, day_name, session_name, completed, completed_at, rpe, log_value, log_field, notes, was_modified, modification_note')
+        .select('id, day_name, session_name, completed, completed_at, rpe, log_value, log_field, notes, was_modified, modification_note')
         .eq('user_id', athleteId)
         .eq('week_number', selectedWeekNumber);
+      if (logsRes.error) {
+        console.error('[coach-athlete] session_logs query failed:', logsRes.error);
+      }
       if (active && mounted.current) setSessionLogs(logsRes.data ?? []);
     })();
     return () => { active = false; };
