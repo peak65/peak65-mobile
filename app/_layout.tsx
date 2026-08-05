@@ -31,6 +31,7 @@ import { Colors } from '../lib/theme';
 import LoginScreen from './auth/login';
 import SignupScreen from './auth/signup';
 import OnboardingScreen from './onboarding/index';
+import PinnacleSetupScreen from './onboarding/pinnacle-setup';
 import GeneratingScreen from './(main)/generating';
 import HomeScreen from './(main)/home';
 import ProgramScreen from './(main)/program';
@@ -124,6 +125,7 @@ export type AuthStackParamList = {
 
 export type MainStackParamList = {
   Onboarding: undefined;
+  PinnacleSetup: undefined;
   Generating: undefined;
   Tabs: undefined;
   LogSession: { sessionJson: string; programId: string; weekNumber: number; dayName: string };
@@ -221,6 +223,7 @@ function MainNavigator({ initialRoute }: { initialRoute: keyof MainStackParamLis
   return (
     <MainStack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
       <MainStack.Screen name="Onboarding"        component={OnboardingScreen} />
+      <MainStack.Screen name="PinnacleSetup"     component={PinnacleSetupScreen} />
       <MainStack.Screen name="Generating"        component={GeneratingScreen} />
       <MainStack.Screen name="Tabs"              component={MainTabs} />
       <MainStack.Screen name="LogSession"        component={LogSessionScreen} options={{ headerShown: false }} />
@@ -267,7 +270,20 @@ async function registerPushToken(userId: string) {
 
 // ─── App state resolution ─────────────────────────────────────────────────────
 
-type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'generating' | 'authenticated';
+type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'setup' | 'generating' | 'waiting' | 'authenticated';
+
+// A non-draft program is what separates "ready to train" from "still waiting".
+// Shared by the Pinnacle branch and the standard path below.
+async function hasActiveProgram(userId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('programs')
+    .select('id')
+    .eq('user_id', userId)
+    .not('is_draft', 'is', true)
+    .limit(1)
+    .maybeSingle();
+  return !!data;
+}
 
 async function resolveAppState(
   session: Session | null,
@@ -276,7 +292,7 @@ async function resolveAppState(
 
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('first_name, role')
+    .select('first_name, role, tier, program_status, onboarding_complete')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -294,18 +310,23 @@ async function resolveAppState(
     return { state: 'authenticated', isCoach: true };
   }
 
+  // ── Pinnacle (tier 'elite') athletes ────────────────────────────────────────
+  // Their coach writes the program by hand, so this path must never reach
+  // 'generating' — that state auto-fires AI program generation on mount.
+  // A coach's invite pre-fills first_name, so without this branch an elite
+  // athlete would fall straight past the first_name check into that generator.
+  if (profile?.tier === 'elite') {
+    if (!profile?.onboarding_complete) return { state: 'setup', isCoach: false };
+    const hasProgram = await hasActiveProgram(session.user.id);
+    return { state: hasProgram ? 'authenticated' : 'waiting', isCoach: false };
+  }
+
   if (!profile?.first_name) return { state: 'onboarding', isCoach: false };
 
   // Check program existence and coach status in parallel.
   // If the coaches table doesn't exist yet, coachRes.error will be set — default to false.
-  const [programRes, coachRes] = await Promise.all([
-    supabase
-      .from('programs')
-      .select('id')
-      .eq('user_id', session.user.id)
-      .not('is_draft', 'is', true)
-      .limit(1)
-      .maybeSingle(),
+  const [hasProgram, coachRes] = await Promise.all([
+    hasActiveProgram(session.user.id),
     supabase
       .from('coaches')
       .select('id')
@@ -314,9 +335,44 @@ async function resolveAppState(
   ]);
 
   const isCoach = !coachRes.error && !!coachRes.data;
-  const state: AppState = programRes.data ? 'authenticated' : 'generating';
+  const state: AppState = hasProgram ? 'authenticated' : 'generating';
 
   return { state, isCoach };
+}
+
+// Per-attempt budget for resolveAppState. Two attempts (16s) fit inside the
+// 20s loading watchdog below, so a slow-but-working network gets a genuine
+// second chance before anything falls back.
+const RESOLVE_ATTEMPT_MS = 8_000;
+const RESOLVE_ATTEMPTS   = 2;
+
+const RESOLVE_TIMED_OUT = Symbol('resolve-timed-out');
+
+// Retries the real resolution instead of guessing a route. Guessing is what we
+// are specifically avoiding here: on timeout we have no profile row, so we
+// cannot tell an elite athlete from a Foundation one, and defaulting a
+// logged-in user to 'authenticated' would drop a Pinnacle athlete into Tabs —
+// bypassing the gate above and stranding them on "No program found."
+async function resolveWithRetry(
+  session: Session | null,
+): Promise<{ state: AppState; isCoach: boolean }> {
+  for (let attempt = 1; attempt <= RESOLVE_ATTEMPTS; attempt++) {
+    const result = await Promise.race([
+      resolveAppState(session),
+      new Promise<typeof RESOLVE_TIMED_OUT>(resolve =>
+        setTimeout(() => resolve(RESOLVE_TIMED_OUT), RESOLVE_ATTEMPT_MS),
+      ),
+    ]);
+    if (result !== RESOLVE_TIMED_OUT) return result;
+    console.log(`[resolveAppState] attempt ${attempt}/${RESOLVE_ATTEMPTS} timed out after ${RESOLVE_ATTEMPT_MS}ms`);
+  }
+
+  // Every attempt timed out — the network is effectively down. Fall back to the
+  // login screen rather than a guessed destination: it is recoverable, it can
+  // never route someone into the wrong flow, and it matches what the 20s
+  // watchdog already does when loading stalls.
+  console.log('[resolveAppState] all attempts timed out — falling back to unauthenticated');
+  return { state: 'unauthenticated', isCoach: false };
 }
 
 // ─── Branded loading screen ──────────────────────────────────────────────────
@@ -453,12 +509,7 @@ export default function RootLayout() {
           if (event !== 'INITIAL_SESSION') setAppState('loading');
 
           const resolveStart = Date.now();
-          const { state: newState, isCoach: newIsCoach } = await Promise.race([
-            resolveAppState(session),
-            new Promise<{ state: AppState; isCoach: boolean }>(resolve =>
-              setTimeout(() => resolve({ state: session ? 'authenticated' : 'unauthenticated', isCoach: false }), 10_000)
-            ),
-          ]);
+          const { state: newState, isCoach: newIsCoach } = await resolveWithRetry(session);
 
           // 300ms minimum prevents a white flash when the splash transitions
           // out before the JS bridge has finished painting the first frame.
@@ -513,6 +564,8 @@ export default function RootLayout() {
   const initialRoute: keyof MainStackParamList =
     appState === 'authenticated' ? 'Tabs' :
     appState === 'generating'    ? 'Generating' :
+    appState === 'setup'         ? 'PinnacleSetup' :
+    appState === 'waiting'       ? 'Waiting' :
                                    'Onboarding';
 
   return (
