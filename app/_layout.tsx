@@ -310,6 +310,25 @@ async function resolveAppState(
     return { state: 'authenticated', isCoach: true };
   }
 
+  // ── Coach status ────────────────────────────────────────────────────────────
+  // Resolved once, up front, and BEFORE any tier branching. Membership in
+  // `coaches` — not `role` — is the authoritative signal: staff accounts carry
+  // role 'admin', which matches nothing above. Staff can also carry tier
+  // 'elite', so if this ran after the Pinnacle branch below (as it once did)
+  // that branch would swallow them and strip the Coach tab.
+  // If the coaches table doesn't exist yet, coachRes.error will be set — default to false.
+  const coachRes = await supabase
+    .from('coaches')
+    .select('id')
+    .eq('id', session.user.id)
+    .maybeSingle();
+
+  if (!coachRes.error && !!coachRes.data) {
+    return { state: 'authenticated', isCoach: true };
+  }
+
+  // Everything past this point is a non-coach athlete, so isCoach is false.
+
   // ── Pinnacle (tier 'elite') athletes ────────────────────────────────────────
   // Their coach writes the program by hand, so this path must never reach
   // 'generating' — that state auto-fires AI program generation on mount.
@@ -323,21 +342,9 @@ async function resolveAppState(
 
   if (!profile?.first_name) return { state: 'onboarding', isCoach: false };
 
-  // Check program existence and coach status in parallel.
-  // If the coaches table doesn't exist yet, coachRes.error will be set — default to false.
-  const [hasProgram, coachRes] = await Promise.all([
-    hasActiveProgram(session.user.id),
-    supabase
-      .from('coaches')
-      .select('id')
-      .eq('id', session.user.id)
-      .maybeSingle(),
-  ]);
+  const hasProgram = await hasActiveProgram(session.user.id);
 
-  const isCoach = !coachRes.error && !!coachRes.data;
-  const state: AppState = hasProgram ? 'authenticated' : 'generating';
-
-  return { state, isCoach };
+  return { state: hasProgram ? 'authenticated' : 'generating', isCoach: false };
 }
 
 // Per-attempt budget for resolveAppState. Two attempts (16s) fit inside the
