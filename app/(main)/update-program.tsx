@@ -127,6 +127,9 @@ function fmtAvail(v: string): string {
 export default function UpdateProgramScreen({ navigation }: Props) {
   const [userId, setUserId]         = useState('');
   const [loading, setLoading]       = useState(true);
+  // Pinnacle athletes' programs are hand-built by their coach. This screen
+  // deletes and rebuilds programs, so it must refuse to run for them.
+  const [isElite, setIsElite]       = useState(false);
   const [step, setStep]             = useState(0);
   const [form, setForm]             = useState<FormData>({
     goal: '', raceDate: '', division: '', hyroxGoalTime: '', stationWeaknesses: [],
@@ -161,6 +164,8 @@ export default function UpdateProgramScreen({ navigation }: Props) {
         .from('profiles').select('*')
         .eq('id', auth.user.id).maybeSingle();
       if (!p) { setLoading(false); return; }
+
+      if (p.tier === 'elite') { setIsElite(true); setLoading(false); return; }
 
       // Map old current_training_days formats to exact number strings
       let trainingDays = '';
@@ -334,6 +339,9 @@ export default function UpdateProgramScreen({ navigation }: Props) {
 
   async function handleConfirm() {
     if (!userId) return;
+    // Never delete or rebuild a coach-built program. Unreachable behind the
+    // render guard below; kept here so no future edit can route around it.
+    if (isElite) return;
     setGenerating(true);
     setGenError(false);
     startAnimation();
@@ -405,6 +413,8 @@ export default function UpdateProgramScreen({ navigation }: Props) {
   }
 
   async function handleRetry() {
+    // Same rule as handleConfirm — no regeneration for a coached athlete.
+    if (isElite) return;
     setGenError(false);
     startAnimation();
     try {
@@ -701,6 +711,35 @@ export default function UpdateProgramScreen({ navigation }: Props) {
 
   if (loading) return null;
 
+  // Pinnacle athletes never reach the edit flow. Their coach owns the program,
+  // and this screen's first act is to delete every program row. Rendered before
+  // the generating branch so no state can slip past it.
+  if (isElite) {
+    return (
+      <SafeAreaView style={s.container} edges={['top', 'bottom']}>
+        <Logo width={150} />
+        <View style={s.header}>
+          <TouchableOpacity
+            style={s.backBtn}
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Feather name="arrow-left" color={Colors.textPrimary} size={22} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }} />
+          <View style={s.backBtn} />
+        </View>
+        <View style={s.blockedBody}>
+          <Text style={s.blockedHeading}>Your coach manages your training plan.</Text>
+          <Text style={s.blockedSub}>Message your coach if something needs to change.</Text>
+          <TouchableOpacity style={s.blockedBtn} onPress={() => navigation.goBack()}>
+            <Text style={s.blockedBtnText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   // ── Generating screen ─────────────────────────────────────────────────────
 
   if (generating) {
@@ -795,6 +834,23 @@ export default function UpdateProgramScreen({ navigation }: Props) {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+
+  // Coach-managed (Pinnacle) blocked state
+  blockedBody: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 32,
+  },
+  blockedHeading: {
+    color: Colors.textPrimary, fontSize: 22, fontWeight: '700',
+    textAlign: 'center', lineHeight: 30,
+  },
+  blockedSub: {
+    color: Colors.textSecondary, fontSize: 15, textAlign: 'center', lineHeight: 22, maxWidth: 280,
+  },
+  blockedBtn: {
+    marginTop: 8, borderWidth: 1.5, borderColor: Colors.accent,
+    borderRadius: 14, paddingVertical: 15, paddingHorizontal: 32,
+  },
+  blockedBtnText: { color: Colors.accent, fontSize: 16, fontWeight: '700' },
 
   logo: {
     color: Colors.accent, fontSize: 36, fontFamily: Fonts.metricHeavy,
