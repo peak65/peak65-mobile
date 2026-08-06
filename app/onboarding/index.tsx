@@ -603,7 +603,8 @@ export default function OnboardingScreen({ navigation }: Props) {
     const { data: freshProfile } = await supabase.from('profiles').select('tier').eq('id', authData.user.id).maybeSingle();
     if ((freshProfile as any)?.tier === 'elite') {
       await supabase.from('profiles').update({ program_status: 'awaiting_coach' }).eq('id', authData.user.id);
-      navigation.replace('Waiting');
+      // Elite path only — matches the gate and the Pinnacle setup screen.
+      navigation.replace('Tabs');
       return;
     }
 

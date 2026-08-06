@@ -249,7 +249,10 @@ export default function PinnacleSetupScreen({ navigation }: Props) {
       }
     }
 
-    navigation.replace('Waiting');
+    // Into the main app, not a dead-end waiting screen — they can message their
+    // coach and connect a wearable while the program is built. Matches what the
+    // gate resolves to on a cold start.
+    navigation.replace('Tabs');
   }
 
   // ── Step renders ───────────────────────────────────────────────────────────

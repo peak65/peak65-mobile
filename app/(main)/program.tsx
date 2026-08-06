@@ -10,6 +10,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import type { Program, ProgramDay, ProgramSession, ExerciseItem, MainStackParamList } from '../_layout';
+import { ProgramStatusContext } from '../_layout';
+import { useCoachName } from '../../lib/useCoachName';
 import {
   matchTimeTrial, getWorkoutHRDetail,
   type WorkoutSample,
@@ -1054,6 +1056,13 @@ function HRDetailModal({ detail, onClose }: { detail: HRDetail; onClose: () => v
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function ProgramScreen() {
+  // Pinnacle status. isElite hard-blocks the next-week generator below — a
+  // coach owns these programs and this screen must never author one.
+  const { isElite, awaitingProgram } = React.useContext(ProgramStatusContext);
+  const isEliteRef = useRef(isElite);
+  isEliteRef.current = isElite;
+  const coachName = useCoachName(isElite && awaitingProgram);
+
   const [allPrograms, setAllPrograms]     = useState<Program[]>([]);
   const [weekIdx, setWeekIdx]             = useState(0);
   const [completedMap, setCompletedMap]   = useState<Record<number, Set<string>>>({});
@@ -1063,6 +1072,10 @@ export default function ProgramScreen() {
   const [userId, setUserId]               = useState<string | null>(null);
   const [todayName, setTodayName]         = useState('');
   const [loading, setLoading]             = useState(true);
+  // `loading` flips false as soon as the AsyncStorage cache is applied, which
+  // can be an empty payload. `resolved` only flips once the server read has
+  // finished, so an empty-state message never renders over unfetched data.
+  const [resolved, setResolved]           = useState(false);
   const [ttProfile, setTtProfile]         = useState<TimeTrialProfile | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const dayListY      = useRef(0);
@@ -1082,6 +1095,9 @@ export default function ProgramScreen() {
   }, []);
 
   async function checkAndGenerateNextWeek(uid: string, prog: Program, completedDayCount: number, trainingDaysCount: number) {
+    // Hard stop for Pinnacle athletes — their coach writes every week by hand.
+    // Guarded at the call site too; this is the inner backstop.
+    if (isEliteRef.current) return;
     if (nextWeekTriggeredRef.current) return;
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
     const days  = prog.program_data?.days ?? [];
@@ -1169,7 +1185,7 @@ export default function ProgramScreen() {
     if (!cacheApplied) setLoading(true);
 
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) { setLoading(false); return; }
+    if (!session?.user) { setLoading(false); setResolved(true); return; }
     setUserId(session.user.id);
 
     const [progsRes, logsRes, profileRes] = await Promise.all([
@@ -1241,9 +1257,10 @@ export default function ProgramScreen() {
     setCompletedSessionKeys(sKeys);
     setSavedTrialMap(tMap);
     setLoading(false);
+    setResolved(true);
 
     // Check if we should generate next week on load
-    if (active && !nextExists && !nextWeekTriggeredRef.current) {
+    if (!isEliteRef.current && active && !nextExists && !nextWeekTriggeredRef.current) {
       const activeCompletedCount = (cMap[active.week_number] ?? new Set()).size;
       const pd = profileRes.data as any;
       const trainingDaysCount = pd?.current_training_days != null
@@ -1341,6 +1358,10 @@ export default function ProgramScreen() {
             </TouchableOpacity>
           )}
 
+          {/* The week selector is meaningless with no program — a Pinnacle
+              athlete waiting on their coach would otherwise see a live
+              "Week 1" stepper above an empty state. */}
+          {!(isElite && awaitingProgram) && (
           <View style={styles.weekRow}>
             <TouchableOpacity
               onPress={() => setWeekIdx(i => i - 1)}
@@ -1358,9 +1379,24 @@ export default function ProgramScreen() {
               <Feather name="chevron-right" color={!canGoForward ? '#333' : Colors.textPrimary} size={28} />
             </TouchableOpacity>
           </View>
+          )}
 
-          {allPrograms.length === 0 ? (
-            <Text style={styles.emptyText}>No program found.</Text>
+          {isElite && awaitingProgram ? (
+            <View style={styles.coachBuildingCard}>
+              <Feather name="target" color={Colors.accent} size={26} />
+              <Text style={styles.coachBuildingTitle}>You're all set.</Text>
+              <Text style={styles.coachBuildingBody}>
+                {coachName} is building your program personally. You'll have it within 48 hours.
+              </Text>
+              <Text style={styles.coachBuildingNudge}>
+                In the meantime — connect your Whoop and send {coachName} a message.
+              </Text>
+            </View>
+          ) : allPrograms.length === 0 ? (
+            // Never claim "no program" over data we haven't fetched yet.
+            resolved
+              ? <Text style={styles.emptyText}>No program found.</Text>
+              : <ActivityIndicator color={Colors.accent} style={{ marginTop: 40 }} />
           ) : days.length === 0 ? (
             <Text style={styles.emptyText}>No days in this week.</Text>
           ) : (
@@ -1466,6 +1502,22 @@ const styles = StyleSheet.create({
 
   restNote:  { color: Colors.textSecondary, fontSize: 14, fontStyle: 'italic' },
   emptyText: { color: Colors.textSecondary, textAlign: 'center', marginTop: 40, fontSize: 15 },
+
+  // Pinnacle athlete waiting on their coach's program
+  coachBuildingCard: {
+    marginTop: 24, marginHorizontal: 4, backgroundColor: Colors.card, borderRadius: 16,
+    paddingVertical: 26, paddingHorizontal: 22, alignItems: 'center', gap: 12,
+    borderLeftWidth: 3, borderLeftColor: Colors.accent,
+  },
+  coachBuildingTitle: {
+    fontFamily: Fonts.metricHeavy, fontSize: 28, color: Colors.textPrimary, letterSpacing: 1,
+  },
+  coachBuildingBody: {
+    color: Colors.textPrimary, fontSize: 15, textAlign: 'center', lineHeight: 22,
+  },
+  coachBuildingNudge: {
+    color: Colors.textSecondary, fontSize: 14, textAlign: 'center', lineHeight: 20,
+  },
 
   // Time trial zone derivation
   ttStatusCard: {

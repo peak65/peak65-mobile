@@ -62,6 +62,10 @@ export default function MessagesScreen() {
   const { setHasUnread } = React.useContext(UnreadContext);
   const [userId,    setUserId]    = useState<string | null>(null);
   const [coachName, setCoachName] = useState('');
+  // Whether an active coach link exists. Previously inferred by comparing
+  // coachName to a sentinel string — split out so the displayed name can change
+  // without altering who gets an automated reply.
+  const [hasCoach,  setHasCoach]  = useState(false);
   const [msgs,      setMsgs]      = useState<Msg[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [input,     setInput]     = useState('');
@@ -110,7 +114,8 @@ export default function MessagesScreen() {
       .eq('athlete_id', uid)
       .eq('status', 'active')
       .maybeSingle();
-    if (!ca?.coach_id) { setCoachName('Peak 65 AI'); return; }
+    if (!ca?.coach_id) { setCoachName('Peak 65'); setHasCoach(false); return; }
+    setHasCoach(true);
     const { data: p } = await supabase
       .from('profiles')
       .select('first_name, last_name')
@@ -183,7 +188,7 @@ export default function MessagesScreen() {
       });
       console.log('[messages] send-message response status:', res.status, 'ok:', res.ok);
       if (!res.ok) throw new Error('send failed');
-      if (coachName === 'Peak 65 AI') {
+      if (!hasCoach) {
         fetch(`${API_BASE}/api/ai-reply`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

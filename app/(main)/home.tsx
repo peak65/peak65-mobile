@@ -25,6 +25,8 @@ import {
   selectSleepSource, resolveAllSources,
 } from '../../lib/wearablePriority';
 import type { Program, ProgramDay, ProgramSession, ExerciseItem, TabParamList, MainStackParamList } from '../_layout';
+import { ProgramStatusContext } from '../_layout';
+import { useCoachName } from '../../lib/useCoachName';
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Logo } from '../../components/Logo';
@@ -353,12 +355,23 @@ export default function HomeScreen() {
     NativeStackNavigationProp<MainStackParamList>
   >>();
 
+  // Pinnacle status. isElite hard-blocks the week-2 generator below; a coach
+  // owns these programs and nothing on this screen may author one.
+  const { isElite, awaitingProgram } = React.useContext(ProgramStatusContext);
+  const isEliteRef = useRef(isElite);
+  isEliteRef.current = isElite;
+  const coachName = useCoachName(isElite && awaitingProgram);
+
   const [userId, setUserId]               = useState('');
   const [program, setProgram]             = useState<Program | null>(null);
   const [todayDay, setTodayDay]           = useState<ProgramDay | null>(null);
   const [sessionCount, setSessionCount]   = useState(0);
   const [streak, setStreak]               = useState(0);
   const [loading, setLoading]             = useState(true);
+  // `loading` flips false as soon as the AsyncStorage cache is applied, which
+  // can be an empty payload. `resolved` only flips once the server read has
+  // finished, so an empty-state message never renders over unfetched data.
+  const [resolved, setResolved]           = useState(false);
   const [milestone, setMilestone]         = useState<(typeof MILESTONES)[number] | null>(null);
   const [generatingWeek2, setGeneratingWeek2] = useState(false);
   const [week2Ready, setWeek2Ready]           = useState(false);
@@ -413,6 +426,10 @@ export default function HomeScreen() {
   // ── Week 2 generation ────────────────────────────────────────────────────────
 
   async function checkAndTriggerWeek2(uid: string, prog: Program) {
+    // Hard stop for Pinnacle athletes: their coach writes every week by hand,
+    // so this screen must never author one over the top. Guarded at the call
+    // site too — this is the inner backstop.
+    if (isEliteRef.current) return;
     const allTrialSessions = (prog.program_data?.days ?? [])
       .flatMap(d => d.sessions ?? [])
       .filter(s => s.log_result === true);
@@ -486,7 +503,7 @@ export default function HomeScreen() {
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current || myId !== loadIdRef.current) return;
-    if (!session?.user) { setLoading(false); return; }
+    if (!session?.user) { setLoading(false); setResolved(true); return; }
     const uid = session.user.id;
     setUserId(uid);
 
@@ -593,6 +610,7 @@ export default function HomeScreen() {
     setHealthConnected(isHealthConnected);
 
     setLoading(false);
+    setResolved(true);
     setCacheStale(false);
     runCountupIfNeeded();
 
@@ -745,7 +763,7 @@ export default function HomeScreen() {
       console.log('[health] Apple Health not connected — health metrics come from backend-written daily_health_readings');
     }
 
-    if (prog?.week_number === 1 && !week2Exists && !week2TriggeredRef.current) {
+    if (!isEliteRef.current && prog?.week_number === 1 && !week2Exists && !week2TriggeredRef.current) {
       checkAndTriggerWeek2(uid, prog);
     }
 
@@ -989,7 +1007,24 @@ export default function HomeScreen() {
         {/* ── TODAY'S SESSION (hero) ─────────────────────────────────────────── */}
         <Text style={styles.sectionHeader}>TODAY</Text>
 
-        {!todayDay ? (
+        {!todayDay && isElite && awaitingProgram ? (
+          <View style={styles.coachBuildingCard}>
+            <Target color={Colors.accent} size={28} strokeWidth={1.5} />
+            <Text style={styles.coachBuildingTitle}>You're all set.</Text>
+            <Text style={styles.coachBuildingBody}>
+              {coachName} is building your program personally. You'll have it within 48 hours.
+            </Text>
+            <View style={styles.coachBuildingDivider} />
+            <Text style={styles.coachBuildingNudge}>
+              In the meantime — connect your Whoop and send {coachName} a message.
+            </Text>
+          </View>
+        ) : !todayDay && !program && !resolved ? (
+          // Server read still in flight — say nothing rather than the wrong thing.
+          <View style={styles.emptyBlock}>
+            <ActivityIndicator color={Colors.accent} />
+          </View>
+        ) : !todayDay ? (
           <View style={styles.emptyBlock}>
             {program && program.week_start_date ? (() => {
               const firstSession = program.program_data?.days?.find((d: any) => d.type !== 'rest' && d.sessions?.length > 0);
@@ -1574,6 +1609,25 @@ const styles = StyleSheet.create({
     marginHorizontal: 16, backgroundColor: '#111111', borderRadius: 16,
     paddingVertical: 24, paddingHorizontal: 20, alignItems: 'center', gap: 10,
     marginBottom: 12,
+  },
+
+  // Pinnacle athlete waiting on their coach's program
+  coachBuildingCard: {
+    marginHorizontal: 16, backgroundColor: '#111111', borderRadius: 16,
+    paddingVertical: 26, paddingHorizontal: 22, alignItems: 'center', gap: 12,
+    marginBottom: 12, borderLeftWidth: 3, borderLeftColor: Colors.accent,
+  },
+  coachBuildingTitle: {
+    fontFamily: Fonts.metricHeavy, fontSize: 30, color: '#f0ede8', letterSpacing: 1,
+  },
+  coachBuildingBody: {
+    color: '#f0ede8', fontSize: 15, textAlign: 'center', lineHeight: 22,
+  },
+  coachBuildingDivider: {
+    height: 1, alignSelf: 'stretch', backgroundColor: Colors.border, marginVertical: 2,
+  },
+  coachBuildingNudge: {
+    color: '#8a877f', fontSize: 14, textAlign: 'center', lineHeight: 20,
   },
   restTitle: {
     fontFamily: Fonts.metricHeavy, fontSize: 30, color: '#f0ede8', letterSpacing: 1,

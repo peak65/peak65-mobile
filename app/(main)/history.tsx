@@ -12,6 +12,7 @@ import { supabase } from '../../lib/supabase';
 import { Colors, Fonts } from '../../lib/theme';
 import Tooltip from '../components/Tooltip';
 import type { TabParamList } from '../_layout';
+import { ProgramStatusContext } from '../_layout';
 
 const ORANGE    = '#ff9944';
 const BAR_MAX_H = 80;
@@ -685,11 +686,16 @@ function WorkoutDetailModal({
 
 export default function HistoryScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<TabParamList>>();
+  const { isElite, awaitingProgram } = React.useContext(ProgramStatusContext);
   const [logs, setLogs]                   = useState<SessionLog[]>([]);
   const [externalWorkouts, setExternalWorkouts] = useState<ExternalWorkout[]>([]);
   const [checkins, setCheckins]           = useState<Checkin[]>([]);
   const [profile, setProfile]             = useState<{ fitness_goal: string; weight_unit: string; preferred_units: string | null } | null>(null);
   const [loading, setLoading]             = useState(true);
+  // `loading` flips false as soon as the AsyncStorage cache is applied, which
+  // can be an empty payload. `resolved` only flips once the server read has
+  // finished, so an empty-state message never renders over unfetched data.
+  const [resolved, setResolved]           = useState(false);
   const [checkinOpen, setCheckinOpen]     = useState(false);
   const [activeTab, setActiveTab]         = useState<'weight' | 'bodyfat'>('weight');
   const [selectedItem, setSelectedItem]   = useState<HistoryItem | null>(null);
@@ -728,7 +734,7 @@ export default function HistoryScreen() {
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current) { setLoading(false); return; }
-    if (!session?.user) { setLoading(false); return; }
+    if (!session?.user) { setLoading(false); setResolved(true); return; }
 
     const [profRes, logsRes, checkinsRes, extRes] = await Promise.all([
       supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units').eq('id', session.user.id).single(),
@@ -747,6 +753,7 @@ export default function HistoryScreen() {
     setCheckins(checkinsRes.data ?? []);
     if (profRes.data?.weight_unit) setWeightUnit(profRes.data.weight_unit as 'lbs' | 'kg');
     setLoading(false);
+    setResolved(true);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -909,14 +916,29 @@ export default function HistoryScreen() {
 
         {/* Sessions + External Workouts — interleaved by date */}
         <Text style={styles.sectionHeading}>SESSIONS</Text>
-        {logs.length === 0 && externalWorkouts.length === 0 ? (
+        {logs.length === 0 && externalWorkouts.length === 0 && !resolved ? (
+          // Server read still in flight — don't assert "no sessions" yet.
+          <View style={styles.emptyState}>
+            <ActivityIndicator color={Colors.accent} />
+          </View>
+        ) : logs.length === 0 && externalWorkouts.length === 0 ? (
           <View style={styles.emptyState}>
             <Feather name="activity" color={Colors.textSecondary} size={32} />
             <Text style={styles.emptyStateTitle}>No sessions yet</Text>
-            <Text style={styles.emptyStateText}>Complete your first workout to start tracking progress.</Text>
-            <TouchableOpacity style={styles.emptyStateBtn} onPress={() => navigation.navigate('Program' as any)}>
-              <Text style={styles.emptyStateBtnText}>View Program</Text>
-            </TouchableOpacity>
+            {isElite && awaitingProgram ? (
+              // Sending them to the Program tab would be a dead end while their
+              // coach is still building it.
+              <Text style={styles.emptyStateText}>
+                Your training history will appear here once your coach's program is live.
+              </Text>
+            ) : (
+              <>
+                <Text style={styles.emptyStateText}>Complete your first workout to start tracking progress.</Text>
+                <TouchableOpacity style={styles.emptyStateBtn} onPress={() => navigation.navigate('Program' as any)}>
+                  <Text style={styles.emptyStateBtnText}>View Program</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         ) : (() => {
           const items: HistoryItem[] = [

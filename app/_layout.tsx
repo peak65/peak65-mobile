@@ -167,6 +167,14 @@ export const UnreadContext = React.createContext<{
   setHasUnread: (v: boolean) => void;
 }>({ hasUnread: false, setHasUnread: () => {} });
 
+// Pinnacle status, resolved once in resolveAppState and read by the tabs.
+// isElite gates every automatic program generator; awaitingProgram switches
+// Home / Program / History to the "coach is building your program" state.
+export const ProgramStatusContext = React.createContext<{
+  isElite: boolean;
+  awaitingProgram: boolean;
+}>({ isElite: false, awaitingProgram: false });
+
 function MainTabs() {
   const isCoach           = React.useContext(CoachContext);
   const { hasUnread }     = React.useContext(UnreadContext);
@@ -285,9 +293,18 @@ async function hasActiveProgram(userId: string): Promise<boolean> {
   return !!data;
 }
 
+// isElite / awaitingProgram are resolved here so the tabs never have to
+// re-query them. Both default to false, so only the Pinnacle branch sets them.
+type ResolveResult = {
+  state: AppState;
+  isCoach: boolean;
+  isElite?: boolean;
+  awaitingProgram?: boolean;
+};
+
 async function resolveAppState(
   session: Session | null,
-): Promise<{ state: AppState; isCoach: boolean }> {
+): Promise<ResolveResult> {
   if (!session) return { state: 'unauthenticated', isCoach: false };
 
   const { data: profile, error: profileError } = await supabase
@@ -334,10 +351,15 @@ async function resolveAppState(
   // 'generating' — that state auto-fires AI program generation on mount.
   // A coach's invite pre-fills first_name, so without this branch an elite
   // athlete would fall straight past the first_name check into that generator.
+  // Once setup is done an elite athlete always enters the main app, with or
+  // without a program — so they can message their coach and connect a wearable
+  // while they wait. awaitingProgram tells the tabs to show the "your coach is
+  // building your program" state instead of an empty one, and gates off the
+  // automatic generators in Home and Program.
   if (profile?.tier === 'elite') {
-    if (!profile?.onboarding_complete) return { state: 'setup', isCoach: false };
+    if (!profile?.onboarding_complete) return { state: 'setup', isCoach: false, isElite: true };
     const hasProgram = await hasActiveProgram(session.user.id);
-    return { state: hasProgram ? 'authenticated' : 'waiting', isCoach: false };
+    return { state: 'authenticated', isCoach: false, isElite: true, awaitingProgram: !hasProgram };
   }
 
   if (!profile?.first_name) return { state: 'onboarding', isCoach: false };
@@ -362,7 +384,7 @@ const RESOLVE_TIMED_OUT = Symbol('resolve-timed-out');
 // bypassing the gate above and stranding them on "No program found."
 async function resolveWithRetry(
   session: Session | null,
-): Promise<{ state: AppState; isCoach: boolean }> {
+): Promise<ResolveResult> {
   for (let attempt = 1; attempt <= RESOLVE_ATTEMPTS; attempt++) {
     const result = await Promise.race([
       resolveAppState(session),
@@ -478,6 +500,8 @@ class ErrorBoundary extends React.Component<
 export default function RootLayout() {
   const [appState,   setAppState]   = useState<AppState>('loading');
   const [isCoach,    setIsCoach]    = useState(false);
+  const [isElite,    setIsElite]    = useState(false);
+  const [awaitingProgram, setAwaitingProgram] = useState(false);
   const [hasUnread,  setHasUnread]  = useState(false);
   const resolvingRef                = React.useRef(false);
   const appStateValueRef            = React.useRef(appState);
@@ -516,7 +540,8 @@ export default function RootLayout() {
           if (event !== 'INITIAL_SESSION') setAppState('loading');
 
           const resolveStart = Date.now();
-          const { state: newState, isCoach: newIsCoach } = await resolveWithRetry(session);
+          const { state: newState, isCoach: newIsCoach, isElite: newIsElite, awaitingProgram: newAwaiting } =
+            await resolveWithRetry(session);
 
           // 300ms minimum prevents a white flash when the splash transitions
           // out before the JS bridge has finished painting the first frame.
@@ -525,6 +550,8 @@ export default function RootLayout() {
 
           setAppState(newState);
           setIsCoach(newIsCoach);
+          setIsElite(!!newIsElite);
+          setAwaitingProgram(!!newAwaiting);
 
           if (newState === 'authenticated' && session?.user?.id) {
             detectCandidates(session.user.id).catch(() => {});
@@ -578,11 +605,13 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <CoachContext.Provider value={isCoach}>
-        <UnreadContext.Provider value={{ hasUnread, setHasUnread }}>
-          <NavigationContainer>
-            <MainNavigator initialRoute={initialRoute} />
-          </NavigationContainer>
-        </UnreadContext.Provider>
+        <ProgramStatusContext.Provider value={{ isElite, awaitingProgram }}>
+          <UnreadContext.Provider value={{ hasUnread, setHasUnread }}>
+            <NavigationContainer>
+              <MainNavigator initialRoute={initialRoute} />
+            </NavigationContainer>
+          </UnreadContext.Provider>
+        </ProgramStatusContext.Provider>
       </CoachContext.Provider>
     </ErrorBoundary>
   );
