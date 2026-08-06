@@ -50,7 +50,7 @@ export default function WaitingScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <Logo width={90} />
+      <Logo width={150} />
       <View style={styles.body}>
         <Text style={styles.heading}>You're all set.</Text>
         <Text style={styles.subtext}>

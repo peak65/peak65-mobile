@@ -895,7 +895,7 @@ export default function HomeScreen() {
 
         {/* Header */}
         <View style={styles.header}>
-          <Logo width={100} />
+          <Logo width={150} />
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={styles.headerDate}>{todayLabel()}</Text>
             {cacheStale && <Text style={{ color: Colors.textSecondary, fontSize: 10, marginTop: 1 }}>Refreshing...</Text>}
