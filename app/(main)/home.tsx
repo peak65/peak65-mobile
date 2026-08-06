@@ -1007,7 +1007,11 @@ export default function HomeScreen() {
         {/* ── TODAY'S SESSION (hero) ─────────────────────────────────────────── */}
         <Text style={styles.sectionHeader}>TODAY</Text>
 
-        {!todayDay && isElite && awaitingProgram ? (
+        {/* `!program` mirrors the Program tab's `allPrograms.length === 0`:
+            awaitingProgram is resolved once per auth resolve and goes stale if
+            the coach publishes while the app is open, so the banner must also
+            require that no program is loaded. Clears without a relaunch. */}
+        {!todayDay && !program && isElite && awaitingProgram ? (
           <View style={styles.coachBuildingCard}>
             <Target color={Colors.accent} size={28} strokeWidth={1.5} />
             <Text style={styles.coachBuildingTitle}>You're all set.</Text>

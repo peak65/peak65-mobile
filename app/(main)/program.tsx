@@ -1307,6 +1307,11 @@ export default function ProgramScreen() {
   const canGoBack    = weekIdx > 0;
   const canGoForward = weekIdx < allPrograms.length - 1;
 
+  // awaitingProgram is resolved once per auth resolve, so it goes stale if the
+  // coach publishes while the app is open. Requiring an empty program list too
+  // means the banner clears the moment a real program lands — no relaunch.
+  const showCoachBuilding = isElite && awaitingProgram && allPrograms.length === 0;
+
   const isViewingCurrentWeek = (() => {
     if (!currentProgram?.week_start_date) return false;
     const start = new Date(currentProgram.week_start_date + 'T00:00:00');
@@ -1361,7 +1366,7 @@ export default function ProgramScreen() {
           {/* The week selector is meaningless with no program — a Pinnacle
               athlete waiting on their coach would otherwise see a live
               "Week 1" stepper above an empty state. */}
-          {!(isElite && awaitingProgram) && (
+          {!showCoachBuilding && (
           <View style={styles.weekRow}>
             <TouchableOpacity
               onPress={() => setWeekIdx(i => i - 1)}
@@ -1381,7 +1386,7 @@ export default function ProgramScreen() {
           </View>
           )}
 
-          {isElite && awaitingProgram ? (
+          {showCoachBuilding ? (
             <View style={styles.coachBuildingCard}>
               <Feather name="target" color={Colors.accent} size={26} />
               <Text style={styles.coachBuildingTitle}>You're all set.</Text>
