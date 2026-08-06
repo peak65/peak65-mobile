@@ -67,6 +67,9 @@ type Profile = {
   run_confidence?: number | null;
   primary_goal?: string | null;
   date_of_birth?: string | null;
+  // Coaching tier — 'elite' (Pinnacle) athletes have a coach who owns their
+  // programming, so this screen hides every control that would alter it.
+  tier?: string | null;
 };
 
 // Postgres text[] can arrive as a JS array, a "{a,b}" string, or null.
@@ -426,9 +429,15 @@ export default function ProfileScreen() {
 
   async function executeGoalSwitch() {
     if (!profile) return;
+    // Pinnacle athletes' programs are hand-built by their coach. Save the goal
+    // change, but never archive or rebuild the program. The control that opens
+    // this modal is hidden for elite — this is the backstop.
+    const skipRegen = profile.tier === 'elite';
     setGoalSwitchStep('generating');
     try {
-      await supabase.from('programs').update({ status: 'archived' }).eq('user_id', profile.id);
+      if (!skipRegen) {
+        await supabase.from('programs').update({ status: 'archived' }).eq('user_id', profile.id);
+      }
       const patch: Partial<Profile> = {
         goal: targetGoal,
         previous_goal: profile.goal,
@@ -444,12 +453,14 @@ export default function ProfileScreen() {
         if (gsPrimaryGoal) patch.primary_goal = gsPrimaryGoal;
       }
       await updateProfile(patch);
-      const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: profile.id }),
-      });
-      if (!res.ok) throw new Error('generate-assessment returned ' + res.status);
+      if (!skipRegen) {
+        const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: profile.id }),
+        });
+        if (!res.ok) throw new Error('generate-assessment returned ' + res.status);
+      }
       setGoalSwitchStep('done');
     } catch (e) {
       console.log('[goalSwitch] error:', e);
@@ -512,7 +523,10 @@ export default function ProfileScreen() {
     setProfile(updated);
     await supabase.from('profiles').update(patch).eq('id', profile.id);
 
-    if (Object.keys(patch).some(k => REGEN_TRIGGER_FIELDS.has(k))) {
+    // Pinnacle athletes' programs belong to their coach — the benign field value
+    // above is still saved, but nothing here may archive or rebuild a program.
+    // The rows that write these fields are hidden for elite; this is the backstop.
+    if (profile.tier !== 'elite' && Object.keys(patch).some(k => REGEN_TRIGGER_FIELDS.has(k))) {
       setProgramRegenStatus('regenerating');
       try {
         await supabase.from('programs').update({ status: 'archived' }).eq('user_id', profile.id);
@@ -654,6 +668,10 @@ export default function ProfileScreen() {
       </SafeAreaView>
     );
   }
+
+  // Pinnacle athletes: their coach owns programming, so every control that
+  // would change it is withheld from this screen.
+  const isElite = profile?.tier === 'elite';
 
   const goalBadge = profile?.goal === 'hyrox'
     ? `Hyrox${profile.hyrox_division ? ` • ${profile.hyrox_division}` : ''}`
@@ -1082,7 +1100,17 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        {/* Training section */}
+        {/* Training section — hidden for Pinnacle athletes. Every row below
+            changes programming, and their coach owns that. */}
+        {isElite ? (
+          <>
+            <Text style={styles.sectionHeading}>Training</Text>
+            <View style={styles.section}>
+              <Text style={styles.coachManagedNote}>Your coach manages your training plan.</Text>
+            </View>
+          </>
+        ) : (
+        <>
         <Text style={styles.sectionHeading}>Training</Text>
         <View style={styles.section}>
           <SettingRow label="Goal" value={GOAL_OPTIONS.find(o => o.value === profile?.goal)?.label ?? ''} onPress={() => {
@@ -1109,6 +1137,8 @@ export default function ProfileScreen() {
             <Feather name="chevron-right" color={Colors.accent} size={16} />
           </TouchableOpacity>
         </View>
+        </>
+        )}
 
         {/* Wearables section */}
         <Text style={styles.sectionHeading}>Wearables</Text>
@@ -1312,7 +1342,7 @@ export default function ProfileScreen() {
         <Text style={styles.sectionHeading}>Account</Text>
         <View style={styles.section}>
           <SettingRow label="Email" value={email} />
-          <SettingRow label="Subscription" value="Foundation • Active" />
+          <SettingRow label="Subscription" value={`${isElite ? 'Pinnacle' : 'Foundation'} • Active`} />
         </View>
 
         {/* Sign out */}
@@ -1326,6 +1356,14 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+
+  coachManagedNote: {
+    color: Colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
 
   nameBlock: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
   name: { color: Colors.textPrimary, fontSize: 24, fontWeight: '800' },
