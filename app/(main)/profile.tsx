@@ -15,6 +15,7 @@ import { computeTDEEFromProfile, type TDEEResult } from '../../lib/tdee';
 import { calculatePeakScore } from '../../lib/peakScore';
 import { getConnectedWearables, resolveAllSources } from '../../lib/wearablePriority';
 import { getWhoopAuthUrl } from '../../lib/whoopApi';
+import { clearUserCache } from '../../lib/userCache';
 import SliderInput from '../../components/SliderInput';
 import { Colors, Fonts } from '../../lib/theme';
 import { Feather } from '@expo/vector-icons';
@@ -545,6 +546,9 @@ export default function ProfileScreen() {
   }
 
   async function handleSignOut() {
+    // Cleared before signOut so nothing can re-read this athlete's cached
+    // program between the two calls. The next account starts from an empty cache.
+    await clearUserCache();
     await supabase.auth.signOut();
   }
 

@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
@@ -686,7 +686,11 @@ function WorkoutDetailModal({
 
 export default function HistoryScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<TabParamList>>();
-  const { isElite, awaitingProgram } = React.useContext(ProgramStatusContext);
+  const { isElite } = React.useContext(ProgramStatusContext);
+  // Read fresh on every focus, like Home and Program. awaitingProgram is a
+  // snapshot taken at auth time and is stale for a just-onboarded athlete.
+  const [athleteTier, setAthleteTier] = useState<string | null>(null);
+  const [hasProgram,  setHasProgram]  = useState(false);
   const [logs, setLogs]                   = useState<SessionLog[]>([]);
   const [externalWorkouts, setExternalWorkouts] = useState<ExternalWorkout[]>([]);
   const [checkins, setCheckins]           = useState<Checkin[]>([]);
@@ -736,14 +740,17 @@ export default function HistoryScreen() {
     if (!mounted.current) { setLoading(false); return; }
     if (!session?.user) { setLoading(false); setResolved(true); return; }
 
-    const [profRes, logsRes, checkinsRes, extRes] = await Promise.all([
-      supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units').eq('id', session.user.id).single(),
+    const [profRes, logsRes, checkinsRes, extRes, progRes] = await Promise.all([
+      supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units, tier').eq('id', session.user.id).single(),
       supabase.from('session_logs').select('*').eq('user_id', session.user.id)
         .order('completed_at', { ascending: false }),
       supabase.from('checkins').select('*').eq('user_id', session.user.id)
         .order('created_at', { ascending: true }).limit(20),
       supabase.from('external_workouts').select('*').eq('user_id', session.user.id)
         .order('start_time', { ascending: false }),
+      // Does a real program exist yet? Drives the Pinnacle waiting copy below.
+      supabase.from('programs').select('id').eq('user_id', session.user.id)
+        .not('is_draft', 'is', true).limit(1).maybeSingle(),
     ]);
 
     if (!mounted.current) { setLoading(false); return; }
@@ -752,11 +759,15 @@ export default function HistoryScreen() {
     setExternalWorkouts(extRes.data ?? []);
     setCheckins(checkinsRes.data ?? []);
     if (profRes.data?.weight_unit) setWeightUnit(profRes.data.weight_unit as 'lbs' | 'kg');
+    setAthleteTier(((profRes.data as any)?.tier ?? null) as string | null);
+    setHasProgram(!!progRes.data);
     setLoading(false);
     setResolved(true);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Refresh on focus so a freshly-onboarded athlete — and a coach publishing
+  // mid-session — are both picked up without relaunching.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   async function handleSaveCheckin() {
     const w = parseFloat(weight);
@@ -784,6 +795,10 @@ export default function HistoryScreen() {
       </SafeAreaView>
     );
   }
+
+  // Fresh tier from this screen's own focus-refreshed read, falling back to the
+  // gate's flag so the copy is right on the very first frame.
+  const isEliteAthlete = athleteTier === 'elite' || isElite;
 
   const showCheckin = !profile?.fitness_goal ||
     ['look_better', 'all_around'].includes(profile.fitness_goal);
@@ -925,7 +940,7 @@ export default function HistoryScreen() {
           <View style={styles.emptyState}>
             <Feather name="activity" color={Colors.textSecondary} size={32} />
             <Text style={styles.emptyStateTitle}>No sessions yet</Text>
-            {isElite && awaitingProgram ? (
+            {isEliteAthlete && !hasProgram ? (
               // Sending them to the Program tab would be a dead end while their
               // coach is still building it.
               <Text style={styles.emptyStateText}>

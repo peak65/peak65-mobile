@@ -27,6 +27,7 @@ Notifications.setNotificationHandler({
 
 import { supabase } from '../lib/supabase';
 import { detectCandidates } from '../lib/sessionMatcher';
+import { clearUserCache } from '../lib/userCache';
 import { Colors } from '../lib/theme';
 import LoginScreen from './auth/login';
 import SignupScreen from './auth/signup';
@@ -528,6 +529,10 @@ export default function RootLayout() {
         try {
           // Token refresh doesn't change routing — skip to avoid remounting the navigator.
           if (event === 'TOKEN_REFRESHED') return;
+
+          // Catches every sign-out path, including the stale-session signOut in
+          // resolveAppState, so no cached athlete data survives an account switch.
+          if (event === 'SIGNED_OUT') void clearUserCache();
 
           // One resolve at a time — if a resolve is already in progress, drop the
           // duplicate event (typically caused by rapid sign-in/sign-out races).
