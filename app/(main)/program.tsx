@@ -1058,10 +1058,9 @@ function HRDetailModal({ detail, onClose }: { detail: HRDetail; onClose: () => v
 export default function ProgramScreen() {
   // Pinnacle status. isElite hard-blocks the next-week generator below — a
   // coach owns these programs and this screen must never author one.
-  const { isElite, awaitingProgram } = React.useContext(ProgramStatusContext);
+  const { isElite } = React.useContext(ProgramStatusContext);
   const isEliteRef = useRef(isElite);
   isEliteRef.current = isElite;
-  const coachName = useCoachName(isElite && awaitingProgram);
 
   const [allPrograms, setAllPrograms]     = useState<Program[]>([]);
   const [weekIdx, setWeekIdx]             = useState(0);
@@ -1077,6 +1076,11 @@ export default function ProgramScreen() {
   // finished, so an empty-state message never renders over unfetched data.
   const [resolved, setResolved]           = useState(false);
   const [ttProfile, setTtProfile]         = useState<TimeTrialProfile | null>(null);
+  const [athleteTier, setAthleteTier]     = useState<string | null>(null);
+
+  // Declared after athleteTier so the lookup can key off the freshly-read tier
+  // rather than a flag captured at auth time.
+  const coachName = useCoachName(athleteTier === 'elite' || isElite);
   const scrollViewRef = useRef<ScrollView>(null);
   const dayListY      = useRef(0);
   const dayYOffsets   = useRef<Record<string, number>>({});
@@ -1202,7 +1206,7 @@ export default function ProgramScreen() {
         .not('day_name', 'is', null),
       supabase
         .from('profiles')
-        .select('goal, age, preferred_units, current_training_days, rest_days')
+        .select('goal, age, preferred_units, current_training_days, rest_days, tier')
         .eq('id', session.user.id)
         .maybeSingle(),
     ]);
@@ -1225,6 +1229,10 @@ export default function ProgramScreen() {
     const nextNum = active?.week_number ? active.week_number + 1 : null;
     const nextExists = nextNum ? progs.some(p => p.week_number === nextNum) : false;
     if (nextExists) setNextWeekReady(true);
+
+    // Read fresh on every focus so a just-onboarded Pinnacle athlete is
+    // recognised without relaunching the app.
+    setAthleteTier(((profileRes.data as any)?.tier ?? null) as string | null);
 
     if (profileRes.data) {
       setTtProfile({
@@ -1307,10 +1315,13 @@ export default function ProgramScreen() {
   const canGoBack    = weekIdx > 0;
   const canGoForward = weekIdx < allPrograms.length - 1;
 
-  // awaitingProgram is resolved once per auth resolve, so it goes stale if the
-  // coach publishes while the app is open. Requiring an empty program list too
-  // means the banner clears the moment a real program lands — no relaunch.
-  const showCoachBuilding = isElite && awaitingProgram && allPrograms.length === 0;
+  // Source of truth: elite tier + zero programs, both read fresh on every focus.
+  // Deliberately NOT keyed on awaitingProgram or program_status — those are
+  // snapshots taken before setup finishes writing, so they can be stale and
+  // would wrongly hide the banner. The empty program list keeps the banner
+  // clearing the moment the coach's program lands.
+  const isEliteAthlete    = athleteTier === 'elite' || isElite;
+  const showCoachBuilding = isEliteAthlete && allPrograms.length === 0;
 
   const isViewingCurrentWeek = (() => {
     if (!currentProgram?.week_start_date) return false;

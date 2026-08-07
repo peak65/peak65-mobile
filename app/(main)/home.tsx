@@ -85,6 +85,9 @@ type HomeProfile = {
   gender: string | null;
   current_training_days: string | null;
   rest_days: number | null;
+  // Read fresh on every focus so a just-onboarded Pinnacle athlete is
+  // recognised without relaunching the app.
+  tier: string | null;
 };
 
 type ExternalWorkout = {
@@ -357,10 +360,9 @@ export default function HomeScreen() {
 
   // Pinnacle status. isElite hard-blocks the week-2 generator below; a coach
   // owns these programs and nothing on this screen may author one.
-  const { isElite, awaitingProgram } = React.useContext(ProgramStatusContext);
+  const { isElite } = React.useContext(ProgramStatusContext);
   const isEliteRef = useRef(isElite);
   isEliteRef.current = isElite;
-  const coachName = useCoachName(isElite && awaitingProgram);
 
   const [userId, setUserId]               = useState('');
   const [program, setProgram]             = useState<Program | null>(null);
@@ -397,6 +399,10 @@ export default function HomeScreen() {
   const [preferredUnits, setPreferredUnits]   = useState<string | null>(null);
   const [showChestStrapTip, setShowChestStrapTip] = useState(false);
   const [storedProfile, setStoredProfile]     = useState<HomeProfile | null>(null);
+
+  // Declared after storedProfile so the lookup can key off the freshly-read
+  // tier rather than a flag captured at auth time.
+  const coachName = useCoachName(storedProfile?.tier === 'elite' || isElite);
   const [pendingCandidates, setPendingCandidates] = useState<CandidateRow[]>([]);
   const [refreshing, setRefreshing]               = useState(false);
   const [completedTodayKeys, setCompletedTodayKeys] = useState<Set<string>>(new Set());
@@ -516,7 +522,7 @@ export default function HomeScreen() {
       supabase.from('session_logs').select('completed_at, completed, session_name, session_time')
         .eq('user_id', uid).eq('completed', true).order('completed_at', { ascending: false }),
       supabase.from('profiles')
-        .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, garmin_connected, coros_connected, manual_hrv, manual_hrv_date, program_start_date')
+        .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, garmin_connected, coros_connected, manual_hrv, manual_hrv_date, program_start_date, tier')
         .eq('id', uid)
         .maybeSingle(),
       supabase.from('external_workouts')
@@ -861,6 +867,10 @@ export default function HomeScreen() {
     : sessions.map(s => s.name).filter(Boolean).join(' + ');
   const workoutSummary = todayDay ? buildWorkoutSummary(todayDay) : '';
 
+  // Fresh tier from this screen's own focus-refreshed profile read, falling
+  // back to the gate's flag so the banner is right on the very first frame.
+  const isEliteAthlete = storedProfile?.tier === 'elite' || isElite;
+
   const hasWearable = healthConnected || storedProfile?.whoop_connected === true;
 
   const hasWearableData = hasWearable && !!readinessData;
@@ -1007,11 +1017,12 @@ export default function HomeScreen() {
         {/* ── TODAY'S SESSION (hero) ─────────────────────────────────────────── */}
         <Text style={styles.sectionHeader}>TODAY</Text>
 
-        {/* `!program` mirrors the Program tab's `allPrograms.length === 0`:
-            awaitingProgram is resolved once per auth resolve and goes stale if
-            the coach publishes while the app is open, so the banner must also
-            require that no program is loaded. Clears without a relaunch. */}
-        {!todayDay && !program && isElite && awaitingProgram ? (
+        {/* Source of truth: elite tier + zero programs, both read fresh on every
+            focus. Deliberately NOT keyed on awaitingProgram or program_status —
+            those are snapshots taken before setup finishes writing, so they can
+            be stale and would wrongly hide the banner. `!program` keeps the
+            banner clearing the moment the coach's program lands. */}
+        {!todayDay && !program && isEliteAthlete ? (
           <View style={styles.coachBuildingCard}>
             <Target color={Colors.accent} size={28} strokeWidth={1.5} />
             <Text style={styles.coachBuildingTitle}>You're all set.</Text>
