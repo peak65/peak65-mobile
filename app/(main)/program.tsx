@@ -1080,7 +1080,8 @@ export default function ProgramScreen() {
 
   // Declared after athleteTier so the lookup can key off the freshly-read tier
   // rather than a flag captured at auth time.
-  const coachName = useCoachName(athleteTier === 'elite' || isElite);
+  const { name: coachName, resolved: coachResolved } =
+    useCoachName(athleteTier === 'elite' || isElite);
   const scrollViewRef = useRef<ScrollView>(null);
   const dayListY      = useRef(0);
   const dayYOffsets   = useRef<Record<string, number>>({});
@@ -1398,16 +1399,22 @@ export default function ProgramScreen() {
           )}
 
           {showCoachBuilding ? (
-            <View style={styles.coachBuildingCard}>
-              <Feather name="target" color={Colors.accent} size={26} />
-              <Text style={styles.coachBuildingTitle}>You're all set.</Text>
-              <Text style={styles.coachBuildingBody}>
-                {coachName} is building your program personally. You'll have it within 48 hours.
-              </Text>
-              <Text style={styles.coachBuildingNudge}>
-                In the meantime — connect your Whoop and send {coachName} a message.
-              </Text>
-            </View>
+            // Hold the card until the coach's name is known, so it never renders
+            // "Your coach" and then swaps to the real name a moment later.
+            coachResolved ? (
+              <View style={styles.coachBuildingCard}>
+                <Feather name="target" color={Colors.accent} size={26} />
+                <Text style={styles.coachBuildingTitle}>You're all set.</Text>
+                <Text style={styles.coachBuildingBody}>
+                  {coachName} is building your program personally.
+                </Text>
+                <Text style={styles.coachBuildingNudge}>
+                  In the meantime — connect your Whoop and send {coachName} a message.
+                </Text>
+              </View>
+            ) : (
+              <ActivityIndicator color={Colors.accent} style={{ marginTop: 40 }} />
+            )
           ) : allPrograms.length === 0 ? (
             // Never claim "no program" over data we haven't fetched yet.
             resolved

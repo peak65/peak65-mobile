@@ -402,7 +402,8 @@ export default function HomeScreen() {
 
   // Declared after storedProfile so the lookup can key off the freshly-read
   // tier rather than a flag captured at auth time.
-  const coachName = useCoachName(storedProfile?.tier === 'elite' || isElite);
+  const { name: coachName, resolved: coachResolved } =
+    useCoachName(storedProfile?.tier === 'elite' || isElite);
   const [pendingCandidates, setPendingCandidates] = useState<CandidateRow[]>([]);
   const [refreshing, setRefreshing]               = useState(false);
   const [completedTodayKeys, setCompletedTodayKeys] = useState<Set<string>>(new Set());
@@ -1023,17 +1024,25 @@ export default function HomeScreen() {
             be stale and would wrongly hide the banner. `!program` keeps the
             banner clearing the moment the coach's program lands. */}
         {!todayDay && !program && isEliteAthlete ? (
-          <View style={styles.coachBuildingCard}>
-            <Target color={Colors.accent} size={28} strokeWidth={1.5} />
-            <Text style={styles.coachBuildingTitle}>You're all set.</Text>
-            <Text style={styles.coachBuildingBody}>
-              {coachName} is building your program personally. You'll have it within 48 hours.
-            </Text>
-            <View style={styles.coachBuildingDivider} />
-            <Text style={styles.coachBuildingNudge}>
-              In the meantime — connect your Whoop and send {coachName} a message.
-            </Text>
-          </View>
+          // Hold the card until the coach's name is known, so it never renders
+          // "Your coach" and then swaps to the real name a moment later.
+          coachResolved ? (
+            <View style={styles.coachBuildingCard}>
+              <Target color={Colors.accent} size={28} strokeWidth={1.5} />
+              <Text style={styles.coachBuildingTitle}>You're all set.</Text>
+              <Text style={styles.coachBuildingBody}>
+                {coachName} is building your program personally.
+              </Text>
+              <View style={styles.coachBuildingDivider} />
+              <Text style={styles.coachBuildingNudge}>
+                In the meantime — connect your Whoop and send {coachName} a message.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.emptyBlock}>
+              <ActivityIndicator color={Colors.accent} />
+            </View>
+          )
         ) : !todayDay && !program && !resolved ? (
           // Server read still in flight — say nothing rather than the wrong thing.
           <View style={styles.emptyBlock}>
