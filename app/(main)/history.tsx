@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, Modal, Alert,
+  Keyboard, KeyboardAvoidingView, InputAccessoryView, TouchableWithoutFeedback, Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -827,8 +828,15 @@ export default function HistoryScreen() {
       )}
 
       {/* Check-in modal */}
-      <Modal visible={checkinOpen} transparent animationType="slide">
-        <View style={styles.modalBackdrop}>
+      <Modal visible={checkinOpen} transparent animationType="slide" onRequestClose={() => setCheckinOpen(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1, justifyContent: 'flex-end' }}
+        >
+          <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>Body Check-In</Text>
 
@@ -844,11 +852,13 @@ export default function HistoryScreen() {
 
             <TextInput style={styles.input} placeholder={`Weight (${weightUnit})`}
               placeholderTextColor={Colors.textSecondary} value={weight} onChangeText={setWeight}
-              keyboardType="decimal-pad" selectionColor={Colors.accent} />
+              keyboardType="decimal-pad" selectionColor={Colors.accent}
+              inputAccessoryViewID="checkin-input-accessory" />
             <TextInput style={[styles.input, { marginTop: 10 }]}
               placeholder="Body fat % (optional)"
               placeholderTextColor={Colors.textSecondary} value={bodyFat} onChangeText={setBodyFat}
-              keyboardType="decimal-pad" selectionColor={Colors.accent} />
+              keyboardType="decimal-pad" selectionColor={Colors.accent}
+              inputAccessoryViewID="checkin-input-accessory" />
 
             <TouchableOpacity
               style={[styles.saveBtn, (!parseFloat(weight) || saving) && { opacity: 0.4 }]}
@@ -860,7 +870,17 @@ export default function HistoryScreen() {
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
+
+        {Platform.OS === 'ios' && (
+          <InputAccessoryView nativeID="checkin-input-accessory">
+            <View style={styles.inputAccessoryBar}>
+              <TouchableOpacity onPress={() => Keyboard.dismiss()} style={styles.inputAccessoryDoneBtn}>
+                <Text style={styles.inputAccessoryDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </InputAccessoryView>
+        )}
       </Modal>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
@@ -1126,11 +1146,21 @@ const styles = StyleSheet.create({
   detailNotes: { color: Colors.textPrimary, fontSize: 14, lineHeight: 20 },
 
   // Check-in modal
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalBackdrop: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
   modalSheet: {
     backgroundColor: Colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: 24, paddingBottom: 40,
   },
+  inputAccessoryBar: {
+    backgroundColor: '#1c1c1e', borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#3a3a3c', paddingVertical: 8, paddingHorizontal: 16,
+    alignItems: 'flex-end',
+  },
+  inputAccessoryDoneBtn: { paddingHorizontal: 12, paddingVertical: 4 },
+  inputAccessoryDoneText: { color: Colors.accent, fontSize: 16, fontWeight: '600' },
   modalTitle: { color: Colors.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
   unitRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   unitBtn: {
