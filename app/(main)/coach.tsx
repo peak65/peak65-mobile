@@ -28,7 +28,7 @@ type AthleteEntry = {
 };
 
 const TIER_LABELS: Record<string, string> = {
-  elite:      'Champion',
+  elite:      'Pinnacle',
   coached:    'Performance',
   ai_coached: 'Foundation',
 };
