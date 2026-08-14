@@ -752,21 +752,30 @@ function WorkoutDetailModal({
               } catch { return null; }
             })() : null}
 
-            {/* HR upload */}
-            {uploadStatus === 'loading' ? (
-              <View style={{ alignItems: 'center', marginTop: 8, gap: 8, marginBottom: 12 }}>
-                <ActivityIndicator color={Colors.accent} />
-                <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Reading your HR data...</Text>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={[styles.saveBtn, { marginBottom: 12 }]}
-                onPress={handleUploadHR}
-              >
-                <Text style={styles.saveBtnText}>
-                  {localWorkout.hr_zones ? 'UPDATE HR DATA' : 'UPLOAD HR DATA'}
-                </Text>
-              </TouchableOpacity>
+            {/* HR upload — only when this workout has no HR at all.
+                Unlike session_logs, external_workouts has no rich HR pipeline:
+                the two sync upserts (home.tsx, profile.tsx) write only
+                avg_hr/max_hr/effort_zone, and nothing ever writes zone_minutes,
+                hr_screenshot_url, peak_hr or the recovery fields to this table.
+                So the rich state that SessionDetailModal has cannot apply here —
+                only the legacy hr_zones bars above and this button. Gating on
+                hr_zones keeps the no-double-log behaviour consistent with the
+                session modal; if a rich pipeline is added for synced workouts,
+                this is where the three-state branch would go. */}
+            {!localWorkout.hr_zones && (
+              uploadStatus === 'loading' ? (
+                <View style={{ alignItems: 'center', marginTop: 8, gap: 8, marginBottom: 12 }}>
+                  <ActivityIndicator color={Colors.accent} />
+                  <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Reading your HR data...</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.saveBtn, { marginBottom: 12 }]}
+                  onPress={handleUploadHR}
+                >
+                  <Text style={styles.saveBtnText}>UPLOAD HR DATA</Text>
+                </TouchableOpacity>
+              )
             )}
 
             <TouchableOpacity
