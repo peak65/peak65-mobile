@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, Modal, Alert,
+  StyleSheet, ActivityIndicator, Modal, Alert, Image,
   Keyboard, KeyboardAvoidingView, InputAccessoryView, TouchableWithoutFeedback, Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,6 +12,7 @@ import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { Colors, Fonts } from '../../lib/theme';
 import Tooltip from '../components/Tooltip';
+import ZoneBars, { type ZoneMinutes } from '../../components/ZoneBars';
 import type { TabParamList } from '../_layout';
 import { ProgramStatusContext } from '../_layout';
 
@@ -44,7 +45,29 @@ type SessionLog = {
   day_type: string | null;
   day_name: string | null;
   program_id: string | null;
+  // Legacy HR: a JSON string of zone minutes, written by this screen's own
+  // upload path. Still present on older sessions, so keep rendering it.
   hr_zones: string | null;
+  // Rich HR, written server-side by the extract-hr-zones API when a session is
+  // logged through log-session.tsx. Already returned by this screen's
+  // select('*') query. All nullable — sessions predate the HR pipeline.
+  peak_hr: number | null;
+  avg_hr: number | null;
+  hr_recovery_1min: number | null;
+  hr_recovery_2min: number | null;
+  zone_minutes: ZoneMinutes | null;
+  hr_screenshot_url: string | null;
+  hr_curve_screenshot_url: string | null;
+};
+
+// A session has rich HR if the server extracted zone minutes or stored a
+// screenshot. Checked instead of the legacy hr_zones column, which the rich
+// pipeline never writes — gating on hr_zones is what made already-logged
+// sessions offer "UPLOAD HR DATA" again.
+const hasRichHR = (log: SessionLog) => {
+  const zm = log.zone_minutes;
+  const zoneTotal = zm ? (['z1', 'z2', 'z3', 'z4', 'z5'] as const).reduce((s, k) => s + (zm[k] ?? 0), 0) : 0;
+  return zoneTotal > 0 || !!log.hr_screenshot_url;
 };
 
 type ExternalWorkout = {
@@ -198,6 +221,28 @@ function SessionDetailModal({
 }) {
   const [log, setLog] = useState(logProp);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'loading'>('idle');
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  // hr_screenshot_url is a storage path in a private bucket, not a URL — it has
+  // to be signed before <Image> can load it. Same pattern as HRDetailModal.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!log.hr_screenshot_url) { setImgFailed(true); return; }
+      try {
+        const { data, error } = await supabase.storage
+          .from('hr-screenshots')
+          .createSignedUrl(log.hr_screenshot_url, 3600);
+        if (!active) return;
+        if (error || !data?.signedUrl) { setImgFailed(true); return; }
+        setSignedUrl(data.signedUrl);
+      } catch {
+        if (active) setImgFailed(true);
+      }
+    })();
+    return () => { active = false; };
+  }, [log.hr_screenshot_url]);
 
   async function handleUploadHR() {
     let ImagePicker: any;
@@ -270,13 +315,11 @@ function SessionDetailModal({
           <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={styles.detailDate}>{fmtDate(log.completed_at)}</Text>
 
+            {/* Week and Trial Result are internal/coach-facing and are
+                deliberately not shown here: week_number is program bookkeeping,
+                and log_value doubles as a completion marker, so it surfaced
+                "true" to athletes. Coach screens read these separately. */}
             <View style={styles.detailGrid}>
-              {log.week_number != null && (
-                <View style={styles.detailCell}>
-                  <Text style={styles.detailCellLabel}>Week</Text>
-                  <Text style={styles.detailCellVal}>{log.week_number}</Text>
-                </View>
-              )}
               {log.duration != null && (
                 <View style={styles.detailCell}>
                   <Text style={styles.detailCellLabel}>Duration</Text>
@@ -289,12 +332,6 @@ function SessionDetailModal({
                   <Text style={[styles.detailCellVal, { color: rpeColor(log.rpe) }]}>{log.rpe}/10</Text>
                 </View>
               )}
-              {log.log_value != null && (
-                <View style={styles.detailCell}>
-                  <Text style={styles.detailCellLabel}>Trial Result</Text>
-                  <Text style={styles.detailCellVal}>{log.log_value}</Text>
-                </View>
-              )}
             </View>
 
             {log.notes ? (
@@ -304,7 +341,66 @@ function SessionDetailModal({
               </>
             ) : null}
 
-            {log.hr_zones ? (() => {
+            {/* ── HR: three mutually exclusive states ──────────────────────────
+                a) rich  — server-extracted numbers + zone bars + screenshot
+                b) legacy — old hr_zones JSON string, bars only
+                c) none  — the upload button, the only way to attach HR to an
+                           already-logged session
+                The upload button renders in state (c) ONLY: offering it when
+                data already exists is what caused duplicate HR logging. */}
+            {hasRichHR(log) ? (
+              <>
+                <Text style={[styles.detailSectionLabel, { marginTop: 16 }]}>Heart Rate</Text>
+                <View style={styles.detailGrid}>
+                  {log.peak_hr != null && (
+                    <View style={styles.detailCell}>
+                      <Text style={styles.detailCellLabel}>Peak HR</Text>
+                      <Text style={styles.detailCellVal}>{log.peak_hr} bpm</Text>
+                    </View>
+                  )}
+                  {log.avg_hr != null && (
+                    <View style={styles.detailCell}>
+                      <Text style={styles.detailCellLabel}>Avg HR</Text>
+                      <Text style={styles.detailCellVal}>{log.avg_hr} bpm</Text>
+                    </View>
+                  )}
+                  {log.hr_recovery_1min != null && (
+                    <View style={styles.detailCell}>
+                      <Text style={styles.detailCellLabel}>1-Min Rec</Text>
+                      <Text style={styles.detailCellVal}>{log.hr_recovery_1min} bpm</Text>
+                    </View>
+                  )}
+                  {log.hr_recovery_2min != null && (
+                    <View style={styles.detailCell}>
+                      <Text style={styles.detailCellLabel}>2-Min Rec</Text>
+                      <Text style={styles.detailCellVal}>{log.hr_recovery_2min} bpm</Text>
+                    </View>
+                  )}
+                </View>
+
+                {log.zone_minutes ? (
+                  <>
+                    <Text style={styles.detailSectionLabel}>Zone Distribution</Text>
+                    <View style={{ marginBottom: 20 }}>
+                      <ZoneBars zones={log.zone_minutes} />
+                    </View>
+                  </>
+                ) : null}
+
+                {signedUrl && !imgFailed ? (
+                  <Image
+                    source={{ uri: signedUrl }}
+                    style={styles.detailHRImage}
+                    resizeMode="contain"
+                    onError={() => setImgFailed(true)}
+                  />
+                ) : imgFailed ? null : (
+                  <View style={styles.detailHRImagePlaceholder}>
+                    <ActivityIndicator color={Colors.accent} />
+                  </View>
+                )}
+              </>
+            ) : log.hr_zones ? (() => {
               try {
                 const zones = JSON.parse(log.hr_zones) as Record<string, number>;
                 const keys = ['z1', 'z2', 'z3', 'z4', 'z5'];
@@ -336,22 +432,25 @@ function SessionDetailModal({
               } catch { return null; }
             })() : null}
 
-            {uploadStatus === 'loading' ? (
-              <View style={{ alignItems: 'center', marginTop: 20, gap: 8 }}>
-                <ActivityIndicator color={Colors.accent} />
-                <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Reading your HR data...</Text>
-              </View>
-            ) : (
-              <Tooltip id="hr_upload" text="Upload your HR screenshot here after any session. Your coach uses this to track your training zones." arrowDirection="down">
-              <TouchableOpacity
-                style={styles.saveBtn}
-                onPress={handleUploadHR}
-              >
-                <Text style={styles.saveBtnText}>
-                  {log.hr_zones ? 'UPDATE HR DATA' : 'UPLOAD HR DATA'}
-                </Text>
-              </TouchableOpacity>
-              </Tooltip>
+            {/* State (c) only — no HR of either kind on this session. */}
+            {!hasRichHR(log) && !log.hr_zones && (
+              uploadStatus === 'loading' ? (
+                <View style={{ alignItems: 'center', marginTop: 20, gap: 8 }}>
+                  <ActivityIndicator color={Colors.accent} />
+                  <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Reading your HR data...</Text>
+                </View>
+              ) : (
+                <Tooltip id="hr_upload" text="Upload your HR screenshot here after any session. Your coach uses this to track your training zones." arrowDirection="down">
+                <TouchableOpacity
+                  style={styles.saveBtn}
+                  onPress={handleUploadHR}
+                >
+                  <Text style={styles.saveBtnText}>
+                    {log.hr_zones ? 'UPDATE HR DATA' : 'UPLOAD HR DATA'}
+                  </Text>
+                </TouchableOpacity>
+                </Tooltip>
+              )
             )}
           </ScrollView>
         </View>
@@ -1144,6 +1243,13 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase', marginBottom: 8,
   },
   detailNotes: { color: Colors.textPrimary, fontSize: 14, lineHeight: 20 },
+  detailHRImage: {
+    width: '100%', height: 260, borderRadius: 8, backgroundColor: Colors.nested,
+  },
+  detailHRImagePlaceholder: {
+    width: '100%', height: 120, borderRadius: 8, backgroundColor: Colors.nested,
+    alignItems: 'center', justifyContent: 'center',
+  },
 
   // Check-in modal
   modalBackdrop: {
