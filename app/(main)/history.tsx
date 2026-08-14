@@ -12,12 +12,15 @@ import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { Colors, Fonts } from '../../lib/theme';
 import Tooltip from '../components/Tooltip';
+import TrendLineChart, { type TrendPoint } from '../components/TrendLineChart';
 import ZoneBars, { type ZoneMinutes } from '../../components/ZoneBars';
 import type { TabParamList } from '../_layout';
 import { ProgramStatusContext } from '../_layout';
 
 const ORANGE    = '#ff9944';
-const BAR_MAX_H = 80;
+// Rendered rows in the check-in history list. The full record stays in state;
+// this only bounds what's drawn so a long history can't stall the page.
+const CHECKIN_LIST_MAX = 50;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,6 +129,13 @@ function fmtDuration(s: number | null): string {
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+// TrendLineChart parses its `date` as `${date}T00:00:00`, so it needs a bare
+// 'YYYY-MM-DD' key — handing it a full ISO timestamp yields an Invalid Date.
+// en-CA gives YYYY-MM-DD in LOCAL time, matching the rest of the codebase.
+function toDayKey(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-CA');
+}
+
 const LBS_PER_KG = 2.20462;
 
 // Convert a stored check-in weight from the unit it was entered in into the
@@ -191,40 +201,6 @@ function longestStreak(logs: SessionLog[]): number {
     else cur = 1;
   }
   return max;
-}
-
-// ─── Bar chart ────────────────────────────────────────────────────────────────
-
-function BarChart({ values, labels, unit }: { values: number[]; labels: string[]; unit: string }) {
-  if (!values.length) {
-    return (
-      <View style={styles.chartEmpty}>
-        <Text style={styles.chartEmptyText}>No data yet.</Text>
-      </View>
-    );
-  }
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const range = max - min || 1;
-  return (
-    <View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <View style={styles.barsRow}>
-          {values.map((v, i) => {
-            const h = ((v - min) / range) * BAR_MAX_H + 10;
-            return (
-              <View key={i} style={styles.barCol}>
-                <Text style={styles.barVal}>{v % 1 === 0 ? v : v.toFixed(1)}</Text>
-                <View style={[styles.bar, { height: h }]} />
-                <Text style={styles.barLabel}>{labels[i]}</Text>
-              </View>
-            );
-          })}
-        </View>
-      </ScrollView>
-      <Text style={styles.barUnit}>{unit}</Text>
-    </View>
-  );
 }
 
 // ─── Detail modal ─────────────────────────────────────────────────────────────
@@ -820,6 +796,9 @@ export default function HistoryScreen() {
   const [logs, setLogs]                   = useState<SessionLog[]>([]);
   const [externalWorkouts, setExternalWorkouts] = useState<ExternalWorkout[]>([]);
   const [checkins, setCheckins]           = useState<Checkin[]>([]);
+  // Full check-in history for the dated list, newest-first and unlimited —
+  // deliberately separate from `checkins`, which is capped at 30 for the chart.
+  const [allCheckins, setAllCheckins]     = useState<Checkin[]>([]);
   const [profile, setProfile]             = useState<{ fitness_goal: string; weight_unit: string; preferred_units: string | null } | null>(null);
   const [loading, setLoading]             = useState(true);
   // `loading` flips false as soon as the AsyncStorage cache is applied, which
@@ -866,7 +845,7 @@ export default function HistoryScreen() {
     if (!mounted.current) { setLoading(false); return; }
     if (!session?.user) { setLoading(false); setResolved(true); return; }
 
-    const [profRes, logsRes, checkinsRes, extRes, progRes] = await Promise.all([
+    const [profRes, logsRes, checkinsRes, allCheckinsRes, extRes, progRes] = await Promise.all([
       supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units, tier').eq('id', session.user.id).single(),
       supabase.from('session_logs').select('*').eq('user_id', session.user.id)
         .order('completed_at', { ascending: false }),
@@ -876,6 +855,9 @@ export default function HistoryScreen() {
       // pre-warms history_cache.
       supabase.from('checkins').select('*').eq('user_id', session.user.id)
         .order('created_at', { ascending: false }).limit(30),
+      // Full history for the dated list — newest-first, no limit.
+      supabase.from('checkins').select('*').eq('user_id', session.user.id)
+        .order('created_at', { ascending: false }),
       supabase.from('external_workouts').select('*').eq('user_id', session.user.id)
         .order('start_time', { ascending: false }),
       // Does a real program exist yet? Drives the Pinnacle waiting copy below.
@@ -889,6 +871,8 @@ export default function HistoryScreen() {
     setExternalWorkouts(extRes.data ?? []);
     // Reverse newest-first back to ascending so the chart reads oldest→newest.
     setCheckins([...(checkinsRes.data ?? [])].reverse());
+    // List stays newest-first as fetched.
+    setAllCheckins(allCheckinsRes.data ?? []);
     if (profRes.data?.weight_unit) setWeightUnit(profRes.data.weight_unit as 'lbs' | 'kg');
     setAthleteTier(((profRes.data as any)?.tier ?? null) as string | null);
     setHasProgram(!!progRes.data);
@@ -899,6 +883,30 @@ export default function HistoryScreen() {
   // Refresh on focus so a freshly-onboarded athlete — and a coach publishing
   // mid-session — are both picked up without relaunching.
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Delete is by row id. The row came from a user_id-scoped query, and RLS is
+  // the real guard — this just avoids a destructive tap being a single gesture.
+  function handleDeleteCheckin(id: string) {
+    Alert.alert('Delete this check-in?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase.from('checkins').delete().eq('id', id);
+          if (error) {
+            Alert.alert('Could not delete', error.message);
+            return;
+          }
+          // Drop locally so the row and its chart point go immediately, then
+          // reload so both the 30-cap chart array and the list are authoritative.
+          setAllCheckins(prev => prev.filter(c => c.id !== id));
+          setCheckins(prev => prev.filter(c => c.id !== id));
+          await load();
+        },
+      },
+    ]);
+  }
 
   async function handleSaveCheckin() {
     const w = parseFloat(weight);
@@ -949,6 +957,17 @@ export default function HistoryScreen() {
     .filter(c => c.weight != null)
     .map(c => ({ ...c, weight: toDisplayWeight(c.weight as number, c.weight_unit, weightUnit) }));
   const bfCheckins     = checkins.filter(c => c.body_fat_percentage != null);
+
+  // TrendLineChart wants ascending points keyed by a bare 'YYYY-MM-DD' date.
+  // `checkins` is already ascending; weightCheckins carries the normalized value.
+  const weightTrend: TrendPoint[] = weightCheckins.map(c => ({
+    date:  toDayKey(c.created_at),
+    value: c.weight,
+  }));
+  const bodyFatTrend: TrendPoint[] = bfCheckins.map(c => ({
+    date:  toDayKey(c.created_at),
+    value: c.body_fat_percentage,
+  }));
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -1071,17 +1090,54 @@ export default function HistoryScreen() {
                   ))}
                 </View>
                 {activeTab === 'weight' ? (
-                  <BarChart
-                    values={weightCheckins.map(c => c.weight as number)}
-                    labels={weightCheckins.map(c => fmtDateShort(c.created_at))}
-                    unit={weightUnit}
+                  <TrendLineChart
+                    data={weightTrend}
+                    color={Colors.accent}
+                    unit={` ${weightUnit}`}
+                    label="Weight"
+                    formatValue={v => (v % 1 === 0 ? String(v) : v.toFixed(1))}
                   />
                 ) : (
-                  <BarChart
-                    values={bfCheckins.map(c => c.body_fat_percentage as number)}
-                    labels={bfCheckins.map(c => fmtDateShort(c.created_at))}
+                  <TrendLineChart
+                    data={bodyFatTrend}
+                    color={ORANGE}
                     unit="%"
+                    label="Body Fat %"
+                    formatValue={v => (v % 1 === 0 ? String(v) : v.toFixed(1))}
                   />
+                )}
+              </>
+            )}
+
+            {/* Dated history — full record, newest first, independent of the
+                30-point chart above. Capped at CHECKIN_LIST_MAX rendered rows. */}
+            {allCheckins.length > 0 && (
+              <>
+                <Text style={[styles.detailSectionLabel, { marginTop: 20 }]}>History</Text>
+                {allCheckins.slice(0, CHECKIN_LIST_MAX).map(c => (
+                  <View key={c.id} style={styles.checkinRow}>
+                    <Text style={styles.checkinRowDate}>{fmtDate(c.created_at)}</Text>
+                    <Text style={styles.checkinRowVal}>
+                      {c.weight != null
+                        ? `${toDisplayWeight(c.weight, c.weight_unit, weightUnit)} ${weightUnit}`
+                        : '—'}
+                    </Text>
+                    <Text style={styles.checkinRowBf}>
+                      {c.body_fat_percentage != null ? `${c.body_fat_percentage}%` : '—'}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => handleDeleteCheckin(c.id)}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      style={styles.checkinRowDel}
+                    >
+                      <Feather name="trash-2" color={Colors.textSecondary} size={16} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                {allCheckins.length > CHECKIN_LIST_MAX && (
+                  <Text style={styles.checkinRowMore}>
+                    Showing the {CHECKIN_LIST_MAX} most recent of {allCheckins.length} check-ins.
+                  </Text>
                 )}
               </>
             )}
@@ -1228,14 +1284,15 @@ const styles = StyleSheet.create({
   tabText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
 
   // Chart
-  chartEmpty: { paddingVertical: 20, alignItems: 'center' },
-  chartEmptyText: { color: Colors.textSecondary, fontSize: 13 },
-  barsRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingBottom: 4, minHeight: BAR_MAX_H + 40 },
-  barCol: { width: 44, alignItems: 'center', gap: 4 },
-  bar: { width: 28, backgroundColor: Colors.accent, borderRadius: 4, minHeight: 4 },
-  barVal: { color: Colors.textSecondary, fontFamily: Fonts.metric, fontSize: 10, textAlign: 'center' },
-  barLabel: { color: Colors.textSecondary, fontSize: 10, textAlign: 'center' },
-  barUnit: { color: Colors.textSecondary, fontSize: 11, textAlign: 'right', marginTop: 4 },
+  checkinRow: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
+  },
+  checkinRowDate: { color: Colors.textSecondary, fontSize: 13, flex: 1 },
+  checkinRowVal:  { color: Colors.textPrimary, fontFamily: Fonts.metric, fontSize: 15, width: 90, textAlign: 'right' },
+  checkinRowBf:   { color: Colors.textSecondary, fontSize: 13, width: 56, textAlign: 'right' },
+  checkinRowDel:  { paddingLeft: 14 },
+  checkinRowMore: { color: Colors.textSecondary, fontSize: 12, marginTop: 10, textAlign: 'center' },
 
   // Session log list
   logList: { paddingHorizontal: 16, gap: 8 },
