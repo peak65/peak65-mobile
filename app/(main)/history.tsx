@@ -126,6 +126,23 @@ function fmtDuration(s: number | null): string {
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+const LBS_PER_KG = 2.20462;
+
+// Convert a stored check-in weight from the unit it was entered in into the
+// unit currently being displayed. Rows written before weight_unit existed, or
+// with an unrecognised value, are assumed to already be in the display unit —
+// that matches the old behaviour of plotting the raw number.
+function toDisplayWeight(
+  weight: number,
+  rowUnit: string | null,
+  displayUnit: 'lbs' | 'kg',
+): number {
+  if (rowUnit !== 'lbs' && rowUnit !== 'kg') return weight;
+  if (rowUnit === displayUnit) return weight;
+  const converted = rowUnit === 'kg' ? weight * LBS_PER_KG : weight / LBS_PER_KG;
+  return Math.round(converted * 10) / 10;
+}
+
 function rpeColor(rpe: number | null): string {
   if (!rpe) return Colors.textSecondary;
   if (rpe <= 3) return Colors.green;
@@ -853,8 +870,12 @@ export default function HistoryScreen() {
       supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units, tier').eq('id', session.user.id).single(),
       supabase.from('session_logs').select('*').eq('user_id', session.user.id)
         .order('completed_at', { ascending: false }),
+      // Newest 30, reversed to ascending below. Ordering ascending with a limit
+      // took the OLDEST rows, so past 20 check-ins the chart froze on ancient
+      // data. Must stay in sync with the identical query in home.tsx that
+      // pre-warms history_cache.
       supabase.from('checkins').select('*').eq('user_id', session.user.id)
-        .order('created_at', { ascending: true }).limit(20),
+        .order('created_at', { ascending: false }).limit(30),
       supabase.from('external_workouts').select('*').eq('user_id', session.user.id)
         .order('start_time', { ascending: false }),
       // Does a real program exist yet? Drives the Pinnacle waiting copy below.
@@ -866,7 +887,8 @@ export default function HistoryScreen() {
     setProfile(profRes.data);
     setLogs(logsRes.data ?? []);
     setExternalWorkouts(extRes.data ?? []);
-    setCheckins(checkinsRes.data ?? []);
+    // Reverse newest-first back to ascending so the chart reads oldest→newest.
+    setCheckins([...(checkinsRes.data ?? [])].reverse());
     if (profRes.data?.weight_unit) setWeightUnit(profRes.data.weight_unit as 'lbs' | 'kg');
     setAthleteTier(((profRes.data as any)?.tier ?? null) as string | null);
     setHasProgram(!!progRes.data);
@@ -909,14 +931,23 @@ export default function HistoryScreen() {
   // gate's flag so the copy is right on the very first frame.
   const isEliteAthlete = athleteTier === 'elite' || isElite;
 
-  const showCheckin = !profile?.fitness_goal ||
-    ['look_better', 'all_around'].includes(profile.fitness_goal);
+  // Every athlete can log and review body check-ins. This was previously gated
+  // on fitness_goal ('look_better' / 'all_around' only), which hid the LOG
+  // button and the trend chart from performance- and race-goal athletes.
+  // Kept as a named flag so the gate is one line to restore if needed.
+  const showCheckin = true;
 
   const totalSessions = logs.length;
   const best = longestStreak(logs);
   const imperial = (profile?.preferred_units ?? 'imperial') === 'imperial';
 
-  const weightCheckins = checkins.filter(c => c.weight != null);
+  // Each row stores the unit it was entered in, and nothing converts on save.
+  // Charting raw values put a 80 kg entry next to a 176 lb entry on the same
+  // axis, so normalize every row into the current display unit at read time.
+  // Save path is untouched — rows keep their original value + weight_unit.
+  const weightCheckins = checkins
+    .filter(c => c.weight != null)
+    .map(c => ({ ...c, weight: toDisplayWeight(c.weight as number, c.weight_unit, weightUnit) }));
   const bfCheckins     = checkins.filter(c => c.body_fat_percentage != null);
 
   return (

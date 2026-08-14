@@ -244,8 +244,11 @@ async function prefetchTabCaches(uid: string, programs: Program[], profileData: 
         .order('completed_at', { ascending: false }).limit(200),
       supabase.from('external_workouts').select('*').eq('user_id', uid)
         .order('start_time', { ascending: false }).limit(100),
+      // Newest 30, reversed to ascending before caching. Must stay in sync with
+      // the identical query in history.tsx — History reads this cache back, so
+      // a mismatch would feed it stale/oldest rows.
       supabase.from('checkins').select('*').eq('user_id', uid)
-        .order('created_at', { ascending: true }).limit(20),
+        .order('created_at', { ascending: false }).limit(30),
       supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units')
         .eq('id', uid).maybeSingle(),
     ]);
@@ -253,7 +256,7 @@ async function prefetchTabCaches(uid: string, programs: Program[], profileData: 
       timestamp:        Date.now(),
       logs:             logsRes.data ?? [],
       externalWorkouts: extRes.data ?? [],
-      checkins:         checkinsRes.data ?? [],
+      checkins:         [...(checkinsRes.data ?? [])].reverse(),
       profile:          histProfRes.data ?? null,
     }));
   } catch {}
