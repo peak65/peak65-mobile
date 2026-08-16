@@ -55,6 +55,12 @@ type SessionLogRow = {
   notes: string | null;
   was_modified: boolean | null;
   modification_note: string | null;
+  // Pace execution. hit_target is null when the athlete was never asked —
+  // an unpaced session, or a session logged before the feature existed.
+  hit_target: boolean | null;
+  actual_pace: string | null;
+  miss_note: string | null;
+  prescribed_pace: string | null;
 };
 
 type ProgramWeek = {
@@ -274,7 +280,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
     (async () => {
       const logsRes = await supabase
         .from('session_logs')
-        .select('id, day_name, session_name, completed, completed_at, rpe, log_value, log_field, notes, was_modified, modification_note')
+        .select('id, day_name, session_name, completed, completed_at, rpe, log_value, log_field, notes, was_modified, modification_note, hit_target, actual_pace, miss_note, prescribed_pace')
         .eq('user_id', athleteId)
         .eq('week_number', selectedWeekNumber);
       if (logsRes.error) {
@@ -428,6 +434,13 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
                         {logsForDay.some(l => l.was_modified) && (
                           <View style={styles.modifiedChip}>
                             <Text style={styles.modifiedChipText}>Modified</Text>
+                          </View>
+                        )}
+                        {/* Missed target — strictly === false, so an unpaced
+                            session (null) never flags. */}
+                        {logsForDay.some(l => l.hit_target === false) && (
+                          <View style={styles.missedChip}>
+                            <Text style={styles.missedChipText}>Missed</Text>
                           </View>
                         )}
                         <StatusBadge status={shownStatus} />
@@ -606,6 +619,31 @@ function StatusBadge({ status }: { status: DayStatus }) {
   );
 }
 
+// " · 6:30/mi" when the log recorded what was prescribed, '' otherwise. Kept
+// separate so a hit with no stored target still reads as a clean "Hit target".
+function paceSuffix(log: SessionLogRow): string {
+  const target = log.prescribed_pace?.trim();
+  return target ? ` · ${target}` : '';
+}
+
+// The coach-facing summary of a missed target: what was asked, what the athlete
+// actually hit, and why. Any missing piece is omitted rather than rendered
+// blank — older logs may carry only some of them. Falls back to the same
+// "no detail given" phrasing the Modified line already uses.
+function missSummary(log: SessionLogRow): string {
+  const parts: string[] = [];
+  const target = log.prescribed_pace?.trim();
+  const actual = log.actual_pace?.trim();
+  if (target) parts.push(`target ${target}`);
+  if (actual) parts.push(`ran ${actual}`);
+  const head = parts.join(' · ');
+  const why = log.miss_note?.trim();
+  if (head && why) return `${head} — ${why}`;
+  if (head) return head;
+  if (why) return why;
+  return 'Athlete missed the target (no detail given).';
+}
+
 // One exercise line in the coach view's compact style. Preserves the existing
 // sets×reps / distance / zone formatting; `prefix` carries superset letters or
 // an EMOM time window.
@@ -730,6 +768,20 @@ function SessionDetail({ day, logs }: { day: ProgramDay; logs: SessionLogRow[] }
               </Text>
             </Text>
           )}
+          {/* Pace execution. Strict === checks: a null hit_target (unpaced
+              session, or logged before this feature) renders nothing. */}
+          {completedLog.hit_target === true && (
+            <Text style={styles.detailLogItem}>
+              <Text style={{ color: GREEN, fontWeight: '700' }}>Hit target</Text>
+              <Text style={{ color: OFF_WHITE }}>{paceSuffix(completedLog)}</Text>
+            </Text>
+          )}
+          {completedLog.hit_target === false && (
+            <Text style={styles.detailLogItem}>
+              <Text style={{ color: RED, fontWeight: '700' }}>Missed: </Text>
+              <Text style={{ color: OFF_WHITE }}>{missSummary(completedLog)}</Text>
+            </Text>
+          )}
         </View>
       )}
     </View>
@@ -850,6 +902,18 @@ const styles = StyleSheet.create({
   },
   modifiedChipText: {
     color: ORANGE,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  missedChip: {
+    backgroundColor: 'rgba(255,68,68,0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  missedChipText: {
+    color: RED,
     fontSize: 11,
     fontWeight: '700',
   },
