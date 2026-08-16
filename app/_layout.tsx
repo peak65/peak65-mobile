@@ -58,6 +58,13 @@ export type ExerciseItem = {
   distance?: string;
   zone?: string;
   duration?: string;
+  // Structured pace prescription. The AI generators write pace_target /
+  // pace_zone; the coach editor writes `pace` (and ALSO packs the same value
+  // into `notes` as "Pace: X | Load: Y | cue"). All three already arrive in the
+  // raw program JSON — declared here so lib/pace.ts can read them without casts.
+  pace_target?: string;
+  pace_zone?: string;
+  pace?: string;
   note?: string;
   notes?: string;
   superset_id?: string | null;
@@ -78,6 +85,10 @@ export type ExerciseItem = {
 
 export type SessionBlock = {
   block_name: string;
+  // Marks the session's main work block — the effort the session is built
+  // around. Set by the AI generators and by the coach editor's "Work set"
+  // checkbox, at most one per session. Already present in the raw JSON.
+  is_work?: boolean;
   exercises: ExerciseItem[];
 };
 
