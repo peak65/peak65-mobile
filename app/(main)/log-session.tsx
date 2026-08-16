@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, KeyboardAvoidingView, Platform, Alert,
@@ -9,6 +9,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import HRUploadPrompt from '../../components/HRUploadPrompt';
 import { Colors, Fonts } from '../../lib/theme';
+import { getSessionPaceTarget } from '../../lib/pace';
 import type { MainStackParamList, ProgramSession } from '../_layout';
 
 type LogSessionRouteProp = RouteProp<MainStackParamList, 'LogSession'>;
@@ -49,12 +50,23 @@ export default function LogSessionScreen() {
     (session.session_type?.toLowerCase().includes('strength') ?? false) ||
     sessionType === 'strength';
 
+  // The prescribed main-work pace, if this session carries one. Keyed on
+  // sessionJson rather than `session` because `session` is re-parsed on every
+  // render, so the object identity is never stable.
+  const paceTarget = useMemo(() => getSessionPaceTarget(session), [sessionJson]);
+  const hasPaceTarget = paceTarget.value !== null;
+
   const [trialValue, setTrialValue] = useState('');
   const [rounds, setRounds] = useState(0);
   const [rpe, setRpe] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
   const [wasModified, setWasModified] = useState(false);
   const [modificationText, setModificationText] = useState('');
+  // Pace execution. Only ever asked when hasPaceTarget — hitTarget stays null
+  // until the athlete answers, which is what the save guard requires.
+  const [hitTarget, setHitTarget] = useState<boolean | null>(null);
+  const [actualPace, setActualPace] = useState('');
+  const [missNote, setMissNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [sessionLogId, setSessionLogId] = useState<string | null>(null);
@@ -68,6 +80,14 @@ export default function LogSessionScreen() {
     if (!userId) return;
     if (wasModified && !modificationText.trim()) {
       Alert.alert('One more thing', 'Tell your coach what you changed and why.');
+      return;
+    }
+    if (hasPaceTarget && hitTarget === null) {
+      Alert.alert('One more thing', 'Let your coach know if you hit your target.');
+      return;
+    }
+    if (hitTarget === false && (!actualPace.trim() || !missNote.trim())) {
+      Alert.alert('One more thing', 'Tell your coach what you actually hit and why.');
       return;
     }
     setSaving(true);
@@ -87,6 +107,10 @@ export default function LogSessionScreen() {
         notes:                notes || null,
         was_modified:         wasModified,
         modification_note:    wasModified ? (modificationText.trim() || null) : null,
+        hit_target:           hasPaceTarget ? hitTarget : null,
+        actual_pace:          (hasPaceTarget && hitTarget === false) ? (actualPace.trim() || null) : null,
+        miss_note:            (hasPaceTarget && hitTarget === false) ? (missNote.trim() || null) : null,
+        prescribed_pace:      hasPaceTarget ? paceTarget.value : null,
         week_number:          weekNumber,
         completed:            true,
         completed_at:         new Date().toISOString(),
@@ -248,12 +272,65 @@ export default function LogSessionScreen() {
             </View>
           )}
 
+          {/* Pace execution — shown ONLY when the session carries a prescribed
+              main-work pace target. A zone-only target ("zone4") is an effort
+              band, not a split, so it asks about holding the zone instead. */}
+          {hasPaceTarget && !saved && (
+            <View style={ls.section}>
+              <Text style={ls.label}>
+                {paceTarget.isZoneOnly ? 'DID YOU HOLD YOUR TARGET ZONE?' : 'DID YOU HIT YOUR TARGET PACE?'}
+              </Text>
+              <Text style={ls.paceTargetTxt}>
+                {paceTarget.isZoneOnly ? paceTarget.value : `Target: ${paceTarget.value}`}
+              </Text>
+              <View style={ls.modRow}>
+                <TouchableOpacity
+                  style={[ls.modOption, hitTarget === true && ls.modOptionSelected]}
+                  onPress={() => setHitTarget(true)}
+                >
+                  <Text style={[ls.modOptionTxt, hitTarget === true && ls.modOptionTxtSelected]}>Hit it</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[ls.modOption, hitTarget === false && ls.modOptionSelected]}
+                  onPress={() => setHitTarget(false)}
+                >
+                  <Text style={[ls.modOptionTxt, hitTarget === false && ls.modOptionTxtSelected]}>Missed it</Text>
+                </TouchableOpacity>
+              </View>
+              {hitTarget === false && (
+                <View style={ls.modTextWrap}>
+                  <Text style={ls.label}>WHAT DID YOU ACTUALLY HIT?</Text>
+                  <TextInput
+                    style={ls.input}
+                    value={actualPace}
+                    onChangeText={setActualPace}
+                    placeholder={paceTarget.isZoneOnly ? 'e.g. mostly Zone 3' : 'e.g. 6:45/mi — your actual average'}
+                    placeholderTextColor={Colors.textSecondary}
+                    keyboardType={paceTarget.isZoneOnly ? 'default' : 'numbers-and-punctuation'}
+                    autoCorrect={false}
+                  />
+                  <Text style={[ls.label, ls.missNoteLabel]}>WHAT GOT IN THE WAY?</Text>
+                  <TextInput
+                    style={[ls.input, ls.notesInput]}
+                    value={missNote}
+                    onChangeText={setMissNote}
+                    placeholder="Tell your coach what happened — legs, weather, effort, etc."
+                    placeholderTextColor={Colors.textSecondary}
+                    multiline
+                    numberOfLines={3}
+                    textAlignVertical="top"
+                  />
+                </View>
+              )}
+            </View>
+          )}
+
           {/* Save button — FIX 4: explicit #e8ff47 / #080808 */}
           {!saved && (
             <TouchableOpacity
-              style={[ls.saveBtn, (saving || (sessionType === 'time_trial' && !trialValue.trim()) || (wasModified && !modificationText.trim())) && ls.saveBtnDisabled]}
+              style={[ls.saveBtn, (saving || (sessionType === 'time_trial' && !trialValue.trim()) || (wasModified && !modificationText.trim()) || (hasPaceTarget && hitTarget === null) || (hitTarget === false && (!actualPace.trim() || !missNote.trim()))) && ls.saveBtnDisabled]}
               onPress={saveSession}
-              disabled={saving || (sessionType === 'time_trial' && !trialValue.trim()) || (wasModified && !modificationText.trim())}
+              disabled={saving || (sessionType === 'time_trial' && !trialValue.trim()) || (wasModified && !modificationText.trim()) || (hasPaceTarget && hitTarget === null) || (hitTarget === false && (!actualPace.trim() || !missNote.trim()))}
             >
               <Text style={ls.saveBtnTxt}>{saving ? 'SAVING...' : 'SAVE SESSION →'}</Text>
             </TouchableOpacity>
@@ -328,6 +405,8 @@ const ls = StyleSheet.create({
   modOptionTxt:    { color: '#f0ede8', fontSize: 14, fontWeight: '600', textAlign: 'center' },
   modOptionTxtSelected: { color: '#080808' },
   modTextWrap:     { marginTop: 20 },
+  paceTargetTxt:   { color: Colors.textPrimary, fontSize: 18, fontFamily: Fonts.metric, marginBottom: 14 },
+  missNoteLabel:   { marginTop: 20 },
   // FIX 4: explicit #e8ff47 / #080808
   saveBtn:         { marginHorizontal: 20, backgroundColor: '#e8ff47', paddingVertical: 20, alignItems: 'center' },
   saveBtnDisabled: { opacity: 0.4 },
