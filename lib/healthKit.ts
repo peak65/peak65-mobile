@@ -41,6 +41,10 @@ type HKSampleMetadata = { sourceName?: string; sourceId?: string; quantity?: num
 type HKSample = HealthValue & {
   sourceName?: string;
   sourceId?: string;
+  // sourceRevision.productType, e.g. "Watch6,1" / "iPhone14,2". Emitted only by
+  // getSamples-backed reads (steps, active/basal calories) — absent on HRV,
+  // resting HR and sleep. See RCTAppleHealthKit+Queries.m fetchSamplesOfType.
+  device?: string;
   metadata?: HKSampleMetadata[];
 };
 
@@ -115,6 +119,68 @@ function sourceMatches(sourceName: string | undefined, keys: string[]): boolean 
   if (!sourceName) return false;
   const l = sourceName.toLowerCase();
   return keys.some(k => l.includes(k));
+}
+
+// ─── Apple-device origin gate ─────────────────────────────────────────────────
+//
+// Apple Health is an Apple-DEVICES-ONLY source here, never a bridge. A sample
+// that Whoop / Oura / Zepp / Garmin wrote into HealthKit is DROPPED, not
+// relabelled — third-party data may only reach us through its own direct
+// integration, where it carries its true source and its real priority.
+//
+// react-native-health@1.19.0 bridges origin as a FLAT shape (NOT the nested
+// sample.device.model / sample.sourceRevision.source.bundleIdentifier of other
+// HealthKit wrappers):
+//   sourceId — source.bundleIdentifier; present on every read we perform
+//   device   — sourceRevision.productType ("Watch6,1"); getSamples reads only
+// Bundle id is therefore the only gate available on all metrics; `device`
+// refines Watch-vs-iPhone where it exists.
+const APPLE_BUNDLE_PREFIX = 'com.apple.';
+
+function isAppleBundle(s: HKSample): boolean {
+  return (s.sourceId ?? '').toLowerCase().trim().startsWith(APPLE_BUNDLE_PREFIX);
+}
+
+// Device from productType. null means the read carried NO device field at all
+// (HRV / resting HR / sleep); 'Other' means one was present but is neither Watch
+// nor iPhone (iPad, Mac...) — which must reject, not fall through to the bundle.
+function deviceKind(s: HKSample): 'Watch' | 'iPhone' | 'Other' | null {
+  const d = (s.device ?? '').trim();
+  if (d === '') return null;
+  if (/^watch/i.test(d)) return 'Watch';
+  if (/^iphone/i.test(d)) return 'iPhone';
+  return 'Other';
+}
+
+// A genuine Apple Watch sample. A third-party bundle is rejected outright,
+// whatever `device` claims. Where `device` is present it is authoritative, so a
+// non-Watch Apple device is rejected. Where it is absent the Apple bundle is the
+// signal — an iPhone has no sensor for HRV, resting HR or sleep, so an Apple
+// bundle on those reads can only be the Watch.
+function isAppleWatchSample(s: HKSample): boolean {
+  if (!isAppleBundle(s)) return false;
+  const kind = deviceKind(s);
+  return kind === null ? true : kind === 'Watch';
+}
+
+// Any Apple-owned device. Used for steps, where the iPhone is a legitimate
+// lower-priority counter.
+function isAppleOwnSample(s: HKSample): boolean {
+  if (!isAppleBundle(s)) return false;
+  const kind = deviceKind(s);
+  return kind === null ? true : kind === 'Watch' || kind === 'iPhone';
+}
+
+// The sample sets are pre-filtered by the gate above, so no cross-source ladder
+// is left to walk — this single permissive level preserves each picker's
+// aggregation (most-recent for pickBest, sum for pickBestSum) unchanged.
+const ACCEPT_ALL: PriorityLevel[] = [{ name: 'Accepted', keys: [''] }];
+
+// Stamp the canonical device tag. The gate has already established the origin,
+// so the raw HealthKit sourceName (user-renameable, e.g. "Kayla's Apple Watch")
+// is discarded in favour of a token the priority arrays match exactly.
+function tagged(r: HealthReading | null, source: string): HealthReading | null {
+  return r ? { value: r.value, source } : null;
 }
 
 // ─── Pickers ──────────────────────────────────────────────────────────────────
@@ -415,12 +481,32 @@ export async function fetchTodayHealthData(): Promise<WearableHealthData> {
   const activeSamples = settled(activeR); console.log('[healthkit] active calories raw samples:', JSON.stringify(activeSamples));
   const basalSamples  = settled(basalR);  console.log('[healthkit] basal calories raw samples:', JSON.stringify(basalSamples));
 
-  const hrv    = pickBest(hrvSamples,    PRIORITY_HRV,      false, 'hrv');
-  const restHR = pickBest(rhrSamples,    PRIORITY_RHR,      false, 'rhr');
-  const sleep  = pickBestSleep(sleepSamples, PRIORITY_SLEEP, 'sleep');
-  const steps  = pickBestSum(stepsSamples, PRIORITY_STEPS,    true,  'steps');
-  const active = pickBestSum(activeSamples, PRIORITY_CALORIES, false, 'active');
-  const basal  = pickBestSum(basalSamples,  PRIORITY_CALORIES, false, 'basal');
+  // Apple-devices-only gate. Anything a third-party app wrote into HealthKit is
+  // dropped here, before aggregation — so a Whoop or Zepp reading yields no
+  // sample, the metric resolves to null, and nothing is written for it.
+  const hrvApple    = hrvSamples.filter(isAppleWatchSample);
+  const rhrApple    = rhrSamples.filter(isAppleWatchSample);
+  const sleepApple  = sleepSamples.filter(isAppleWatchSample);
+  const activeApple = activeSamples.filter(isAppleWatchSample);
+  const basalApple  = basalSamples.filter(isAppleOwnSample);
+  // Steps split by device: Watch preferred, iPhone as the lower-priority counter.
+  const stepsWatch  = stepsSamples.filter(isAppleWatchSample);
+  const stepsPhone  = stepsSamples.filter(s => isAppleOwnSample(s) && !isAppleWatchSample(s));
+
+  console.log('[healthkit] apple-only gate — hrv:', `${hrvApple.length}/${hrvSamples.length}`,
+    '| rhr:', `${rhrApple.length}/${rhrSamples.length}`,
+    '| sleep:', `${sleepApple.length}/${sleepSamples.length}`,
+    '| steps watch/iphone:', `${stepsWatch.length}/${stepsPhone.length} of ${stepsSamples.length}`,
+    '| active:', `${activeApple.length}/${activeSamples.length}`);
+
+  const hrv    = tagged(pickBest(hrvApple, ACCEPT_ALL, false, 'hrv'), 'Apple Watch');
+  const restHR = tagged(pickBest(rhrApple, ACCEPT_ALL, false, 'rhr'), 'Apple Watch');
+  const sleep  = tagged(pickBestSleep(sleepApple, ACCEPT_ALL, 'sleep'), 'Apple Watch');
+  const steps  =
+    tagged(pickBestSum(stepsWatch, ACCEPT_ALL, false, 'steps-watch'), 'Apple Watch') ??
+    tagged(pickBestSum(stepsPhone, ACCEPT_ALL, false, 'steps-iphone'), 'iPhone');
+  const active = tagged(pickBestSum(activeApple, ACCEPT_ALL, false, 'active'), 'Apple Watch');
+  const basal  = tagged(pickBestSum(basalApple,  ACCEPT_ALL, false, 'basal'),  'Apple Watch');
 
   console.log('[hrv] source selected:', hrv?.source ?? 'none', 'value:', hrv?.value ?? null);
   console.log('[rhr] source selected:', restHR?.source ?? 'none', 'value:', restHR?.value ?? null);

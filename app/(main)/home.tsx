@@ -265,38 +265,49 @@ async function prefetchTabCaches(uid: string, programs: Program[], profileData: 
 // ─── Daily health cache ───────────────────────────────────────────────────────
 
 async function saveHealthCache(uid: string, rd: WearableHealthData, date: string): Promise<void> {
-  // Build the payload dynamically: only include a metric (and its _source) when it
-  // has a non-null value. Supabase upsert (INSERT ... ON CONFLICT DO UPDATE) only
-  // updates columns present in the payload, so omitting a null metric leaves any
-  // previously-stored value for that day untouched — a missing reading never wipes
-  // a good one.
-  const payload: Record<string, any> = { user_id: uid, reading_date: date };
+  // Writes go through the upsert_health_reading RPC rather than a direct upsert:
+  // it arbitrates per metric by source priority inside a single atomic statement,
+  // so a lower-priority reading can never overwrite a higher-priority one and the
+  // mobile sync can never race the Whoop cron.
+  //
+  // Sources arrive already gated and tagged by lib/healthKit.ts — 'Apple Watch'
+  // or, for steps, 'iPhone'. Third-party samples were dropped at read time, so
+  // nothing here can carry a foreign source name.
+  const hrv       = rd.hrv?.value            ?? null;
+  const restingHr = rd.restingHR?.value      ?? null;
+  const sleep     = rd.sleepHours?.value     ?? null;
+  const steps     = rd.steps?.value          ?? null;
+  const activeCal = rd.activeCalories?.value ?? null;
+  const totalCal  = rd.totalCalories?.value  ?? null;
 
-  if (rd.hrv?.value != null) {
-    payload.hrv = rd.hrv.value;
-    payload.hrv_source = rd.hrv.source ?? null;
-  }
-  if (rd.restingHR?.value != null) {
-    payload.resting_hr = rd.restingHR.value;
-    payload.resting_hr_source = rd.restingHR.source ?? null;
-  }
-  if (rd.sleepHours?.value != null) {
-    payload.sleep_hours = rd.sleepHours.value;
-    payload.sleep_source = rd.sleepHours.source ?? null;
-  }
-  if (rd.steps?.value != null) {
-    payload.steps = rd.steps.value;
-    payload.steps_source = rd.steps.source ?? null;
-  }
-  if (rd.activeCalories?.value != null) {
-    payload.active_calories = rd.activeCalories.value;
-    payload.active_calories_source = rd.activeCalories.source ?? null;
-  }
-  if (rd.totalCalories?.value != null) {
-    payload.total_calories = rd.totalCalories.value;
+  // Nothing to report — return without calling the RPC. Its first statement is an
+  // unconditional INSERT ... ON CONFLICT DO NOTHING, so an all-null call would
+  // still create an empty row for the day.
+  if (hrv == null && restingHr == null && sleep == null &&
+      steps == null && activeCal == null && totalCal == null) {
+    return;
   }
 
-  await supabase.from('daily_health_readings').upsert(payload, { onConflict: 'user_id,reading_date' });
+  try {
+    const { error } = await supabase.rpc('upsert_health_reading', {
+      p_user_id:                uid,
+      p_date:                   date,
+      p_hrv:                    hrv,
+      p_hrv_source:             hrv       != null ? (rd.hrv?.source            ?? null) : null,
+      p_resting_hr:             restingHr,
+      p_resting_hr_source:      restingHr != null ? (rd.restingHR?.source      ?? null) : null,
+      p_sleep_hours:            sleep,
+      p_sleep_source:           sleep     != null ? (rd.sleepHours?.source     ?? null) : null,
+      p_steps:                  steps,
+      p_steps_source:           steps     != null ? (rd.steps?.source          ?? null) : null,
+      p_active_calories:        activeCal,
+      p_active_calories_source: activeCal != null ? (rd.activeCalories?.source ?? null) : null,
+      p_total_calories:         totalCal,
+    });
+    if (error) console.log('[health] upsert_health_reading error:', error.message);
+  } catch (e) {
+    console.log('[health] upsert_health_reading threw:', e);
+  }
 }
 
 function cacheToReadiness(row: Record<string, any>): WearableHealthData {
