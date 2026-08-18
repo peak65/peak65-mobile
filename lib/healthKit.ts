@@ -225,57 +225,106 @@ function pickBestSum(samples: HKSample[], priorities: PriorityLevel[], includeIp
   return null;
 }
 
-// Walk wearable priorities; for the first source that has actual sleep-stage
-// samples (value ≠ InBed/Awake), sum durations and return total hours.
-// If the winning source only recorded InBed/Awake, continue to the next level.
-// HK sleep values: 0=InBed, 1=Asleep, 2=Awake, 3=Core, 4=Deep, 5=REM
+// ─── Sleep stages ─────────────────────────────────────────────────────────────
+//
+// react-native-health@1.19.0 serializes HKCategoryValueSleepAnalysis to a STRING
+// label, never the numeric enum — see RCTAppleHealthKit+Queries.m,
+// fetchSleepCategorySamplesForPredicate:
+//   INBED | ASLEEP | CORE | DEEP | REM | AWAKE | UNKNOWN (the default branch).
+// The library's own type declares `value: number` (index.d.ts HealthValue), which
+// is why the previous numeric comparison (`s.value !== 0 && s.value !== 2`)
+// type-checked cleanly while matching nothing — every sample survived it and
+// sleep_hours became time-in-bed.
+
+// Fine-grained asleep stages; watchOS 9 / iOS 16 and later. These partition the
+// night and do not overlap each other.
+const SLEEP_STAGE_VALUES = ['core', 'deep', 'rem'];
+// Coarse "asleep, stage unspecified" — older watches and most third-party writers.
+const SLEEP_COARSE_VALUE = 'asleep';
+// Never counted. In bed is not asleep; awake is an interruption inside the
+// session; unknown is an enum this library version could not map.
+const SLEEP_EXCLUDED_VALUES = ['inbed', 'awake', 'unknown'];
+
+// Intervals separated by more than this start a new sleep session.
+const SLEEP_SESSION_GAP_MS = 2 * 60 * 60 * 1000;
+
+function sleepStage(s: HKSample): string {
+  return String(s.value ?? '').trim().toLowerCase();
+}
+
+// True asleep hours from a set of sleep samples, or null when there is no real
+// sleep in them.
+//
+// Overlap is structurally impossible here, by three guards:
+//  1. Stage-vs-coarse are NEVER mixed. CORE/DEEP/REM and a coarse ASLEEP span the
+//     SAME period when a source writes both, so stages win whenever any exist and
+//     ASLEEP is used only when none do.
+//  2. INBED and AWAKE are excluded by the allow-list, so in-bed time (which
+//     brackets the whole night) and wake-after-sleep-onset are never counted.
+//  3. Remaining intervals are merged before summing, so duplicate or nested spans
+//     inside one set collapse rather than double-count.
+// Finally, only the most recent session is summed — a query window wide enough to
+// span two nights reports last night, not both.
+function sumAsleepHours(samples: HKSample[], metric: string): number | null {
+  const stages = samples.filter(s => SLEEP_STAGE_VALUES.includes(sleepStage(s)));
+  const usingStages = stages.length > 0;
+  const counted = usingStages
+    ? stages
+    : samples.filter(s => sleepStage(s) === SLEEP_COARSE_VALUE);
+
+  const dropped = samples.filter(s => SLEEP_EXCLUDED_VALUES.includes(sleepStage(s))).length;
+  console.log(`[healthkit] ${metric} stages:`, usingStages ? 'CORE/DEEP/REM' : 'coarse ASLEEP',
+    '| counted:', counted.length, '| excluded (inbed/awake/unknown):', dropped, 'of', samples.length);
+
+  if (counted.length === 0) return null;
+
+  type Interval = { from: number; to: number };
+  const intervals: Interval[] = counted
+    .map(s => ({ from: new Date(s.startDate).getTime(), to: new Date(s.endDate).getTime() }))
+    .filter(i => Number.isFinite(i.from) && Number.isFinite(i.to) && i.to > i.from)
+    .sort((a, b) => a.from - b.from);
+  if (intervals.length === 0) return null;
+
+  const merged: Interval[] = [];
+  for (const iv of intervals) {
+    const last = merged[merged.length - 1];
+    if (!last || iv.from > last.to) merged.push({ ...iv });
+    else last.to = Math.max(last.to, iv.to);
+  }
+
+  // Keep only the last session: a gap longer than SLEEP_SESSION_GAP_MS restarts it.
+  let session: Interval[] = [];
+  for (const iv of merged) {
+    const last = session[session.length - 1];
+    if (last && iv.from - last.to > SLEEP_SESSION_GAP_MS) session = [];
+    session.push(iv);
+  }
+
+  // Sum the merged durations — not the span from first to last, which would
+  // re-absorb the awake gaps this filter exists to remove.
+  const ms = session.reduce((acc, iv) => acc + (iv.to - iv.from), 0);
+  if (ms <= 0) return null;
+
+  const hours = Math.min(Math.round((ms / (1000 * 60 * 60)) * 10) / 10, 16); // sanity cap
+  console.log(`[healthkit] ${metric} merged:`, merged.length, 'session intervals:', session.length, 'hours:', hours);
+  return hours > 0.25 ? hours : null;
+}
+
+// Walk wearable priorities; for the first source with real asleep samples, return
+// its summed asleep hours. A source that recorded only InBed/Awake yields null,
+// so the walk continues to the next priority level.
 function pickBestSleep(samples: HKSample[], priorities: PriorityLevel[], metric: string): HealthReading | null {
   console.log(`[healthkit] ${metric} unique sources:`, [...new Set(samples.map(s => getSampleSource(s)))]);
 
   for (const { name, keys } of priorities) {
     const matched = samples.filter(s => sourceMatches(getSampleSource(s), keys));
-    if (matched.length > 0) {
-      console.log(`[healthkit] ${metric} matched priority:`, name, 'count:', matched.length);
+    if (matched.length === 0) continue;
+    console.log(`[healthkit] ${metric} matched priority:`, name, 'count:', matched.length);
 
-      // Filter to asleep stages only (exclude InBed=0, Awake=2)
-      // HK values: 0=InBed, 1=Asleep, 2=Awake, 3=Core, 4=Deep, 5=REM
-      const asleepSamples = matched.filter(s => s.value !== 0 && s.value !== 2);
-      if (asleepSamples.length === 0) continue; // only InBed/Awake — try next priority
+    const hours = sumAsleepHours(matched, metric);
+    if (hours === null) continue; // no real sleep from this source — try next priority
 
-      // Merge overlapping intervals before summing.
-      // Zepp (and some other apps) logs both a whole-night Asleep span AND individual
-      // stage sub-intervals within it, which causes naive summation to double-count.
-      type Interval = { from: number; to: number };
-      const intervals: Interval[] = asleepSamples
-        .map(s => ({ from: new Date(s.startDate).getTime(), to: new Date(s.endDate).getTime() }))
-        .filter(i => i.to > i.from)
-        .sort((a, b) => a.from - b.from);
-
-      const merged: Interval[] = [];
-      for (const iv of intervals) {
-        const last = merged[merged.length - 1];
-        if (!last || iv.from > last.to) {
-          merged.push({ ...iv });
-        } else {
-          last.to = Math.max(last.to, iv.to);
-        }
-      }
-
-      console.log(`[healthkit] ${metric} merged intervals before pick:`, JSON.stringify(merged));
-
-      // If more than one merged block (e.g. two separate nights snuck into the window),
-      // take only the latest block — that's last night's sleep session.
-      const block = merged.length > 1 ? merged[merged.length - 1] : merged[0];
-      if (!block) continue;
-
-      const ms = block.to - block.from;
-      if (ms > 0) {
-        const rawHours = ms / (1000 * 60 * 60);
-        const hours = Math.min(Math.round(rawHours * 10) / 10, 16); // sanity cap
-        console.log(`[healthkit] ${metric} asleep samples:`, asleepSamples.length, 'merged intervals:', merged.length, 'hours:', hours);
-        return hours > 0.25 ? { value: hours, source: getSampleSource(matched[0]) || 'Unknown' } : null;
-      }
-    }
+    return { value: hours, source: getSampleSource(matched[0]) || 'Unknown' };
   }
   return null;
 }
@@ -578,16 +627,7 @@ export async function getTodayHealthData(): Promise<HealthData> {
           { startDate: s.toISOString(), endDate: now.toISOString() },
           (err, r) => {
             if (err || !r?.length) { resolve(null); return; }
-            let ms = 0;
-            for (const smp of r) {
-              if (smp.value !== 0 && smp.value !== 2) {
-                const f = new Date(smp.startDate).getTime();
-                const t = new Date(smp.endDate).getTime();
-                if (t > f) ms += t - f;
-              }
-            }
-            const h = ms / (1000 * 60 * 60);
-            resolve(h > 0.25 ? Math.round(h * 10) / 10 : null);
+            resolve(sumAsleepHours(r as unknown as HKSample[], 'sleep(today)'));
           }
         );
       }),
