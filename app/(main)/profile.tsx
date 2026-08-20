@@ -725,6 +725,18 @@ export default function ProfileScreen() {
     ? `Hyrox${profile.hyrox_division ? ` • ${profile.hyrox_division}` : ''}`
     : profile?.goal === 'general_fitness' ? 'General Fitness' : '';
 
+  // Does the athlete have ANY wearable connected? Drives the "no wearable"
+  // banner, which previously read the legacy wearable_connected flag — a flag now
+  // written only by connectAppleHealth, so Whoop athletes were wrongly warned.
+  // Whoop's clause mirrors its row: a lingering token counts as connected.
+  const anyWearableConnected =
+    profile?.apple_health_connected === true ||
+    profile?.whoop_connected === true ||
+    !!profile?.whoop_access_token ||
+    !!profile?.whoop_refresh_token ||
+    profile?.garmin_connected === true ||
+    profile?.coros_connected === true;
+
   const wearableReadings = (healthData && profile) ? (() => {
     const wearables = getConnectedWearables(profile as any);
     const tdee = computeTDEEFromProfile(profile);
@@ -1190,9 +1202,9 @@ export default function ProfileScreen() {
 
         {/* Wearables section */}
         <Text style={styles.sectionHeading}>Wearables</Text>
-        {!profile?.wearable_connected && Platform.OS === 'ios' && (
+        {!anyWearableConnected && Platform.OS === 'ios' && (
           <View style={styles.wearableBanner}>
-            <Text style={styles.wearableBannerText}>No wearable connected — link Apple Health for live readiness data.</Text>
+            <Text style={styles.wearableBannerText}>No wearable connected — connect one below for live readiness data.</Text>
             <TouchableOpacity onPress={connectAppleHealth} disabled={healthConnecting} style={styles.wearableBannerBtn}>
               <Text style={styles.wearableBannerBtnText}>{healthConnecting ? 'Connecting...' : 'Connect Apple Health'}</Text>
             </TouchableOpacity>
