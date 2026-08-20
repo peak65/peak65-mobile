@@ -63,6 +63,7 @@ const WORKOUT_TYPE_LABELS: Record<string, string> = {
 type HomeProfile = {
   wearable_connected: boolean | null;
   wearable_type: string | null;
+  apple_health_connected: boolean | null;
   goal: string | null;
   chest_strap_tip_shown: boolean | null;
   coached_upsell_dismissed: boolean | null;
@@ -537,7 +538,7 @@ export default function HomeScreen() {
       supabase.from('session_logs').select('completed_at, completed, session_name, session_time')
         .eq('user_id', uid).eq('completed', true).order('completed_at', { ascending: false }),
       supabase.from('profiles')
-        .select('wearable_connected, wearable_type, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, garmin_connected, coros_connected, manual_hrv, manual_hrv_date, program_start_date, tier')
+        .select('wearable_connected, wearable_type, apple_health_connected, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, garmin_connected, coros_connected, manual_hrv, manual_hrv_date, program_start_date, tier')
         .eq('id', uid)
         .maybeSingle(),
       supabase.from('external_workouts')
@@ -614,9 +615,10 @@ export default function HomeScreen() {
     const newStreak = calculateStreakValue(sessionDates, externalDates, restDayNames, isElite);
     console.log('[streak] isEliteHyrox:', isElite, 'streak:', newStreak);
     setStreak(newStreak);
-    const isHealthConnected =
-      profileData?.wearable_connected === true &&
-      profileData?.wearable_type === 'apple_health';
+    // Opt-in only. This gates the sole client writer of daily_health_readings, so
+    // it must read the deliberate flag — not the legacy pair, which could have
+    // been set without consent by the old init-success path.
+    const isHealthConnected = profileData?.apple_health_connected === true;
     const isWhoopConnected = profileData?.whoop_connected === true;
 
     console.log('[health] wearable state from profile:', {

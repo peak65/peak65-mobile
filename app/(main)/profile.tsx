@@ -37,8 +37,12 @@ type Profile = {
   body_weight: number | null;
   weight_unit: string | null;
   body_fat_range: string | null;
+  // Legacy generic wearable flags. Kept in sync with apple_health_connected so
+  // everything still reading the old pair keeps working.
   wearable_connected: boolean | null;
   wearable_type: string | null;
+  // Per-wearable opt-in. The ONLY thing that gates the Apple Health sync.
+  apple_health_connected?: boolean | null;
   // TDEE inputs
   age: number | null;
   gender: string | null;              // 'male' | 'female'
@@ -484,11 +488,14 @@ export default function ProfileScreen() {
     setProfile(data);
     setLoading(false);
 
-    const appleHealthConnected = !!(data?.wearable_connected && data?.wearable_type === 'apple_health');
-    const whoopConnected = !!data?.whoop_connected;
-    console.log('[profile] mount, appleHealthConnected:', appleHealthConnected, 'whoopConnected:', whoopConnected);
+    // Apple Health is opt-in: the sync runs ONLY for an athlete who deliberately
+    // connected it. Gating on apple_health_connected (not the legacy pair, and no
+    // longer on `|| whoopConnected`) is what stops a Whoop-direct athlete from
+    // touching HealthKit at all.
+    const appleHealthConnected = data?.apple_health_connected === true;
+    console.log('[profile] mount, appleHealthConnected:', appleHealthConnected, 'whoopConnected:', !!data?.whoop_connected);
     console.log('[whoop] has refresh token:', !!data?.whoop_refresh_token);
-    if (appleHealthConnected || whoopConnected) {
+    if (appleHealthConnected) {
       loadHealthData(session.user.id, data);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -580,11 +587,48 @@ export default function ProfileScreen() {
         setHealthConnecting(false);
         return;
       }
-      console.log('[healthkit] initHealthKit success — permissions granted');
-      updateProfile({ wearable_connected: true, wearable_type: 'apple_health' });
+      // NOTE: this does NOT mean permission was granted. iOS returns no error as
+      // long as the sheet was presented, and deliberately hides read-authorization
+      // status. What we record here is the athlete's CHOICE to connect — which is
+      // why this write lives behind a deliberate tap and nowhere else. If they
+      // granted nothing, the Apple-origin sample filter means syncs write nothing.
+      console.log('[healthkit] permission sheet completed — recording opt-in');
+      updateProfile({
+        apple_health_connected: true,
+        // Legacy generic pair, kept in sync so existing readers keep working.
+        wearable_connected: true,
+        wearable_type: 'apple_health',
+      });
       setHealthConnecting(false);
       loadHealthData(profile.id);
     });
+  }
+
+  function disconnectAppleHealth() {
+    if (!profile?.id) return;
+    Alert.alert(
+      'Disconnect Apple Health',
+      'Peak 65 will stop reading Apple Health data. You can reconnect at any time.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            // Clear the legacy generic pair ONLY when it points at Apple Health.
+            // If wearable_type names another device, that wearable owns the legacy
+            // flags and clearing them would wipe its state.
+            const ownsLegacy = profile!.wearable_type === 'apple_health';
+            const patch: Partial<Profile> = ownsLegacy
+              ? { apple_health_connected: false, wearable_connected: false, wearable_type: null }
+              : { apple_health_connected: false };
+            await supabase.from('profiles').update(patch).eq('id', profile!.id);
+            setProfile(prev => (prev ? { ...prev, ...patch } : prev));
+            console.log('[healthkit] disconnected — legacy pair cleared:', ownsLegacy);
+          },
+        },
+      ],
+    );
   }
 
   async function connectWhoop() {
@@ -1155,32 +1199,34 @@ export default function ProfileScreen() {
           </View>
         )}
         <View style={styles.section}>
-          {/* Apple Health row — custom to handle connect/connected state */}
+          {/* Apple Health row — opt-in state comes from apple_health_connected,
+              matching how whoop_connected drives the Whoop row below. */}
           {(() => {
-            const isConnected = profile?.wearable_connected === true &&
-                                profile?.wearable_type === 'apple_health';
+            const isConnected = profile?.apple_health_connected === true;
             const isIOS = Platform.OS === 'ios';
             return (
-              <TouchableOpacity
-                style={styles.settingRow}
-                onPress={isConnected || !isIOS ? undefined : connectAppleHealth}
-                disabled={isConnected || healthConnecting || !isIOS}
-              >
+              <View style={styles.settingRow}>
                 <Text style={styles.settingLabel}>Apple Health</Text>
-                <View style={styles.settingRight}>
-                  <Text style={[
-                    styles.settingValue,
-                    isConnected && { color: '#a8ff78' },
-                  ]}>
-                    {!isIOS ? 'iOS Only' :
-                     healthConnecting ? 'Connecting...' :
-                     isConnected ? 'Connected ✓' : 'Connect'}
-                  </Text>
-                  {!isConnected && isIOS && !healthConnecting && (
-                    <Feather name="chevron-right" color={Colors.textSecondary} size={16} />
+                <View style={[styles.settingRight, { flexShrink: 1 }]}>
+                  {!isIOS ? (
+                    <Text style={styles.settingValue} numberOfLines={1}>iOS Only</Text>
+                  ) : healthConnecting ? (
+                    <Text style={styles.settingValue} numberOfLines={1}>Connecting...</Text>
+                  ) : isConnected ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
+                      <Text style={[styles.settingValue, { color: '#a8ff78' }]} numberOfLines={1}>Connected ✓</Text>
+                      <TouchableOpacity onPress={disconnectAppleHealth} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <Text style={[styles.settingValue, { color: Colors.textSecondary }]} numberOfLines={1}>Disconnect</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <TouchableOpacity onPress={connectAppleHealth} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text style={styles.settingValue} numberOfLines={1}>Connect</Text>
+                      <Feather name="chevron-right" color={Colors.textSecondary} size={16} />
+                    </TouchableOpacity>
                   )}
                 </View>
-              </TouchableOpacity>
+              </View>
             );
           })()}
           {/* Whoop direct API row */}
@@ -1223,7 +1269,7 @@ export default function ProfileScreen() {
         </View>
 
         {/* Today's Health Data — only when Apple Health is connected */}
-        {profile?.wearable_connected && profile?.wearable_type === 'apple_health' && (
+        {profile?.apple_health_connected === true && (
           <>
             <View style={styles.healthSectionHeader}>
               <Text style={styles.healthSectionTitle}>Today's Health Data</Text>
