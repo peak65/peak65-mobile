@@ -15,6 +15,7 @@ import { computeTDEEFromProfile, type TDEEResult } from '../../lib/tdee';
 import { calculatePeakScore } from '../../lib/peakScore';
 import { getConnectedWearables, resolveAllSources } from '../../lib/wearablePriority';
 import { getWhoopAuthUrl } from '../../lib/whoopApi';
+import { fetchOuraSignedState, getOuraAuthUrl } from '../../lib/ouraApi';
 import { clearUserCache } from '../../lib/userCache';
 import SliderInput from '../../components/SliderInput';
 import { Colors, Fonts } from '../../lib/theme';
@@ -61,6 +62,7 @@ type Profile = {
   whoop_connected?: boolean | null;
   whoop_access_token?: string | null;
   whoop_refresh_token?: string | null;
+  oura_connected?: boolean | null;
   garmin_connected?: boolean | null;
   coros_connected?: boolean | null;
   // Goal switching
@@ -337,6 +339,7 @@ export default function ProfileScreen() {
   const [gsPrimaryGoal, setGsPrimaryGoal]       = useState('');
   const [showCoachedUpsell, setShowCoachedUpsell] = useState(false);
   const [whoopConnecting, setWhoopConnecting]     = useState(false);
+  const [ouraConnecting, setOuraConnecting]       = useState(false);
   const [programRegenStatus, setProgramRegenStatus] = useState<'idle' | 'regenerating' | 'done'>('idle');
 
   const mounted      = useRef(true);
@@ -678,28 +681,79 @@ export default function ProfileScreen() {
     );
   }
 
+  async function connectOura() {
+    setOuraConnecting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        Alert.alert('Error', 'Could not start Oura connection. Please sign in again.');
+        return;
+      }
+      // Signed state from the backend — never the raw user id.
+      const state = await fetchOuraSignedState(accessToken);
+      const url = getOuraAuthUrl(state);
+      await Linking.openURL(url);
+    } catch (e: any) {
+      console.log('[oura] connect error:', e?.message ?? e);
+      Alert.alert('Error', 'Could not open Oura authorization page.');
+    } finally {
+      // Never leave the row stuck on "Connecting..." if the athlete backs out
+      // without returning. The deep-link handler re-sets it while it refetches.
+      setOuraConnecting(false);
+    }
+  }
+
+  function disconnectOura() {
+    if (!profile?.id) return;
+    Alert.alert(
+      'Disconnect Oura',
+      'This will remove your Oura connection. You can reconnect at any time.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            await supabase.from('profiles').update({
+              oura_connected:     false,
+              oura_access_token:  null,
+              oura_refresh_token: null,
+              oura_token_expiry:  null,
+            }).eq('id', profile!.id);
+            setProfile(prev => prev ? { ...prev, oura_connected: false } : prev);
+            console.log('[oura] disconnected — tokens cleared from Supabase');
+          },
+        },
+      ],
+    );
+  }
+
   // Deep link handler — the backend redirects to
   // peak65://auth/whoop/callback?status=success|error after it has exchanged the
   // code and stored tokens server-side. Mobile just refreshes its connected state.
   useEffect(() => {
     const handleUrl = async ({ url }: { url: string }) => {
-      if (!url.startsWith('peak65://auth/whoop/callback')) return;
-      console.log('[whoop] deep link received:', url);
+      const isWhoop = url.startsWith('peak65://auth/whoop/callback');
+      const isOura  = url.startsWith('peak65://auth/oura/callback');
+      if (!isWhoop && !isOura) return;
+      const label = isOura ? 'Oura' : 'Whoop';
+      console.log(`[${label.toLowerCase()}] deep link received:`, url);
       const queryIdx = url.indexOf('?');
       const status = queryIdx !== -1
         ? new URLSearchParams(url.slice(queryIdx + 1)).get('status')
         : null;
-
+      const setConnecting = isOura ? setOuraConnecting : setWhoopConnecting;
       if (status === 'success') {
-        setWhoopConnecting(true);
+        setConnecting(true);
         try {
-          await load(); // re-read profile so whoop_connected flips to true in the UI
+          await load(); // re-read profile so the connected flag flips in the UI
         } finally {
-          setWhoopConnecting(false);
+          setConnecting(false);
         }
-        Alert.alert('Whoop Connected', 'Your Whoop data will sync automatically.');
+        Alert.alert(`${label} Connected`, `Your ${label} data will sync automatically.`);
       } else {
-        Alert.alert('Error', 'Could not connect Whoop. Please try again.');
+        Alert.alert('Error', `Could not connect ${label}. Please try again.`);
       }
     };
 
@@ -734,6 +788,7 @@ export default function ProfileScreen() {
     profile?.whoop_connected === true ||
     !!profile?.whoop_access_token ||
     !!profile?.whoop_refresh_token ||
+    profile?.oura_connected === true ||
     profile?.garmin_connected === true ||
     profile?.coros_connected === true;
 
@@ -1274,6 +1329,34 @@ export default function ProfileScreen() {
                     Tap to reconnect for uninterrupted access
                   </Text>
                 )}
+              </View>
+            );
+          })()}
+          {/* Oura direct API row. State is oura_connected only — the backend
+              clears that flag when a refresh token dies, so a dead connection
+              shows "Connect" again with no separate reconnect state. */}
+          {(() => {
+            const isConnected = profile?.oura_connected === true;
+            return (
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Oura</Text>
+                <View style={[styles.settingRight, { flexShrink: 1 }]}>
+                  {ouraConnecting ? (
+                    <Text style={styles.settingValue} numberOfLines={1}>Connecting...</Text>
+                  ) : isConnected ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
+                      <Text style={[styles.settingValue, { color: '#a8ff78' }]} numberOfLines={1}>Connected ✓</Text>
+                      <TouchableOpacity onPress={disconnectOura} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <Text style={[styles.settingValue, { color: Colors.textSecondary }]} numberOfLines={1}>Disconnect</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <TouchableOpacity onPress={connectOura} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text style={styles.settingValue} numberOfLines={1}>Connect</Text>
+                      <Feather name="chevron-right" color={Colors.textSecondary} size={16} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             );
           })()}
