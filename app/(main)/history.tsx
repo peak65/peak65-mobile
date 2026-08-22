@@ -11,7 +11,6 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { Colors, Fonts } from '../../lib/theme';
-import Tooltip from '../components/Tooltip';
 import TrendLineChart, { type TrendPoint } from '../components/TrendLineChart';
 import ZoneBars, { type ZoneMinutes } from '../../components/ZoneBars';
 import type { TabParamList } from '../_layout';
@@ -43,6 +42,10 @@ type SessionLog = {
   log_value: string | null;
   notes: string | null;
   session_type: string | null;
+  // Written at log time by log-session.tsx and by the extract-hr-zones route.
+  // Clean union: 'time_trial' | 'amrap' | 'strength' | 'z2' | 'cardio'.
+  // Already returned by this screen's select('*') — null on older rows.
+  session_type_context: string | null;
   session_name: string | null;
   title: string | null;
   day_type: string | null;
@@ -205,6 +208,15 @@ function longestStreak(logs: SessionLog[]): number {
 
 // ─── Detail modal ─────────────────────────────────────────────────────────────
 
+// Strength sessions never get an HR upload prompt — zone distribution on a lift
+// tells the coach nothing useful. session_type_context is the reliable signal;
+// session_type is the coach's dropdown value, matched by substring because its
+// vocabulary lives in the web repo and is not enumerated here.
+function isStrengthLog(log: SessionLog): boolean {
+  if ((log.session_type_context ?? '').toLowerCase() === 'strength') return true;
+  return (log.session_type ?? '').toLowerCase().includes('strength');
+}
+
 function SessionDetailModal({
   log: logProp,
   onClose,
@@ -216,6 +228,8 @@ function SessionDetailModal({
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'loading'>('idle');
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [imgFailed, setImgFailed] = useState(false);
+  const [curveUrl, setCurveUrl] = useState<string | null>(null);
+  const [curveFailed, setCurveFailed] = useState(false);
 
   // hr_screenshot_url is a storage path in a private bucket, not a URL — it has
   // to be signed before <Image> can load it. Same pattern as HRDetailModal.
@@ -236,6 +250,28 @@ function SessionDetailModal({
     })();
     return () => { active = false; };
   }, [log.hr_screenshot_url]);
+
+  // The curve is only ever written when BOTH charts were uploaded. When one
+  // chart is uploaded it lands in hr_screenshot_url whichever kind it is, so
+  // a null curve does NOT mean no curve exists — it means only one image was
+  // sent. See the extract-hr-zones route.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!log.hr_curve_screenshot_url) { setCurveFailed(true); return; }
+      try {
+        const { data, error } = await supabase.storage
+          .from('hr-screenshots')
+          .createSignedUrl(log.hr_curve_screenshot_url, 3600);
+        if (!active) return;
+        if (error || !data?.signedUrl) { setCurveFailed(true); return; }
+        setCurveUrl(data.signedUrl);
+      } catch {
+        if (active) setCurveFailed(true);
+      }
+    })();
+    return () => { active = false; };
+  }, [log.hr_curve_screenshot_url]);
 
   async function handleUploadHR() {
     let ImagePicker: any;
@@ -380,6 +416,11 @@ function SessionDetailModal({
                   </>
                 ) : null}
 
+                {/* Label the two images ONLY when both are present — that is
+                    the only case where we know which chart is which. */}
+                {signedUrl && curveUrl && !imgFailed ? (
+                  <Text style={styles.detailSectionLabel}>Zone Chart</Text>
+                ) : null}
                 {signedUrl && !imgFailed ? (
                   <Image
                     source={{ uri: signedUrl }}
@@ -392,6 +433,17 @@ function SessionDetailModal({
                     <ActivityIndicator color={Colors.accent} />
                   </View>
                 )}
+                {curveUrl && !curveFailed ? (
+                  <>
+                    <Text style={[styles.detailSectionLabel, { marginTop: 16 }]}>HR Curve</Text>
+                    <Image
+                      source={{ uri: curveUrl }}
+                      style={styles.detailHRImage}
+                      resizeMode="contain"
+                      onError={() => setCurveFailed(true)}
+                    />
+                  </>
+                ) : null}
               </>
             ) : log.hr_zones ? (() => {
               try {
@@ -425,24 +477,22 @@ function SessionDetailModal({
               } catch { return null; }
             })() : null}
 
-            {/* State (c) only — no HR of either kind on this session. */}
-            {!hasRichHR(log) && !log.hr_zones && (
+            {/* State (c) only — no HR of either kind, and not a strength
+                session. The Tooltip wrapper was removed: it rendered
+                absolutely at bottom:'100%' above this button, overlaying the
+                content above it, contributing zero scroll height, and getting
+                clipped by the sheet's rounded corners. The button label is
+                self-explanatory without it. */}
+            {!isStrengthLog(log) && !hasRichHR(log) && !log.hr_zones && (
               uploadStatus === 'loading' ? (
                 <View style={{ alignItems: 'center', marginTop: 20, gap: 8 }}>
                   <ActivityIndicator color={Colors.accent} />
                   <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Reading your HR data...</Text>
                 </View>
               ) : (
-                <Tooltip id="hr_upload" text="Upload your HR screenshot here after any session. Your coach uses this to track your training zones." arrowDirection="down">
-                <TouchableOpacity
-                  style={styles.saveBtn}
-                  onPress={handleUploadHR}
-                >
-                  <Text style={styles.saveBtnText}>
-                    {log.hr_zones ? 'UPDATE HR DATA' : 'UPLOAD HR DATA'}
-                  </Text>
+                <TouchableOpacity style={styles.saveBtn} onPress={handleUploadHR}>
+                  <Text style={styles.saveBtnText}>UPLOAD HR DATA</Text>
                 </TouchableOpacity>
-                </Tooltip>
               )
             )}
           </ScrollView>

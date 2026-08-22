@@ -1260,9 +1260,6 @@ export default function ProfileScreen() {
         {!anyWearableConnected && Platform.OS === 'ios' && (
           <View style={styles.wearableBanner}>
             <Text style={styles.wearableBannerText}>No wearable connected — connect one below for live readiness data.</Text>
-            <TouchableOpacity onPress={connectAppleHealth} disabled={healthConnecting} style={styles.wearableBannerBtn}>
-              <Text style={styles.wearableBannerBtnText}>{healthConnecting ? 'Connecting...' : 'Connect Apple Health'}</Text>
-            </TouchableOpacity>
           </View>
         )}
         <View style={styles.section}>
@@ -1649,7 +1646,7 @@ const styles = StyleSheet.create({
   // Wearable connection banner
   wearableBanner: {
     marginHorizontal: 16, marginBottom: 8, backgroundColor: '#1a1500',
-    borderRadius: 12, padding: 14, gap: 10, borderWidth: 1, borderColor: '#3a3000',
+    borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#3a3000',
   },
   wearableBannerText: { color: '#e8c44a', fontSize: 13, lineHeight: 18 },
   wearableBannerBtn:  { backgroundColor: Colors.accent, borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
