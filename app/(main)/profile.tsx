@@ -242,6 +242,17 @@ function MultiSelectModal({
 
 const REGEN_TRIGGER_FIELDS = new Set(['rest_days', 'session_length', 'availability', 'equipment_access']);
 
+// ─── Account deletion ─────────────────────────────────────────────────────────
+
+// Supabase storage caps both list() and remove() at 100 entries per call, so the
+// same number paginates the listing and batches the removal.
+const STORAGE_PAGE = 100;
+
+// Shown whenever deletion stops before the account row is touched. The promise
+// that nothing was deleted is what makes retrying safe.
+const DELETE_ABORTED_MSG =
+  'Something went wrong deleting your data. Nothing was deleted. Please try again, or contact your coach.';
+
 const WEAKNESS_OPTIONS = [
   'SkiErg', 'Sled Push', 'Sled Pull', 'Burpee Broad Jump',
   'Rowing', 'Farmers Carry', 'Sandbag Lunges', 'Wall Balls', 'Running',
@@ -326,6 +337,11 @@ export default function ProfileScreen() {
   const [manualHRVOpen, setManualHRVOpen]   = useState(false);
   const [manualHRVInput, setManualHRVInput] = useState('');
   const [manualHRVError, setManualHRVError] = useState('');
+  // Account deletion. `deleting` gates both buttons so a double-tap can't run
+  // the sequence twice against a half-deleted account.
+  const [deleteOpen, setDeleteOpen]       = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleting, setDeleting]           = useState(false);
 
   // Goal switching
   const [goalSwitchOpen, setGoalSwitchOpen]     = useState(false);
@@ -561,6 +577,100 @@ export default function ProfileScreen() {
     await supabase.auth.signOut();
   }
 
+  function closeDeleteModal() {
+    setDeleteOpen(false);
+    setDeleteConfirm('');
+  }
+
+  // Storage first, database second — and abort the whole sequence the moment a
+  // storage call fails. If the screenshots can't be removed, the account has to
+  // survive so the athlete can retry; deleting the account first would strand
+  // the images with no owner left who could ever clear them.
+  async function handleDeleteAccount() {
+    setDeleting(true);
+    try {
+      // 1 — who is being deleted.
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      if (!userId) {
+        Alert.alert('Session expired', 'Your session has expired. Please log in again.');
+        setDeleting(false);
+        return;
+      }
+
+      // 2 — page through this athlete's screenshots. list() returns at most 100
+      // entries per call and a logged session writes two files, so a single call
+      // would silently leave most of a long history behind.
+      const paths: string[] = [];
+      for (let offset = 0; ; offset += STORAGE_PAGE) {
+        const { data: page, error: listError } = await supabase
+          .storage.from('hr-screenshots')
+          .list(userId, { limit: STORAGE_PAGE, offset });
+        if (listError) {
+          console.log('[delete-account] storage list failed:', listError.message);
+          Alert.alert('Something went wrong', DELETE_ABORTED_MSG);
+          setDeleting(false);
+          return;
+        }
+        const entries = page ?? [];
+        for (const entry of entries) paths.push(`${userId}/${entry.name}`);
+        if (entries.length < STORAGE_PAGE) break;
+      }
+
+      // 3 — remove them, batched to the same per-call ceiling. Any failure stops
+      // here, before the account itself is touched.
+      for (let i = 0; i < paths.length; i += STORAGE_PAGE) {
+        const { error: removeError } = await supabase
+          .storage.from('hr-screenshots')
+          .remove(paths.slice(i, i + STORAGE_PAGE));
+        if (removeError) {
+          console.log('[delete-account] storage remove failed:', removeError.message);
+          Alert.alert('Something went wrong', DELETE_ABORTED_MSG);
+          setDeleting(false);
+          return;
+        }
+      }
+
+      // 4 — delete_my_account() takes no arguments: it resolves the caller from
+      // the JWT. It raises readable messages when it refuses (a coach account,
+      // for one), so the message goes straight to the athlete.
+      const { error: rpcError } = await supabase.rpc('delete_my_account');
+      if (rpcError) {
+        console.log('[delete-account] rpc failed:', rpcError.message);
+        Alert.alert('Could not delete your account', rpcError.message);
+        setDeleting(false);
+        return;
+      }
+
+      // 5 — every AsyncStorage key holding this athlete's data. Same helper
+      // sign-out uses, so the two paths can never drift apart.
+      await clearUserCache();
+
+      // 6 — the auth user is already gone, so this can legitimately fail. Either
+      // way the local session is dropped and the listener in _layout.tsx routes
+      // back to Login on its own — nothing here navigates by hand.
+      try {
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) {
+          console.log('[delete-account] signOut after deletion (non-fatal):', signOutError.message);
+        }
+      } catch (err) {
+        console.log('[delete-account] signOut after deletion threw (non-fatal):', err);
+      }
+
+      // Reached only once the account is gone. Resetting leaves no frozen
+      // "DELETING…" behind if the route change is slower than this frame.
+      setDeleting(false);
+      closeDeleteModal();
+    } catch (err) {
+      // Only reachable before the RPC lands — every step after it is itself
+      // guarded — so "nothing was deleted" stays true.
+      console.log('[delete-account] unexpected error:', err);
+      Alert.alert('Something went wrong', DELETE_ABORTED_MSG);
+      setDeleting(false);
+    }
+  }
+
   function connectAppleHealth() {
     if (!profile || Platform.OS !== 'ios') return;
     setHealthConnecting(true);
@@ -773,6 +883,10 @@ export default function ProfileScreen() {
   // Pinnacle athletes: their coach owns programming, so every control that
   // would change it is withheld from this screen.
   const isElite = profile?.tier === 'elite';
+
+  // Case-insensitive: typing the word is the deliberate act being confirmed, and
+  // a keyboard that ignored autoCapitalize shouldn't be what blocks it.
+  const canDeleteAccount = deleteConfirm.trim().toUpperCase() === 'DELETE' && !deleting;
 
   const goalBadge = profile?.goal === 'hyrox'
     ? `Hyrox${profile.hyrox_division ? ` • ${profile.hyrox_division}` : ''}`
@@ -1159,6 +1273,58 @@ export default function ProfileScreen() {
         </InputAccessoryView>
       </Modal>
 
+      {/* Delete account confirmation. Typing the word is the guard — this is the
+          one action in the app with no undo on either side of the connection. */}
+      <Modal
+        visible={deleteOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => { if (!deleting) closeDeleteModal(); }}
+      >
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <View style={styles.deleteCard}>
+            <ScrollView keyboardShouldPersistTaps="handled" bounces={false} contentContainerStyle={{ gap: 14 }}>
+              <Text style={styles.deleteTitle}>Delete your account</Text>
+              <Text style={styles.deleteBody}>
+                This permanently deletes your Peak 65 account and everything in it — your
+                programs, every session you've logged, your race history, and your uploaded
+                heart rate data. It cannot be undone and your coach cannot recover it.
+              </Text>
+              <Text style={styles.deleteWarning}>
+                This does not cancel your coaching payment. Message your coach before you
+                delete so your billing can be stopped.
+              </Text>
+              <Text style={styles.deleteLabel}>TYPE DELETE TO CONFIRM</Text>
+              <TextInput
+                style={styles.deleteInput}
+                value={deleteConfirm}
+                onChangeText={setDeleteConfirm}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                editable={!deleting}
+                selectionColor={Colors.accent}
+              />
+              <TouchableOpacity
+                style={[styles.deleteConfirmBtn, !canDeleteAccount && styles.deleteConfirmBtnDisabled]}
+                onPress={handleDeleteAccount}
+                disabled={!canDeleteAccount}
+              >
+                <Text style={styles.deleteConfirmBtnText}>
+                  {deleting ? 'DELETING…' : 'DELETE MY ACCOUNT'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={closeDeleteModal}
+                disabled={deleting}
+                style={{ alignItems: 'center' }}
+              >
+                <Text style={[styles.cancelText, deleting && styles.deleteCancelDisabled]}>Cancel</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
         {/* Name + badge */}
         <View style={styles.nameBlock}>
@@ -1458,6 +1624,14 @@ export default function ProfileScreen() {
         <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
           <Text style={styles.signOutText}>SIGN OUT</Text>
         </TouchableOpacity>
+
+        {/* Delete account — App Store Guideline 5.1.1(v) requires this to be
+            completable in the app, so it sits directly under SIGN OUT at the end
+            of Account rather than behind a submenu. Plain text, no fill: clearly
+            destructive without competing with SIGN OUT for the primary tap. */}
+        <TouchableOpacity style={styles.deleteAccountBtn} onPress={() => setDeleteOpen(true)}>
+          <Text style={styles.deleteAccountText}>Delete Account</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -1516,7 +1690,36 @@ const styles = StyleSheet.create({
     marginHorizontal: 16, marginTop: 24, backgroundColor: '#1a0000',
     borderRadius: 12, paddingVertical: 16, alignItems: 'center',
   },
-  signOutText: { color: '#ff4444', fontSize: 16, fontWeight: '700' },
+  signOutText: { color: Colors.red, fontSize: 16, fontWeight: '700' },
+
+  // Delete account — plain text under SIGN OUT, no fill. Same horizontal inset
+  // and tap height as the button above it so the pair reads as one block.
+  deleteAccountBtn:  { marginHorizontal: 16, marginTop: 12, paddingVertical: 14, alignItems: 'center' },
+  deleteAccountText: { color: Colors.red, fontSize: 15, fontWeight: '600' },
+
+  // Delete confirmation sheet — same bottom-sheet shape as the HRV modal.
+  deleteCard: {
+    backgroundColor: '#1a1a1a', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 24,
+  },
+  deleteTitle:   { color: Colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  deleteBody:    { color: Colors.textSecondary, fontSize: 13, lineHeight: 19 },
+  // The billing warning, in alert red — the one thing deletion cannot undo for them.
+  deleteWarning: { color: Colors.red, fontSize: 13, lineHeight: 19, fontWeight: '700' },
+  deleteLabel: {
+    color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
+  },
+  // Darker than the sheet so the field reads as a well; no border needed.
+  deleteInput: {
+    backgroundColor: '#111111', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 14,
+    color: Colors.textPrimary, fontSize: 18, fontWeight: '700', letterSpacing: 2,
+  },
+  deleteConfirmBtn: {
+    backgroundColor: Colors.red, borderRadius: 12, paddingVertical: 16, alignItems: 'center',
+  },
+  deleteConfirmBtnDisabled: { opacity: 0.4 },
+  deleteConfirmBtnText: { color: '#f0ede8', fontSize: 15, fontWeight: '800', letterSpacing: 1 },
+  deleteCancelDisabled: { opacity: 0.4 },
 
   // Picker
   pickerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
