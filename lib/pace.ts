@@ -90,3 +90,85 @@ export function getSessionPaceTarget(session: ProgramSession): PaceTarget {
 
   return { value: null, isZoneOnly: false };
 }
+
+// ─── Multi-piece pace targets ────────────────────────────────────────────────
+//
+// getSessionPaceTarget above answers "what is THE pace for this session?" and
+// stops at the first one it finds. That is wrong for a session built from
+// several paced pieces — a threshold day with a Ski Erg at 2:08/500m and a Row
+// Erg at 2:15/500m has two prescriptions, and the athlete's answer for the
+// second was being dropped on the floor. getSessionPaceTargets returns all of
+// them, in prescription order, so the capture flow can ask about each.
+//
+// The scalar function is left untouched: it still backs the rollup columns that
+// the coach portal and weekly generation read.
+
+export type PaceTargetItem = {
+  // Stable identifier, safe as an object key. Positional — "<blockIndex>-<exerciseIndex>"
+  // against the ORIGINAL session.blocks array, so it survives re-renders of the
+  // same session without colliding across blocks.
+  key: string;
+  // Exercise name as shown to the athlete. Never empty — falls back to 'Target'.
+  name: string;
+  // The resolved pace string. Non-null by construction; an exercise with no
+  // pace never becomes an item.
+  value: string;
+  // Same meaning as PaceTarget.isZoneOnly — an effort band, not a split.
+  isZoneOnly: boolean;
+};
+
+// Asking about more than a handful of pieces stops being a log and starts being
+// a form. Programs this long are malformed rather than legitimately paced.
+const MAX_PACE_TARGETS = 6;
+
+// Same test findWorkBlock applies, factored out so both agree about what counts
+// as work. findWorkBlock keeps taking only the FIRST match; this is used to take
+// every match, since a session's paced pieces can live in separate blocks.
+function isWorkBlock(block: SessionBlock | undefined | null): boolean {
+  if (!block) return false;
+  return block.is_work === true || /main/i.test(block.block_name ?? '');
+}
+
+// Every prescribed pace across the session's work blocks, in the order they are
+// written. Empty means the session carries no pace target at all, which is the
+// signal the capture flow gates on.
+export function getSessionPaceTargets(session: ProgramSession): PaceTargetItem[] {
+  const blocks = session.blocks ?? [];
+  const items: PaceTargetItem[] = [];
+  // name+value pairs already collected. A circuit that repeats the same erg at
+  // the same split is one question, not three.
+  const seen = new Set<string>();
+
+  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
+    const block = blocks[blockIndex];
+    if (!isWorkBlock(block)) continue;
+
+    const exercises = block?.exercises ?? [];
+    for (let exerciseIndex = 0; exerciseIndex < exercises.length; exerciseIndex++) {
+      const ex = exercises[exerciseIndex];
+      if (!ex) continue;
+
+      const resolved = resolveExercisePace(ex);
+      if (resolved.value === null) continue;
+
+      // clean() rejects the empty strings and non-strings real program JSON
+      // carries, so an unnamed exercise gets a usable label rather than a blank.
+      const name = clean(ex.name) ?? 'Target';
+
+      const dedupeKey = `${name.toLowerCase()}|${resolved.value}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+
+      items.push({
+        key:        `${blockIndex}-${exerciseIndex}`,
+        name,
+        value:      resolved.value,
+        isZoneOnly: resolved.isZoneOnly,
+      });
+
+      if (items.length === MAX_PACE_TARGETS) return items;
+    }
+  }
+
+  return items;
+}

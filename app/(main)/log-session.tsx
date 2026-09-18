@@ -9,10 +9,19 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import HRUploadPrompt from '../../components/HRUploadPrompt';
 import { Colors, Fonts } from '../../lib/theme';
-import { getSessionPaceTarget } from '../../lib/pace';
+import { getSessionPaceTargets } from '../../lib/pace';
 import type { MainStackParamList, ProgramSession } from '../_layout';
 
 type LogSessionRouteProp = RouteProp<MainStackParamList, 'LogSession'>;
+
+// The athlete's answer for ONE paced piece. Kept per-piece rather than as three
+// screen-level scalars, which is what silently discarded every answer after the
+// first on a session with more than one prescription.
+type PaceAnswer = { hit: boolean | null; actual: string; note: string };
+
+// What an untouched piece reads as. Shared constant so a key that has never been
+// tapped renders as unanswered instead of crashing on an undefined lookup.
+const EMPTY_PACE_ANSWER: PaceAnswer = { hit: null, actual: '', note: '' };
 
 function detectSessionType(session: ProgramSession): 'time_trial' | 'amrap' | 'strength' | 'z2' | 'cardio' {
   const name = (session.name ?? '').toLowerCase();
@@ -50,11 +59,14 @@ export default function LogSessionScreen() {
     (session.session_type?.toLowerCase().includes('strength') ?? false) ||
     sessionType === 'strength';
 
-  // The prescribed main-work pace, if this session carries one. Keyed on
+  // Every prescribed pace this session carries, in prescription order. Keyed on
   // sessionJson rather than `session` because `session` is re-parsed on every
   // render, so the object identity is never stable.
-  const paceTarget = useMemo(() => getSessionPaceTarget(session), [sessionJson]);
-  const hasPaceTarget = paceTarget.value !== null;
+  const paceTargets = useMemo(() => getSessionPaceTargets(session), [sessionJson]);
+  // The single gate every pace-aware branch below reads. !isStrengthSession is
+  // deliberate: a lift carrying a stray pace or pace_zone must never surface the
+  // question, since there is no split to hit.
+  const showPaceBlock = paceTargets.length > 0 && !isStrengthSession;
 
   const [trialValue, setTrialValue] = useState('');
   const [rounds, setRounds] = useState(0);
@@ -62,11 +74,10 @@ export default function LogSessionScreen() {
   const [notes, setNotes] = useState('');
   const [wasModified, setWasModified] = useState(false);
   const [modificationText, setModificationText] = useState('');
-  // Pace execution. Only ever asked when hasPaceTarget — hitTarget stays null
-  // until the athlete answers, which is what the save guard requires.
-  const [hitTarget, setHitTarget] = useState<boolean | null>(null);
-  const [actualPace, setActualPace] = useState('');
-  const [missNote, setMissNote] = useState('');
+  // Pace execution, one entry per paced piece keyed by PaceTargetItem.key. Only
+  // ever asked when showPaceBlock — a piece stays unanswered (hit: null) until
+  // the athlete taps, which is what the save guard requires.
+  const [paceAnswers, setPaceAnswers] = useState<Record<string, PaceAnswer>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [sessionLogId, setSessionLogId] = useState<string | null>(null);
@@ -76,22 +87,98 @@ export default function LogSessionScreen() {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
 
+  // Reading a key that was never written must not crash — an untapped piece is
+  // simply unanswered.
+  const answerFor = (key: string): PaceAnswer => paceAnswers[key] ?? EMPTY_PACE_ANSWER;
+
+  // Immutable single-key patch. Functional form so two taps in the same frame
+  // can't clobber each other.
+  function setPaceAnswer(key: string, patch: Partial<PaceAnswer>) {
+    setPaceAnswers(prev => ({
+      ...prev,
+      [key]: { ...(prev[key] ?? EMPTY_PACE_ANSWER), ...patch },
+    }));
+  }
+
+  // One result row per paced piece, in prescription order — the value written to
+  // session_logs.pace_results and the source of every rollup scalar below. Empty
+  // whenever the question was never asked, which nulls all four pace columns.
+  const paceResults = showPaceBlock
+    ? paceTargets.map(item => {
+        const answer = answerFor(item.key);
+        return {
+          key:          item.key,
+          name:         item.name,
+          prescribed:   item.value,
+          is_zone_only: item.isZoneOnly,
+          hit:          answer.hit,
+          actual:       answer.hit === false ? (answer.actual.trim() || null) : null,
+          note:         answer.hit === false ? (answer.note.trim()   || null) : null,
+        };
+      })
+    : [];
+
+  // Any piece still unanswered, or missed without the follow-up detail. Drives
+  // both the save guards and the SAVE button's disabled state, so the two can't
+  // disagree.
+  const pacePending = paceResults.some(
+    r => r.hit === null || (r.hit === false && (!r.actual || !r.note)),
+  );
+
   async function saveSession() {
     if (!userId) return;
     if (wasModified && !modificationText.trim()) {
       Alert.alert('One more thing', 'Tell your coach what you changed and why.');
       return;
     }
-    if (hasPaceTarget && hitTarget === null) {
-      Alert.alert('One more thing', 'Let your coach know if you hit your target.');
+    // Multi-piece sessions name the piece that's missing an answer — "hit your
+    // target" is useless guidance when the screen is asking about three ergs.
+    const multi = paceResults.length > 1;
+    const unanswered = paceResults.find(r => r.hit === null);
+    if (unanswered) {
+      Alert.alert(
+        'One more thing',
+        multi
+          ? `Let your coach know if you hit your target on ${unanswered.name}.`
+          : 'Let your coach know if you hit your target.',
+      );
       return;
     }
-    if (hitTarget === false && (!actualPace.trim() || !missNote.trim())) {
-      Alert.alert('One more thing', 'Tell your coach what you actually hit and why.');
+    const missingDetail = paceResults.find(r => r.hit === false && (!r.actual || !r.note));
+    if (missingDetail) {
+      Alert.alert(
+        'One more thing',
+        multi
+          ? `Tell your coach what you actually hit on ${missingDetail.name} and why.`
+          : 'Tell your coach what you actually hit and why.',
+      );
       return;
     }
     setSaving(true);
     try {
+      // Rollup scalars. The coach portal's "Missed" chip, the expanded session
+      // detail and weekly generation all still read these, so they keep their
+      // exact single-piece meaning and only gain a joined form when a session
+      // genuinely has several prescriptions.
+      const missedResults = paceResults.filter(r => r.hit === false);
+      const hitTargetRollup =
+        paceResults.length === 0      ? null
+        : missedResults.length > 0    ? false
+        : paceResults.every(r => r.hit === true) ? true
+        : null;
+      const prescribedRollup =
+        paceResults.length === 0 ? null
+        : paceResults.length === 1 ? paceResults[0].prescribed
+        : paceResults.map(r => `${r.name} ${r.prescribed}`).join(' · ');
+      const actualRollup =
+        missedResults.length === 0 ? null
+        : paceResults.length === 1 ? paceResults[0].actual
+        : missedResults.map(r => `${r.name} ${r.actual}`).join(' · ');
+      const missNoteRollup =
+        missedResults.length === 0 ? null
+        : paceResults.length === 1 ? paceResults[0].note
+        : missedResults.map(r => `${r.name}: ${r.note}`).join(' · ');
+
       const payload = {
         user_id:              userId,
         program_id:           programId,
@@ -107,10 +194,11 @@ export default function LogSessionScreen() {
         notes:                notes || null,
         was_modified:         wasModified,
         modification_note:    wasModified ? (modificationText.trim() || null) : null,
-        hit_target:           hasPaceTarget ? hitTarget : null,
-        actual_pace:          (hasPaceTarget && hitTarget === false) ? (actualPace.trim() || null) : null,
-        miss_note:            (hasPaceTarget && hitTarget === false) ? (missNote.trim() || null) : null,
-        prescribed_pace:      hasPaceTarget ? paceTarget.value : null,
+        pace_results:         paceResults.length > 0 ? paceResults : null,
+        hit_target:           hitTargetRollup,
+        actual_pace:          actualRollup,
+        miss_note:            missNoteRollup,
+        prescribed_pace:      prescribedRollup,
         week_number:          weekNumber,
         completed:            true,
         completed_at:         new Date().toISOString(),
@@ -272,65 +360,82 @@ export default function LogSessionScreen() {
             </View>
           )}
 
-          {/* Pace execution — shown ONLY when the session carries a prescribed
-              main-work pace target. A zone-only target ("zone4") is an effort
-              band, not a split, so it asks about holding the zone instead. */}
-          {hasPaceTarget && !saved && (
+          {/* Pace execution — one question per paced piece, so a threshold
+              session with a Ski Erg and a Row Erg at different splits captures
+              both answers instead of only the first. Never shown on a strength
+              session. A zone-only target ("zone4") is an effort band, not a
+              split, so it asks about holding the zone instead. With a single
+              piece this renders exactly as it always has — no name label. */}
+          {showPaceBlock && !saved && (
             <View style={ls.section}>
               <Text style={ls.label}>
-                {paceTarget.isZoneOnly ? 'DID YOU HOLD YOUR TARGET ZONE?' : 'DID YOU HIT YOUR TARGET PACE?'}
+                {paceTargets.length > 1
+                  ? 'DID YOU HIT YOUR TARGET PACES?'
+                  : paceTargets[0].isZoneOnly
+                    ? 'DID YOU HOLD YOUR TARGET ZONE?'
+                    : 'DID YOU HIT YOUR TARGET PACE?'}
               </Text>
-              <Text style={ls.paceTargetTxt}>
-                {paceTarget.isZoneOnly ? paceTarget.value : `Target: ${paceTarget.value}`}
-              </Text>
-              <View style={ls.modRow}>
-                <TouchableOpacity
-                  style={[ls.modOption, hitTarget === true && ls.modOptionSelected]}
-                  onPress={() => setHitTarget(true)}
-                >
-                  <Text style={[ls.modOptionTxt, hitTarget === true && ls.modOptionTxtSelected]}>Hit it</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[ls.modOption, hitTarget === false && ls.modOptionSelected]}
-                  onPress={() => setHitTarget(false)}
-                >
-                  <Text style={[ls.modOptionTxt, hitTarget === false && ls.modOptionTxtSelected]}>Missed it</Text>
-                </TouchableOpacity>
-              </View>
-              {hitTarget === false && (
-                <View style={ls.modTextWrap}>
-                  <Text style={ls.label}>WHAT DID YOU ACTUALLY HIT?</Text>
-                  <TextInput
-                    style={ls.input}
-                    value={actualPace}
-                    onChangeText={setActualPace}
-                    placeholder={paceTarget.isZoneOnly ? 'e.g. mostly Zone 3' : 'e.g. 6:45/mi — your actual average'}
-                    placeholderTextColor={Colors.textSecondary}
-                    keyboardType={paceTarget.isZoneOnly ? 'default' : 'numbers-and-punctuation'}
-                    autoCorrect={false}
-                  />
-                  <Text style={[ls.label, ls.missNoteLabel]}>WHAT GOT IN THE WAY?</Text>
-                  <TextInput
-                    style={[ls.input, ls.notesInput]}
-                    value={missNote}
-                    onChangeText={setMissNote}
-                    placeholder="Tell your coach what happened — legs, weather, effort, etc."
-                    placeholderTextColor={Colors.textSecondary}
-                    multiline
-                    numberOfLines={3}
-                    textAlignVertical="top"
-                  />
-                </View>
-              )}
+              {paceTargets.map((item, idx) => {
+                const answer = answerFor(item.key);
+                return (
+                  <View key={item.key} style={idx > 0 ? ls.paceGroup : undefined}>
+                    {paceTargets.length > 1 && (
+                      <Text style={ls.paceGroupName}>{item.name}</Text>
+                    )}
+                    <Text style={ls.paceTargetTxt}>
+                      {item.isZoneOnly ? item.value : `Target: ${item.value}`}
+                    </Text>
+                    <View style={ls.modRow}>
+                      <TouchableOpacity
+                        style={[ls.modOption, answer.hit === true && ls.modOptionSelected]}
+                        onPress={() => setPaceAnswer(item.key, { hit: true })}
+                      >
+                        <Text style={[ls.modOptionTxt, answer.hit === true && ls.modOptionTxtSelected]}>Hit it</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[ls.modOption, answer.hit === false && ls.modOptionSelected]}
+                        onPress={() => setPaceAnswer(item.key, { hit: false })}
+                      >
+                        <Text style={[ls.modOptionTxt, answer.hit === false && ls.modOptionTxtSelected]}>Missed it</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {answer.hit === false && (
+                      <View style={ls.modTextWrap}>
+                        <Text style={ls.label}>WHAT DID YOU ACTUALLY HIT?</Text>
+                        <TextInput
+                          style={ls.input}
+                          value={answer.actual}
+                          onChangeText={text => setPaceAnswer(item.key, { actual: text })}
+                          placeholder={item.isZoneOnly ? 'e.g. mostly Zone 3' : 'e.g. 6:45/mi — your actual average'}
+                          placeholderTextColor={Colors.textSecondary}
+                          keyboardType={item.isZoneOnly ? 'default' : 'numbers-and-punctuation'}
+                          autoCorrect={false}
+                        />
+                        <Text style={[ls.label, ls.missNoteLabel]}>WHAT GOT IN THE WAY?</Text>
+                        <TextInput
+                          style={[ls.input, ls.notesInput]}
+                          value={answer.note}
+                          onChangeText={text => setPaceAnswer(item.key, { note: text })}
+                          placeholder="Tell your coach what happened — legs, weather, effort, etc."
+                          placeholderTextColor={Colors.textSecondary}
+                          multiline
+                          numberOfLines={3}
+                          textAlignVertical="top"
+                        />
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
             </View>
           )}
 
           {/* Save button — FIX 4: explicit #e8ff47 / #080808 */}
           {!saved && (
             <TouchableOpacity
-              style={[ls.saveBtn, (saving || (sessionType === 'time_trial' && !trialValue.trim()) || (wasModified && !modificationText.trim()) || (hasPaceTarget && hitTarget === null) || (hitTarget === false && (!actualPace.trim() || !missNote.trim()))) && ls.saveBtnDisabled]}
+              style={[ls.saveBtn, (saving || (sessionType === 'time_trial' && !trialValue.trim()) || (wasModified && !modificationText.trim()) || pacePending) && ls.saveBtnDisabled]}
               onPress={saveSession}
-              disabled={saving || (sessionType === 'time_trial' && !trialValue.trim()) || (wasModified && !modificationText.trim()) || (hasPaceTarget && hitTarget === null) || (hitTarget === false && (!actualPace.trim() || !missNote.trim()))}
+              disabled={saving || (sessionType === 'time_trial' && !trialValue.trim()) || (wasModified && !modificationText.trim()) || pacePending}
             >
               <Text style={ls.saveBtnTxt}>{saving ? 'SAVING...' : 'SAVE SESSION →'}</Text>
             </TouchableOpacity>
@@ -406,6 +511,12 @@ const ls = StyleSheet.create({
   modOptionTxtSelected: { color: '#080808' },
   modTextWrap:     { marginTop: 20 },
   paceTargetTxt:   { color: Colors.textPrimary, fontSize: 18, fontFamily: Fonts.metric, marginBottom: 14 },
+  // Separates the 2nd..nth paced piece so they read as distinct questions.
+  // Never applied to the first, which keeps the single-piece layout untouched.
+  paceGroup:       { marginTop: 24, paddingTop: 24, borderTopWidth: 1, borderTopColor: '#1a1a1a' },
+  // Sub-label under the accent section header: same metrics as ls.label, in the
+  // secondary tone so the piece name reads below the question, not beside it.
+  paceGroupName:   { color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 8 },
   missNoteLabel:   { marginTop: 20 },
   // FIX 4: explicit #e8ff47 / #080808
   saveBtn:         { marginHorizontal: 20, backgroundColor: '#e8ff47', paddingVertical: 20, alignItems: 'center' },
