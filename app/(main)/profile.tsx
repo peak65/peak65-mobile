@@ -337,7 +337,6 @@ export default function ProfileScreen() {
   const [gsWeaknesses, setGsWeaknesses]         = useState<string[]>([]);
   const [gsRunConfidence, setGsRunConfidence]   = useState(3);
   const [gsPrimaryGoal, setGsPrimaryGoal]       = useState('');
-  const [showCoachedUpsell, setShowCoachedUpsell] = useState(false);
   const [whoopConnecting, setWhoopConnecting]     = useState(false);
   const [ouraConnecting, setOuraConnecting]       = useState(false);
   const [programRegenStatus, setProgramRegenStatus] = useState<'idle' | 'regenerating' | 'done'>('idle');
@@ -1100,10 +1099,7 @@ export default function ProfileScreen() {
                 </Text>
                 <TouchableOpacity
                   style={[styles.saveBtn, { marginTop: 20, width: '100%' }]}
-                  onPress={() => {
-                    setGoalSwitchOpen(false);
-                    if (profile?.coached_upsell_dismissed !== true) setShowCoachedUpsell(true);
-                  }}
+                  onPress={() => setGoalSwitchOpen(false)}
                 >
                   <Text style={styles.saveBtnText}>DONE</Text>
                 </TouchableOpacity>
@@ -1171,35 +1167,6 @@ export default function ProfileScreen() {
           </Text>
           {!!goalBadge && <Text style={styles.goalBadge}>{goalBadge}</Text>}
         </View>
-
-        {/* Coached upsell — shown once after goal switch if not dismissed */}
-        {showCoachedUpsell && (
-          <View style={styles.coachedUpsellCard}>
-            <Text style={styles.coachedUpsellTitle}>Level up with Peak 65 Coached</Text>
-            <Text style={styles.coachedUpsellBody}>
-              Get 1:1 coaching, weekly check-ins, and personalised programming adjustments from a real coach.
-            </Text>
-            <View style={styles.coachedUpsellBtns}>
-              <TouchableOpacity
-                style={styles.coachedLearnBtn}
-                onPress={() => Alert.alert('Peak 65 Coached', 'Coming soon! Stay tuned for 1:1 coaching options.')}
-              >
-                <Text style={styles.coachedLearnText}>Learn More</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.coachedNoBtn}
-                onPress={async () => {
-                  setShowCoachedUpsell(false);
-                  if (profile?.id) {
-                    await supabase.from('profiles').update({ coached_upsell_dismissed: true }).eq('id', profile.id);
-                  }
-                }}
-              >
-                <Text style={styles.coachedNoText}>No thanks</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
 
         {/* Program regen status banner */}
         {programRegenStatus !== 'idle' && (
@@ -1484,7 +1451,7 @@ export default function ProfileScreen() {
         <Text style={styles.sectionHeading}>Account</Text>
         <View style={styles.section}>
           <SettingRow label="Email" value={email} />
-          <SettingRow label="Subscription" value={`${isElite ? 'Pinnacle' : 'Foundation'} • Active`} />
+          <SettingRow label="Coaching" value={`${isElite ? 'Pinnacle' : 'Foundation'} • Active`} />
         </View>
 
         {/* Sign out */}
@@ -1621,19 +1588,6 @@ const styles = StyleSheet.create({
   gsConfidenceBtn:     { flex: 1, backgroundColor: '#1a1a1a', borderRadius: 10, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
   gsConfidenceBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   gsConfidenceBtnText: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700' },
-
-  // Coached upsell card
-  coachedUpsellCard: {
-    marginHorizontal: 16, marginTop: 16, backgroundColor: '#111',
-    borderRadius: 14, padding: 18, borderLeftWidth: 3, borderLeftColor: Colors.accent, gap: 10,
-  },
-  coachedUpsellTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '800' },
-  coachedUpsellBody:  { color: Colors.textSecondary, fontSize: 13, lineHeight: 18 },
-  coachedUpsellBtns:  { flexDirection: 'row', gap: 10, marginTop: 4 },
-  coachedLearnBtn:    { flex: 1, backgroundColor: Colors.accent, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
-  coachedLearnText:   { color: Colors.background, fontSize: 13, fontWeight: '700' },
-  coachedNoBtn:       { flex: 1, backgroundColor: '#1a1a1a', borderRadius: 10, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
-  coachedNoText:      { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
 
   // Program regen banner
   regenBanner: {
