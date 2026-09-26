@@ -29,10 +29,12 @@ import { supabase } from '../lib/supabase';
 import { detectCandidates } from '../lib/sessionMatcher';
 import { clearUserCache } from '../lib/userCache';
 import { Colors } from '../lib/theme';
+import { LEGAL_VERSION } from '../lib/legal';
 import LoginScreen from './auth/login';
 import SignupScreen from './auth/signup';
 import OnboardingScreen from './onboarding/index';
 import PinnacleSetupScreen from './onboarding/pinnacle-setup';
+import LegalAcceptScreen from './legal-accept';
 import GeneratingScreen from './(main)/generating';
 import HomeScreen from './(main)/home';
 import ProgramScreen from './(main)/program';
@@ -138,6 +140,9 @@ export type AuthStackParamList = {
 export type MainStackParamList = {
   Onboarding: undefined;
   PinnacleSetup: undefined;
+  // `next` is the state the account would have landed on without the gate;
+  // the screen routes there once acceptance is recorded.
+  LegalAccept: { next: AppState; fullName: string | null };
   Generating: undefined;
   Tabs: undefined;
   LogSession: { sessionJson: string; programId: string; weekNumber: number; dayName: string };
@@ -239,11 +244,23 @@ function AuthNavigator() {
   );
 }
 
-function MainNavigator({ initialRoute }: { initialRoute: keyof MainStackParamList }) {
+function MainNavigator({
+  initialRoute,
+  legalParams,
+}: {
+  initialRoute: keyof MainStackParamList;
+  legalParams: MainStackParamList['LegalAccept'];
+}) {
   return (
     <MainStack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
       <MainStack.Screen name="Onboarding"        component={OnboardingScreen} />
       <MainStack.Screen name="PinnacleSetup"     component={PinnacleSetupScreen} />
+      <MainStack.Screen
+        name="LegalAccept"
+        component={LegalAcceptScreen}
+        initialParams={legalParams}
+        options={{ gestureEnabled: false }}
+      />
       <MainStack.Screen name="Generating"        component={GeneratingScreen} />
       <MainStack.Screen name="Tabs"              component={MainTabs} />
       <MainStack.Screen name="LogSession"        component={LogSessionScreen} options={{ headerShown: false }} />
@@ -290,7 +307,7 @@ async function registerPushToken(userId: string) {
 
 // ─── App state resolution ─────────────────────────────────────────────────────
 
-type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'setup' | 'generating' | 'waiting' | 'authenticated';
+export type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'setup' | 'generating' | 'waiting' | 'authenticated' | 'legal';
 
 // A non-draft program is what separates "ready to train" from "still waiting".
 // Shared by the Pinnacle branch and the standard path below.
@@ -312,6 +329,20 @@ type ResolveResult = {
   isCoach: boolean;
   isElite?: boolean;
   awaitingProgram?: boolean;
+  // Set only when state is 'legal': where the account goes after accepting,
+  // and the name recorded with the acceptance.
+  next?: AppState;
+  fullName?: string | null;
+};
+
+type Profile = {
+  first_name: string | null;
+  last_name: string | null;
+  role: string | null;
+  tier: string | null;
+  program_status: string | null;
+  onboarding_complete: boolean | null;
+  legal_accepted_version: string | null;
 };
 
 async function resolveAppState(
@@ -321,7 +352,7 @@ async function resolveAppState(
 
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('first_name, role, tier, program_status, onboarding_complete')
+    .select('first_name, last_name, role, tier, program_status, onboarding_complete, legal_accepted_version')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -335,6 +366,38 @@ async function resolveAppState(
     return { state: 'unauthenticated', isCoach: false };
   }
 
+  const base = await resolveRoute(session, profile);
+
+  // ── Legal gate ──────────────────────────────────────────────────────────────
+  // Wraps the routing rather than sitting inside it, so every signed-in
+  // account — coaches and admins included — passes through it. isElite and
+  // awaitingProgram ride along so the tabs are configured correctly once the
+  // account is let through; without them a Pinnacle athlete would reach Tabs
+  // with the automatic program generators switched back on.
+  if (profile?.legal_accepted_version !== LEGAL_VERSION) {
+    const fullName = [profile?.first_name, profile?.last_name]
+      .map(n => (n ?? '').trim())
+      .filter(Boolean)
+      .join(' ') || null;
+    return {
+      state:           'legal',
+      isCoach:         base.isCoach,
+      isElite:         base.isElite,
+      awaitingProgram: base.awaitingProgram,
+      next:            base.state,
+      fullName,
+    };
+  }
+
+  return base;
+}
+
+// Routing for a signed-in account whose profile loaded — where it belongs
+// before the legal gate is applied.
+async function resolveRoute(
+  session: Session,
+  profile: Profile | null,
+): Promise<ResolveResult> {
   if (profile?.role === 'coach') {
     return { state: 'authenticated', isCoach: true };
   }
@@ -515,6 +578,7 @@ export default function RootLayout() {
   const [isElite,    setIsElite]    = useState(false);
   const [awaitingProgram, setAwaitingProgram] = useState(false);
   const [hasUnread,  setHasUnread]  = useState(false);
+  const [legalParams, setLegalParams] = useState<MainStackParamList['LegalAccept']>({ next: 'authenticated', fullName: null });
   const resolvingRef                = React.useRef(false);
   const appStateValueRef            = React.useRef(appState);
   appStateValueRef.current          = appState;
@@ -556,7 +620,7 @@ export default function RootLayout() {
           if (event !== 'INITIAL_SESSION') setAppState('loading');
 
           const resolveStart = Date.now();
-          const { state: newState, isCoach: newIsCoach, isElite: newIsElite, awaitingProgram: newAwaiting } =
+          const { state: newState, isCoach: newIsCoach, isElite: newIsElite, awaitingProgram: newAwaiting, next: newNext, fullName: newFullName } =
             await resolveWithRetry(session);
 
           // 300ms minimum prevents a white flash when the splash transitions
@@ -568,6 +632,7 @@ export default function RootLayout() {
           setIsCoach(newIsCoach);
           setIsElite(!!newIsElite);
           setAwaitingProgram(!!newAwaiting);
+          setLegalParams({ next: newNext ?? 'authenticated', fullName: newFullName ?? null });
 
           if (newState === 'authenticated' && session?.user?.id) {
             detectCandidates(session.user.id).catch(() => {});
@@ -612,6 +677,7 @@ export default function RootLayout() {
   }
 
   const initialRoute: keyof MainStackParamList =
+    appState === 'legal'         ? 'LegalAccept' :
     appState === 'authenticated' ? 'Tabs' :
     appState === 'generating'    ? 'Generating' :
     appState === 'setup'         ? 'PinnacleSetup' :
@@ -624,7 +690,7 @@ export default function RootLayout() {
         <ProgramStatusContext.Provider value={{ isElite, awaitingProgram }}>
           <UnreadContext.Provider value={{ hasUnread, setHasUnread }}>
             <NavigationContainer>
-              <MainNavigator initialRoute={initialRoute} />
+              <MainNavigator initialRoute={initialRoute} legalParams={legalParams} />
             </NavigationContainer>
           </UnreadContext.Provider>
         </ProgramStatusContext.Provider>
