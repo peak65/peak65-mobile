@@ -18,6 +18,7 @@ import { supabase } from '../../lib/supabase';
 import type { MainStackParamList, ProgramDay, ProgramSession, ExerciseItem } from '../_layout';
 import TrendLineChart from '../components/TrendLineChart';
 import { groupBySuperset } from '../../lib/programGrouping';
+import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CoachAthleteDetail'>;
 
@@ -644,17 +645,39 @@ function missSummary(log: SessionLogRow): string {
   return 'Athlete missed the target (no detail given).';
 }
 
-// One exercise line in the coach view's compact style. Preserves the existing
-// sets×reps / distance / zone formatting; `prefix` carries superset letters or
-// an EMOM time window.
+// One exercise in the coach view: name on the first line, the prescription on
+// an indented second line, and the coaching cue (if any) on a third. `prefix`
+// carries superset letters or an EMOM time window. Rest rows render as a break.
 function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string) {
+  if (isRestRow(ex)) {
+    return (
+      <View key={key} style={styles.restBreak}>
+        <View style={styles.restRule} />
+        <Text style={styles.restText}>{restLabel(ex)}</Text>
+        <View style={styles.restRule} />
+      </View>
+    );
+  }
+
+  const { pace, load, cue } = parseExerciseNotes(ex.notes || ex.note);
+  const duration = ex.duration?.trim();
+  const rest = displayRest(ex.rest);
+
+  const parts: string[] = [];
+  if (ex.sets) parts.push(`${ex.sets}×${duration || (ex.reps ?? '')}`);
+  if (ex.distance) parts.push(ex.distance);
+  if (rest) parts.push(`${rest} rest`);
+  if (load) parts.push(`Load: ${load}`);
+  if (pace) parts.push(`Pace: ${pace}`);
+  if (ex.zone) parts.push(`Z${ex.zone}`);
+  const detail = parts.join(' · ');
+
   return (
-    <Text key={key} style={styles.detailExercise}>
-      {prefix ? `${prefix} ` : ''}{ex.name}
-      {ex.sets ? `  ${ex.sets}×${ex.reps ?? ''}` : ''}
-      {ex.distance ? `  ${ex.distance}` : ''}
-      {ex.zone ? `  Z${ex.zone}` : ''}
-    </Text>
+    <View key={key} style={styles.detailExerciseItem}>
+      <Text style={styles.detailExercise}>{prefix ? `${prefix} ` : ''}{ex.name}</Text>
+      {detail ? <Text style={styles.detailExerciseMeta}>{detail}</Text> : null}
+      {cue ? <Text style={styles.detailExerciseCue}>{cue}</Text> : null}
+    </View>
   );
 }
 
@@ -972,10 +995,45 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 2,
   },
+  detailExerciseItem: {
+    marginBottom: 4,
+  },
   detailExercise: {
     color: OFF_WHITE,
     fontSize: 13,
     lineHeight: 18,
+  },
+  detailExerciseMeta: {
+    color: GREY,
+    fontSize: 12,
+    lineHeight: 17,
+    marginLeft: 12,
+  },
+  detailExerciseCue: {
+    color: GREY,
+    fontSize: 12,
+    lineHeight: 17,
+    marginLeft: 12,
+    fontStyle: 'italic',
+  },
+  // Rest row: a thin rule either side of "REST — 3 min". Matches the athlete view.
+  restBreak: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginVertical: 4,
+  },
+  restRule: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: GREY,
+    opacity: 0.4,
+  },
+  restText: {
+    color: GREY,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
   },
   detailGroup: {
     gap: 2,

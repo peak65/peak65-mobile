@@ -30,6 +30,7 @@ import { useCoachName } from '../../lib/useCoachName';
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Logo } from '../../components/Logo';
+import { isRestRow } from '../../lib/exerciseNotes';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
 import { Flags } from '../../lib/flags';
 
@@ -1127,11 +1128,14 @@ export default function HomeScreen() {
                   <View key={bi} style={styles.blockSection}>
                     <Text style={styles.blockLabel}>{block.block_name}</Text>
                     {(() => {
-                      const exercises = block.exercises ?? [];
+                      // Rest rows are omitted from this condensed preview — no
+                      // divider, no line — so neither walk below ever sees them.
+                      const exercises = (block.exercises ?? []).filter(ex => !isRestRow(ex));
                       // Volume string: only show the "N×" multiplier when sets > 1.
                       // Circuit members pass hideSets so they never show a multiplier
                       // (rounds are conveyed by the "N ROUNDS" header instead).
                       const volume = (ex: ExerciseItem, hideSets?: boolean): string => {
+                        if (isRestRow(ex)) return '';
                         const parts: string[] = [];
                         const setsNum = ex.sets ? Number(ex.sets) : 0;
                         if (!hideSets && setsNum > 1 && ex.reps) parts.push(`${ex.sets}×${ex.reps}`);

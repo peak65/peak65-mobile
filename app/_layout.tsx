@@ -51,7 +51,7 @@ import LogSessionScreen from './(main)/log-session';
 
 export type ExerciseItem = {
   name: string;
-  type?: 'strength' | 'cardio' | 'mobility' | 'bodyweight';
+  type?: 'strength' | 'cardio' | 'z2_cardio' | 'mobility' | 'bodyweight' | 'rest';
   is_bodyweight?: boolean;
   sets?: number;
   reps?: string;

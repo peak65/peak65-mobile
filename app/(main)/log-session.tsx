@@ -10,6 +10,7 @@ import { supabase } from '../../lib/supabase';
 import HRUploadPrompt from '../../components/HRUploadPrompt';
 import { Colors, Fonts } from '../../lib/theme';
 import { getSessionPaceTargets } from '../../lib/pace';
+import { isRestRow } from '../../lib/exerciseNotes';
 import type { MainStackParamList, ProgramSession } from '../_layout';
 
 type LogSessionRouteProp = RouteProp<MainStackParamList, 'LogSession'>;
@@ -26,12 +27,19 @@ const EMPTY_PACE_ANSWER: PaceAnswer = { hit: null, actual: '', note: '' };
 function detectSessionType(session: ProgramSession): 'time_trial' | 'amrap' | 'strength' | 'z2' | 'cardio' {
   const name = (session.name ?? '').toLowerCase();
   const desc = (session.description ?? '').toLowerCase();
-  const exercises = (session.blocks ?? []).flatMap(b => b.exercises ?? []);
+  // A rest row is never evidence of what kind of session this is.
+  const exercises = (session.blocks ?? []).flatMap(b => b.exercises ?? []).filter(e => !isRestRow(e));
   const types = exercises.map(e => (e as any).type as string ?? '');
+
+  // Zone 2 when at least one exercise is z2_cardio and every TYPED exercise is.
+  // Untyped exercises are ignored rather than counted against it; the "at least
+  // one" condition keeps a session with no types at all from reading as z2.
+  const typed = types.filter(t => t !== '');
+  const isZ2ByType = typed.includes('z2_cardio') && typed.every(t => t === 'z2_cardio');
 
   if (/time trial|time-trial/.test(name) || exercises.some(e => /time.trial/i.test(e.name))) return 'time_trial';
   if (/amrap/.test(name) || /amrap/.test(desc)) return 'amrap';
-  if (types.every(t => t === 'z2_cardio') || /zone 2|z2/.test(name)) return 'z2';
+  if (isZ2ByType || /zone 2|z2/.test(name)) return 'z2';
   if (types.some(t => t === 'strength')) return 'strength';
   return 'cardio';
 }

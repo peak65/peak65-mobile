@@ -19,6 +19,7 @@ import {
 import { deriveZonesFromTimeTrial, type TrainingZones } from '../../lib/zoneDerivation';
 import { Colors, Fonts } from '../../lib/theme';
 import { groupBySuperset } from '../../lib/programGrouping';
+import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
 import HRDetailModal, { type HRDetail } from '../../components/HRDetailModal';
 
 function toHRDetail(log: any): HRDetail {
@@ -88,22 +89,20 @@ function SessionDocument({ session }: { session: ProgramSession }) {
   const blocks = session.blocks ?? [];
 
   function renderExerciseLine(ex: ExerciseItem, index: number, prefix?: string, hideSets?: boolean): React.ReactNode {
-    const name = prefix ? `${prefix} ${ex.name}` : ex.name;
-    const duration = (ex as any).duration as string | undefined;
-    const loadNote = (ex as any).load_note as string | undefined;
-    const rawNote = (ex.notes || (ex as any).note || '').trim();
-    let loadPart = '';
-    let cuePart = '';
-    if (rawNote) {
-      const pipeIdx = rawNote.indexOf('|');
-      if (pipeIdx >= 0) {
-        loadPart = rawNote.slice(0, pipeIdx).trim();      // e.g. "Load: RPE 8"
-        cuePart = rawNote.slice(pipeIdx + 1).trim();      // e.g. "Elbows stay tight... don't let them flare"
-      } else {
-        // no pipe — treat the whole note as the cue (no load prefix)
-        cuePart = rawNote;
-      }
+    // A rest row is a break between movements: no name, detail or cue.
+    if (isRestRow(ex)) {
+      return (
+        <View key={`rest-${index}-${prefix ?? ''}`} style={pd.restBreak}>
+          <View style={pd.restRule} />
+          <Text style={pd.restText}>{restLabel(ex)}</Text>
+          <View style={pd.restRule} />
+        </View>
+      );
     }
+
+    const name = prefix ? `${prefix} ${ex.name}` : ex.name;
+    const duration = ex.duration;
+    const { pace, load, cue } = parseExerciseNotes(ex.notes || ex.note);
 
     const parts: string[] = [];
 
@@ -117,11 +116,11 @@ function SessionDocument({ session }: { session: ProgramSession }) {
       parts.push(value);
     }
 
-    if (ex.rest && !['none','0 min','0:00','0','00:00'].includes(ex.rest.trim())) {
-      parts.push(`${ex.rest} rest`);
-    }
+    const rest = displayRest(ex.rest);
+    if (rest) parts.push(`${rest} rest`);
 
-    if (loadPart) parts.push(loadPart);
+    if (load) parts.push(`Load: ${load}`);
+    if (pace) parts.push(`Pace: ${pace}`);
 
     const detail = parts.join(' · ');
 
@@ -129,7 +128,7 @@ function SessionDocument({ session }: { session: ProgramSession }) {
       <View key={`ex-${index}-${prefix ?? ''}`} style={pd.exerciseLine}>
         <Text style={pd.exerciseName}>{name}</Text>
         {detail ? <Text style={pd.exerciseDetail}>{detail}</Text> : null}
-        {cuePart ? <Text style={pd.exerciseCue}>{cuePart}</Text> : null}
+        {cue ? <Text style={pd.exerciseCue}>{cue}</Text> : null}
       </View>
     );
   }
@@ -240,8 +239,9 @@ function SessionDocument({ session }: { session: ProgramSession }) {
               </View>
             );
           }
-          // single
-          if (isMain) {
+          // single — a rest row never takes a number, so 1), 2), 3) stay
+          // continuous across it.
+          if (isMain && !isRestRow(group.ex)) {
             const prefix = `${counter})`;
             counter++; // one number consumed by this standalone movement
             return renderExerciseLine(group.ex, gi, prefix);
@@ -346,6 +346,25 @@ const pd = StyleSheet.create({
     marginTop: 3,
     marginLeft: 14,
     fontStyle: 'italic',
+  },
+  // Rest row: a thin rule either side of "REST — 3 min". Matches the coach view.
+  restBreak: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  restRule: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#8a877f',
+    opacity: 0.4,
+  },
+  restText: {
+    color: '#8a877f',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
   },
   circuitSection: {
     marginBottom: 8,
