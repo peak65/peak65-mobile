@@ -17,6 +17,7 @@ import { getConnectedWearables, resolveAllSources } from '../../lib/wearablePrio
 import { getWhoopAuthUrl } from '../../lib/whoopApi';
 import { fetchOuraSignedState, getOuraAuthUrl } from '../../lib/ouraApi';
 import { clearUserCache } from '../../lib/userCache';
+import { LEGAL_URLS } from '../../lib/legal';
 import SliderInput from '../../components/SliderInput';
 import { Colors, Fonts } from '../../lib/theme';
 import { Feather } from '@expo/vector-icons';
@@ -307,17 +308,27 @@ function HealthReadingRow({
 function SettingRow({
   label, value, onPress,
 }: {
-  label: string; value: string; onPress?: () => void;
+  // Omit for link-style rows that have no value to show (e.g. Legal).
+  label: string; value?: string; onPress?: () => void;
 }) {
   return (
     <TouchableOpacity style={styles.settingRow} onPress={onPress} disabled={!onPress}>
       <Text style={styles.settingLabel}>{label}</Text>
       <View style={styles.settingRight}>
-        <Text style={styles.settingValue} numberOfLines={1}>{value || '—'}</Text>
+        {value !== undefined && (
+          <Text style={styles.settingValue} numberOfLines={1}>{value || '—'}</Text>
+        )}
         {!!onPress && <Feather name="chevron-right" color={Colors.textSecondary} size={16} />}
       </View>
     </TouchableOpacity>
   );
+}
+
+function openLegalDoc(url: string) {
+  Linking.openURL(url).catch(e => {
+    console.log('[legal] openURL error:', e);
+    Alert.alert('Error', 'Could not open the document.');
+  });
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -1611,6 +1622,17 @@ export default function ProfileScreen() {
             value={BF_OPTIONS.find(o => o.value === profile?.body_fat_range)?.label ?? profile?.body_fat_range ?? ''}
             onPress={() => setPicker('bf')}
           />
+        </View>
+
+        {/* Legal section — keeps the policies reachable after the acceptance
+            gate (App Store Guideline 5.1.1(i)). */}
+        <Text style={styles.sectionHeading}>Legal</Text>
+        <View style={styles.section}>
+          <SettingRow label="Terms of Service"             onPress={() => openLegalDoc(LEGAL_URLS.terms)} />
+          <SettingRow label="Privacy Policy"               onPress={() => openLegalDoc(LEGAL_URLS.privacy)} />
+          <SettingRow label="Consumer Health Data Privacy" onPress={() => openLegalDoc(LEGAL_URLS.consumerHealth)} />
+          <SettingRow label="Waiver"                       onPress={() => openLegalDoc(LEGAL_URLS.waiver)} />
+          <SettingRow label="Medical Disclaimer"           onPress={() => openLegalDoc(LEGAL_URLS.medicalDisclaimer)} />
         </View>
 
         {/* Account section */}
