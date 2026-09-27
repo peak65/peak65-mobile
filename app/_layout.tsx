@@ -28,6 +28,7 @@ Notifications.setNotificationHandler({
 import { supabase } from '../lib/supabase';
 import { detectCandidates } from '../lib/sessionMatcher';
 import { clearUserCache } from '../lib/userCache';
+import { syncBadge } from '../lib/badge';
 import { Colors } from '../lib/theme';
 import { LEGAL_VERSION } from '../lib/legal';
 import LoginScreen from './auth/login';
@@ -638,6 +639,7 @@ export default function RootLayout() {
             detectCandidates(session.user.id).catch(() => {});
             registerPushToken(session.user.id).catch(() => {});
             checkUnread(session.user.id).then(u => setHasUnread(u)).catch(() => {});
+            void syncBadge(session.user.id);
           }
         } catch (err) {
           console.log('[layout] auth handler error:', err);

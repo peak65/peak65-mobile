@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -18,6 +19,7 @@ import { supabase } from '../../lib/supabase';
 import type { MainStackParamList, ProgramDay, ProgramSession, ExerciseItem } from '../_layout';
 import TrendLineChart from '../components/TrendLineChart';
 import { groupBySuperset } from '../../lib/programGrouping';
+import { syncBadge } from '../../lib/badge';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CoachAthleteDetail'>;
@@ -31,6 +33,8 @@ const GREEN     = '#44ff88';
 const RED       = '#ff4444';
 const DIM       = '#1a1a1a';
 const ORANGE    = '#ff9944';
+
+const API_BASE = 'https://peak65.vercel.app';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -267,6 +271,9 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
       .eq('athlete_id', athleteId)
       .eq('sender_id', athleteId)
       .is('read_at', null);
+
+    // Recount across every thread, so other athletes' unread messages keep the badge.
+    void syncBadge(user.id);
   }, [athleteId]);
 
   useEffect(() => {
@@ -311,13 +318,36 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
     setSending(true);
     const body = messageText.trim();
     setMessageText('');
-    const { data: newMsg } = await supabase
-      .from('messages')
-      .insert({ coach_id: coachId, athlete_id: athleteId, sender_id: coachId, body })
-      .select('id, sender_id, body, created_at')
-      .maybeSingle();
-    if (newMsg) setMessages(prev => [...prev, newMsg]);
-    setSending(false);
+
+    // Through the web API, not a direct insert: the route derives the coach from
+    // the token, writes the message, and pushes it to the athlete.
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch(`${API_BASE}/api/coach/send-message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ athleteId, body }),
+      });
+      if (!res.ok) throw new Error(`send-message returned ${res.status}`);
+
+      // Re-read the thread so the sent message shows with its real id and time.
+      const { data: thread } = await supabase
+        .from('messages')
+        .select('id, sender_id, body, created_at')
+        .eq('coach_id', coachId)
+        .eq('athlete_id', athleteId)
+        .order('created_at', { ascending: true });
+      if (thread && mounted.current) setMessages(thread);
+    } catch (err) {
+      console.error('[coach-athlete] send failed:', err);
+      if (mounted.current) setMessageText(body);
+      Alert.alert('Message not sent', 'We could not send your message. Please try again.');
+    }
+    if (mounted.current) setSending(false);
     setTimeout(() => messagesRef.current?.scrollToEnd({ animated: true }), 100);
   }
 

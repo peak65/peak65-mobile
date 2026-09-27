@@ -11,6 +11,7 @@ import Tooltip from '../components/Tooltip';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../lib/theme';
 import { UnreadContext } from '../_layout';
+import { syncBadge } from '../../lib/badge';
 
 const API_BASE = 'https://peak65.vercel.app';
 
@@ -147,6 +148,8 @@ export default function MessagesScreen() {
         .neq('sender_id', uid);
       setHasUnread(false);
     } catch {}
+    // Recount rather than clear — the icon badge reflects whatever is still unread.
+    void syncBadge(uid);
   }
 
   useFocusEffect(
