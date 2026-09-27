@@ -13,13 +13,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { AlertTriangle, Check, ChevronLeft, ChevronRight } from 'lucide-react-native';
 
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList, ProgramDay, ProgramSession, ExerciseItem } from '../_layout';
 import TrendLineChart from '../components/TrendLineChart';
 import { groupBySuperset } from '../../lib/programGrouping';
 import { syncBadge } from '../../lib/badge';
+import { Colors, Fonts } from '../../lib/theme';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CoachAthleteDetail'>;
@@ -79,6 +80,17 @@ type ProgramWeek = {
 type ScoreRow = {
   score: number;
   date: string;
+};
+
+// One coach's private note on this athlete, from coach_private_notes. Row-level
+// security decides which rows come back: a coach gets only their own, an admin
+// gets every coach's.
+type CoachNote = {
+  coach_id: string;
+  coach_name: string;
+  body: string;
+  updated_at: string;
+  is_mine: boolean;
 };
 
 type MessageRow = {
@@ -158,8 +170,15 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
   const [scores, setScores]             = useState<ScoreRow[]>([]);
   const [healthReadings, setHealthReadings] = useState<any[]>([]);
   const [messages, setMessages]         = useState<MessageRow[]>([]);
-  const [notes, setNotes]               = useState('');
-  const [coachAthleteId, setCoachAthleteId] = useState<string | null>(null);
+  // Coach notes. notesStatus separates "no notes yet" (ready, empty list) from
+  // "load failed" (error) — a failed load must never look like an empty note.
+  const [coachNotes, setCoachNotes]     = useState<CoachNote[]>([]);
+  const [notesStatus, setNotesStatus]   = useState<'loading' | 'ready' | 'error'>('loading');
+  const [myDraft, setMyDraft]           = useState('');
+  const [myLoadedBody, setMyLoadedBody] = useState('');
+  // updated_at of my note as loaded; null when I had no note. Drives the stale-write guard.
+  const [myUpdatedAt, setMyUpdatedAt]   = useState<string | null>(null);
+  const [noteSave, setNoteSave]         = useState<'idle' | 'saving' | 'saved' | 'error' | 'stale'>('idle');
   const [coachId, setCoachId]           = useState<string | null>(null);
   const [messageText, setMessageText]   = useState('');
   const [sending, setSending]           = useState(false);
@@ -171,14 +190,66 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
   const program = weeks[selectedWeekIdx] ?? null;
   const selectedWeekNumber = program?.week_number ?? null;
 
-  const notesTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesRef  = useRef<ScrollView>(null);
   const mounted      = useRef(true);
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+    };
   }, []);
+
+  // Every coach note on this athlete that row-level security lets me see, newest
+  // first, each labelled with its coach's name. `myId` comes from the session.
+  const loadNotes = useCallback(async (myId: string) => {
+    setNotesStatus('loading');
+    const { data: rows, error } = await supabase
+      .from('coach_private_notes')
+      .select('coach_id, body, updated_at')
+      .eq('athlete_id', athleteId)
+      .order('updated_at', { ascending: false });
+    if (!mounted.current) return;
+    if (error || !rows) {
+      console.error('[coach-athlete] coach notes load failed:', error?.message);
+      setNotesStatus('error');
+      return;
+    }
+
+    // Names are labels only — a failed lookup falls back to "Coach" rather than
+    // failing the notes.
+    const coachIds = [...new Set(rows.map(r => r.coach_id as string))];
+    const names = new Map<string, string>();
+    if (coachIds.length > 0) {
+      const { data: people, error: namesError } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name')
+        .in('id', coachIds);
+      if (namesError) console.error('[coach-athlete] coach names load failed:', namesError.message);
+      for (const p of people ?? []) {
+        const full = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim();
+        if (full) names.set(p.id, full);
+      }
+    }
+    if (!mounted.current) return;
+
+    const list: CoachNote[] = rows.map(r => ({
+      coach_id:   r.coach_id,
+      coach_name: names.get(r.coach_id) ?? 'Coach',
+      body:       r.body ?? '',
+      updated_at: r.updated_at,
+      is_mine:    r.coach_id === myId,
+    }));
+    const mine = list.find(n => n.is_mine);
+    setCoachNotes(list);
+    setMyDraft(mine?.body ?? '');
+    setMyLoadedBody(mine?.body ?? '');
+    setMyUpdatedAt(mine?.updated_at ?? null);
+    setNoteSave('idle');
+    setNotesStatus('ready');
+  }, [athleteId]);
 
   const load = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -187,18 +258,12 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
     const user = session.user;
     setCoachId(user.id);
 
-    // Fetch profile, coach_athletes row, and latest program in parallel
-    const [profileRes, caRes, programRes] = await Promise.all([
+    // Fetch profile and latest program in parallel
+    const [profileRes, programRes] = await Promise.all([
       supabase
         .from('profiles')
         .select('id, first_name, last_name, avatar_url, goal, race_date, tier')
         .eq('id', athleteId)
-        .maybeSingle(),
-      supabase
-        .from('coach_athletes')
-        .select('id, notes')
-        .eq('athlete_id', athleteId)
-        .eq('coach_id', user.id)
         .maybeSingle(),
       supabase
         .from('programs')
@@ -211,10 +276,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
     if (!mounted.current) return;
     setProfile(profileRes.data ?? null);
 
-    if (caRes.data) {
-      setCoachAthleteId(caRes.data.id);
-      setNotes(caRes.data.notes ?? '');
-    }
+    void loadNotes(user.id);
 
     // All non-draft weeks, ascending by week_number. Default the selected week to
     // the latest (last in the ascending list) so the initial view is unchanged.
@@ -274,7 +336,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
 
     // Recount across every thread, so other athletes' unread messages keep the badge.
     void syncBadge(user.id);
-  }, [athleteId]);
+  }, [athleteId, loadNotes]);
 
   useEffect(() => {
     load().finally(() => setLoading(false));
@@ -299,18 +361,89 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
     return () => { active = false; };
   }, [athleteId, selectedWeekNumber]);
 
-  // Auto-save notes after 2 s of inactivity
-  function handleNotesChange(text: string) {
-    setNotes(text);
-    if (notesTimer.current) clearTimeout(notesTimer.current);
-    if (!coachAthleteId) return;
-    notesTimer.current = setTimeout(() => {
-      supabase
-        .from('coach_athletes')
-        .update({ notes: text })
-        .eq('id', coachAthleteId)
-        .then(() => {});
-    }, 2000);
+  // Explicit save of my own note. coach_id is always the signed-in user's id,
+  // read from the session here — never from state, params or a loaded row.
+  async function handleSaveNote() {
+    if (notesStatus !== 'ready' || noteSave === 'saving' || myDraft === myLoadedBody) return;
+    setNoteSave('saving');
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const myId = session?.user?.id;
+    if (!myId) {
+      if (mounted.current) setNoteSave('error');
+      return;
+    }
+
+    // Stale-write guard: if my note changed since I loaded it (the web portal,
+    // another device), don't overwrite it — offer a reload instead.
+    const { data: current, error: checkError } = await supabase
+      .from('coach_private_notes')
+      .select('updated_at')
+      .eq('coach_id', myId)
+      .eq('athlete_id', athleteId)
+      .maybeSingle();
+    if (!mounted.current) return;
+    if (checkError) {
+      console.error('[coach-athlete] coach note check failed:', checkError.message);
+      setNoteSave('error');
+      return;
+    }
+    if ((current?.updated_at ?? null) !== myUpdatedAt) {
+      setNoteSave('stale');
+      return;
+    }
+
+    const { data: saved, error: saveError } = await supabase
+      .from('coach_private_notes')
+      .upsert(
+        // updated_at is stamped by a database trigger; the saved value is read back below.
+        { coach_id: myId, athlete_id: athleteId, body: myDraft },
+        { onConflict: 'coach_id,athlete_id' },
+      )
+      .select('body, updated_at')
+      .single();
+    if (!mounted.current) return;
+    if (saveError || !saved) {
+      console.error('[coach-athlete] coach note save failed:', saveError?.message);
+      setNoteSave('error');
+      return;
+    }
+
+    setMyLoadedBody(saved.body ?? '');
+    setMyUpdatedAt(saved.updated_at);
+    setCoachNotes(prev => {
+      const others = prev.filter(n => !n.is_mine);
+      const mine = prev.find(n => n.is_mine);
+      return [{
+        coach_id:   myId,
+        coach_name: mine?.coach_name ?? 'Coach',
+        body:       saved.body ?? '',
+        updated_at: saved.updated_at,
+        is_mine:    true,
+      }, ...others];
+    });
+    setNoteSave('saved');
+    savedTimer.current = setTimeout(() => {
+      if (mounted.current) setNoteSave(s => (s === 'saved' ? 'idle' : s));
+    }, 2500);
+  }
+
+  // Reloading replaces my box with the saved note, so unsaved text is confirmed
+  // before it is thrown away.
+  function handleReloadNotes() {
+    const reload = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) await loadNotes(session.user.id);
+    };
+    if (myDraft === myLoadedBody) {
+      void reload();
+      return;
+    }
+    Alert.alert('Discard your unsaved note and load the latest?', undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => { void reload(); } },
+    ]);
   }
 
   async function sendMessage() {
@@ -593,20 +726,92 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
             </View>
           </View>
 
-          {/* ── 5. NOTES ──────────────────────────────────────────────────── */}
+          {/* ── 5. COACH NOTES ────────────────────────────────────────────── */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Notes</Text>
-            <View style={styles.notesCard}>
-              <TextInput
-                style={styles.notesInput}
-                placeholder="Private notes about this athlete…"
-                placeholderTextColor="#444"
-                value={notes}
-                onChangeText={handleNotesChange}
-                multiline
-                textAlignVertical="top"
-              />
-            </View>
+            <Text style={[styles.sectionTitle, styles.notesHeading]}>Coach Notes</Text>
+            <Text style={styles.notesHelper}>Visible to Peak 65 coaching staff. Athletes never see this.</Text>
+
+            {notesStatus === 'error' && (
+              <View style={styles.notesWarning}>
+                <AlertTriangle color={Colors.red} size={16} strokeWidth={2} />
+                <Text style={styles.notesWarningText}>
+                  Couldn't load notes. Editing is off so nothing is saved over them.
+                </Text>
+                <TouchableOpacity onPress={handleReloadNotes} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={styles.notesReloadText}>Reload</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {notesStatus !== 'error' && (() => {
+              const others = coachNotes.filter(n => !n.is_mine);
+              const canSave = notesStatus === 'ready' && noteSave !== 'saving' && myDraft !== myLoadedBody;
+              return (
+                <>
+                  <Text style={styles.notesLabel}>Your note</Text>
+                  <View style={styles.notesCard}>
+                    <TextInput
+                      style={styles.notesInput}
+                      placeholder="Your notes about this athlete"
+                      placeholderTextColor={GREY}
+                      value={myDraft}
+                      onChangeText={text => {
+                        setMyDraft(text);
+                        if (noteSave === 'error' || noteSave === 'saved') setNoteSave('idle');
+                      }}
+                      editable={notesStatus === 'ready' && noteSave !== 'saving'}
+                      multiline
+                      textAlignVertical="top"
+                    />
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.noteSaveBtn, !canSave && styles.noteSaveBtnDisabled]}
+                    onPress={handleSaveNote}
+                    disabled={!canSave}
+                  >
+                    {noteSave === 'saving'
+                      ? <ActivityIndicator size="small" color={BLACK} />
+                      : <Text style={styles.noteSaveBtnText}>Save</Text>}
+                  </TouchableOpacity>
+
+                  {noteSave === 'saved' && (
+                    <View style={styles.noteStatusRow}>
+                      <Check color={Colors.green} size={14} strokeWidth={2.5} />
+                      <Text style={[styles.noteStatusText, { color: Colors.green }]}>Saved</Text>
+                    </View>
+                  )}
+                  {noteSave === 'error' && (
+                    <View style={styles.noteStatusRow}>
+                      <AlertTriangle color={Colors.red} size={14} strokeWidth={2} />
+                      <Text style={[styles.noteStatusText, { color: Colors.red }]}>
+                        Couldn't save your note. Please try again.
+                      </Text>
+                    </View>
+                  )}
+                  {noteSave === 'stale' && (
+                    <View style={styles.notesWarning}>
+                      <AlertTriangle color={Colors.red} size={16} strokeWidth={2} />
+                      <Text style={styles.notesWarningText}>
+                        This note was changed somewhere else since you opened it. Reload to see the latest before saving.
+                      </Text>
+                      <TouchableOpacity onPress={handleReloadNotes} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <Text style={styles.notesReloadText}>Reload</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {others.map(n => (
+                    <View key={n.coach_id} style={styles.otherNote}>
+                      <Text style={styles.notesLabel}>{n.coach_name} · read only</Text>
+                      <View style={styles.otherNoteBody}>
+                        <Text style={styles.otherNoteText}>{n.body || '—'}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </>
+              );
+            })()}
           </View>
 
           {/* ── 6. PROGRAM OVERVIEW ───────────────────────────────────────── */}
@@ -1216,7 +1421,26 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // ── Notes
+  // ── Coach notes
+  notesHeading: {
+    fontFamily: Fonts.metric,
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  notesHelper: {
+    color: GREY,
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  notesLabel: {
+    color: GREY,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
   notesCard: {
     backgroundColor: CARD_BG,
     borderRadius: 12,
@@ -1227,6 +1451,66 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     minHeight: 100,
+  },
+  noteSaveBtn: {
+    backgroundColor: YELLOW,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  noteSaveBtnDisabled: {
+    opacity: 0.4,
+  },
+  noteSaveBtnText: {
+    color: BLACK,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  noteStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  noteStatusText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  notesWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: CARD_BG,
+    borderRadius: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.red,
+    padding: 12,
+    marginTop: 10,
+  },
+  notesWarningText: {
+    flex: 1,
+    color: OFF_WHITE,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  notesReloadText: {
+    color: YELLOW,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  otherNote: {
+    marginTop: 18,
+  },
+  otherNoteBody: {
+    backgroundColor: DIM,
+    borderRadius: 12,
+    padding: 14,
+  },
+  otherNoteText: {
+    color: OFF_WHITE,
+    fontSize: 14,
+    lineHeight: 20,
   },
 
   // ── Program overview
