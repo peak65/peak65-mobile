@@ -1,7 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, Platform, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { NavigationContainer } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  createNavigationContainerRef,
+  type NavigatorScreenParams,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { Session } from '@supabase/supabase-js';
@@ -145,7 +149,7 @@ export type MainStackParamList = {
   // the screen routes there once acceptance is recorded.
   LegalAccept: { next: AppState; fullName: string | null };
   Generating: undefined;
-  Tabs: undefined;
+  Tabs: NavigatorScreenParams<TabParamList> | undefined;
   LogSession: { sessionJson: string; programId: string; weekNumber: number; dayName: string };
   Waiting: undefined;
   CoachAthleteDetail: { athleteId: string };
@@ -305,6 +309,32 @@ async function registerPushToken(userId: string) {
     console.log('[registerPushToken] error:', err);
   }
 }
+
+// ─── Notification taps ───────────────────────────────────────────────────────
+
+// Attached to the main navigator only, so it is "ready" only while a signed-in
+// user's stack is mounted — never on the auth screens or the loading screen.
+const mainNavigationRef = createNavigationContainerRef<MainStackParamList>();
+
+type TapKind = 'message' | 'program';
+
+// The server puts `kind` next to `aps` in the APNs payload. For a remote push on
+// iOS, expo-notifications 0.32 exposes that full payload as trigger.payload;
+// content.data is only userInfo["body"], which this server doesn't send. Fall
+// back to content.data in case a push ever nests it there.
+function readTapKind(response: Notifications.NotificationResponse): TapKind | null {
+  const { request } = response.notification;
+  const payload = request.trigger && 'payload' in request.trigger ? request.trigger.payload : undefined;
+  const kind = payload?.kind ?? request.content.data?.kind;
+  return kind === 'message' || kind === 'program' ? kind : null;
+}
+
+// Root stack screens a tap may navigate away from. Anything before the app
+// proper — LegalAccept, Onboarding, PinnacleSetup, Generating, Waiting — is
+// excluded, so a tap can never skip the gate or strand a half-onboarded athlete.
+const TAP_SAFE_ROUTES = new Set<keyof MainStackParamList>([
+  'Tabs', 'LogSession', 'CoachAthleteDetail', 'UpdateProgram',
+]);
 
 // ─── App state resolution ─────────────────────────────────────────────────────
 
@@ -583,6 +613,65 @@ export default function RootLayout() {
   const resolvingRef                = React.useRef(false);
   const appStateValueRef            = React.useRef(appState);
   appStateValueRef.current          = appState;
+  const isCoachRef                  = React.useRef(isCoach);
+  isCoachRef.current                = isCoach;
+
+  // A tapped notification waiting for the main navigator to be ready.
+  const pendingTapRef               = React.useRef<TapKind | null>(null);
+  const handledTapIdsRef            = React.useRef(new Set<string>());
+
+  // Acts on a pending tap once the main navigator is mounted. Checks the screen
+  // actually showing rather than appState: after the legal gate or onboarding
+  // hands off with navigation.replace, appState keeps its old value, but the
+  // route tells the truth. A tap that lands on a pre-app screen is dropped.
+  const flushPendingTap = React.useCallback(() => {
+    const kind = pendingTapRef.current;
+    if (!kind || !mainNavigationRef.isReady()) return;
+    pendingTapRef.current = null;
+
+    const root = mainNavigationRef.getRootState();
+    const current = root?.routes[root.index ?? 0]?.name as keyof MainStackParamList | undefined;
+    if (!current || !TAP_SAFE_ROUTES.has(current)) return;
+
+    // Coaches read athlete messages from the Coach tab; their Messages tab is
+    // the athlete-side thread, not their inbox.
+    const screen: keyof TabParamList =
+      kind === 'program' ? 'Program' :
+      isCoachRef.current ? 'Coach' :
+                           'Messages';
+    mainNavigationRef.navigate('Tabs', { screen });
+  }, []);
+
+  // Notification taps: the listener covers a running app; the last response
+  // covers a cold launch from a tap. Both feed the same pending slot, deduped by
+  // notification id, and flushPendingTap waits for the navigator to be ready.
+  useEffect(() => {
+    let active = true;
+
+    function handleResponse(response: Notifications.NotificationResponse) {
+      if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
+      const id = response.notification.request.identifier;
+      if (handledTapIdsRef.current.has(id)) return;
+      handledTapIdsRef.current.add(id);
+      // Consumed — a later JS reload must not replay this tap.
+      Notifications.clearLastNotificationResponseAsync().catch(() => {});
+
+      const kind = readTapKind(response);
+      if (!kind) return;
+      pendingTapRef.current = kind;
+      flushPendingTap();
+    }
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(handleResponse);
+    Notifications.getLastNotificationResponseAsync()
+      .then(response => { if (active && response) handleResponse(response); })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, [flushPendingTap]);
 
   const [fontsLoaded] = useFonts({
     BarlowCondensed_700Bold,
@@ -691,7 +780,7 @@ export default function RootLayout() {
       <CoachContext.Provider value={isCoach}>
         <ProgramStatusContext.Provider value={{ isElite, awaitingProgram }}>
           <UnreadContext.Provider value={{ hasUnread, setHasUnread }}>
-            <NavigationContainer>
+            <NavigationContainer ref={mainNavigationRef} onReady={flushPendingTap}>
               <MainNavigator initialRoute={initialRoute} legalParams={legalParams} />
             </NavigationContainer>
           </UnreadContext.Provider>
