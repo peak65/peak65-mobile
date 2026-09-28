@@ -6,7 +6,7 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   View, Text, ScrollView, TouchableOpacity, RefreshControl,
-  StyleSheet, ActivityIndicator, Modal, AppState, Animated,
+  StyleSheet, ActivityIndicator, Modal, AppState, Animated, InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -31,6 +31,8 @@ import { detectCandidates, getPendingCandidates, type CandidateRow } from '../..
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Logo } from '../../components/Logo';
 import { excludeArchived, isArchivedProgram, visiblePrograms } from '../../lib/programFilters';
+import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
+import { perfLog, sinceAppStart } from '../../lib/perf';
 import { isRestRow } from '../../lib/exerciseNotes';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
 import { Flags } from '../../lib/flags';
@@ -61,6 +63,22 @@ const WORKOUT_TYPE_LABELS: Record<string, string> = {
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+// A program week without its program_data — what the week-list query returns.
+type ProgramWeekRow = {
+  id: string;
+  week_number: number;
+  week_start_date: string;
+  status: string | null;
+  is_draft: boolean | null;
+  created_at: string;
+};
+
+// Foreground returns within this window reuse the data already on screen.
+const FOREGROUND_REFRESH_MIN_MS = 2 * 60 * 1000;
+
+// First content on screen, once per app launch.
+let firstRenderLogged = false;
 
 type HomeProfile = {
   wearable_connected: boolean | null;
@@ -219,13 +237,39 @@ function scoreStatusText(score: number): string {
 
 // ─── Tab cache prefetch ───────────────────────────────────────────────────────
 
-async function prefetchTabCaches(uid: string, programs: Program[], profileData: any) {
+// Warms the Program and History tab caches. Deferred until after the first
+// screen's interactions settle, and throttled: it's five requests, two of them
+// unbounded, and used to run on every Home focus and every foreground.
+const PREFETCH_MIN_INTERVAL_MS = 10 * 60 * 1000;
+let lastPrefetchAt = 0;
+
+function schedulePrefetch(uid: string, profileData: any) {
+  if (Date.now() - lastPrefetchAt < PREFETCH_MIN_INTERVAL_MS) return;
+  lastPrefetchAt = Date.now();
+  InteractionManager.runAfterInteractions(() => {
+    prefetchTabCaches(uid, profileData).catch(() => {});
+  });
+}
+
+async function prefetchTabCaches(uid: string, profileData: any) {
   try {
-    const programLogsRes = await supabase
-      .from('session_logs')
-      .select('week_number, day_name, log_field, session_name, session_time, id, peak_hr, avg_hr, hr_recovery_1min, hr_recovery_2min, zone_minutes, hr_screenshot_url, hr_curve_screenshot_url')
-      .eq('user_id', uid)
-      .not('day_name', 'is', null);
+    // Home now fetches only a light week list, so the Program tab's full rows
+    // (program_data for every week) are read here, with the same filters as the
+    // Program tab's own query.
+    const [programsRes, programLogsRes] = await Promise.all([
+      excludeArchived(
+        supabase.from('programs').select('*').eq('user_id', uid)
+          .not('is_draft', 'is', true),
+      ).order('week_number', { ascending: true }),
+      supabase
+        .from('session_logs')
+        .select('week_number, day_name, log_field, session_name, session_time, id, peak_hr, avg_hr, hr_recovery_1min, hr_recovery_2min, zone_minutes, hr_screenshot_url, hr_curve_screenshot_url')
+        .eq('user_id', uid)
+        .not('day_name', 'is', null),
+    ]);
+    // Never cache a failed read as an empty program.
+    if (programsRes.error || programLogsRes.error) throw new Error('program prefetch failed');
+    const programs = visiblePrograms((programsRes.data ?? []) as Program[], 'prefetch');
     const profileSubset = profileData ? {
       goal:                  profileData.goal ?? null,
       age:                   profileData.age ?? null,
@@ -255,6 +299,7 @@ async function prefetchTabCaches(uid: string, programs: Program[], profileData: 
       supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units')
         .eq('id', uid).maybeSingle(),
     ]);
+    if (logsRes.error || extRes.error || checkinsRes.error) throw new Error('history prefetch failed');
     await AsyncStorage.setItem('history_cache', JSON.stringify({
       timestamp:        Date.now(),
       logs:             logsRes.data ?? [],
@@ -398,6 +443,10 @@ export default function HomeScreen() {
   const week2TriggeredRef = useRef(false);
   const mounted           = useRef(true);
   const loadIdRef         = useRef(0);
+  // True once server data has been shown; later loads skip the cache.
+  const freshShownRef     = useRef(false);
+  // When server data last landed, for the foreground-return throttle.
+  const lastFreshAtRef    = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
@@ -495,17 +544,26 @@ export default function HomeScreen() {
   const loadData = useCallback(async () => {
     const myId = ++loadIdRef.current;
 
-    // Apply cached home data immediately so screen renders without a spinner
+    // Stale-while-revalidate: on the first load, show cached home data straight
+    // away (whatever its age, up to the CACHE_MAX_AGE_MS ceiling) and refresh
+    // below. Skipped once fresh data is on screen, so a focus reload never
+    // regresses it to an older cache. `cacheStale` marks the cached content
+    // until the refresh lands — it shows "Refreshing..." and holds LOG SESSION.
     let cacheApplied = false;
     try {
-      const raw = await AsyncStorage.getItem('home_cache');
+      const raw = freshShownRef.current ? null : await AsyncStorage.getItem('home_cache');
       if (raw && mounted.current && myId === loadIdRef.current) {
         const c = JSON.parse(raw);
-        const ageMs = Date.now() - (c.timestamp ?? 0);
-        // A cache written before archived rows were filtered can hold an archived
-        // week; skip it and let the fresh fetch below render instead.
-        if (ageMs < 4 * 60 * 60 * 1000 && !isArchivedProgram(c.program)) {
-          const prog = c.program as Program | null;
+        // Not shown: past the ceiling; an archived week (a cache written before
+        // archived rows were filtered); or a week that no longer covers today,
+        // which would put another week's session on today's card.
+        const cachedProg = c.program as Program | null;
+        if (
+          cacheUsable(c.timestamp) &&
+          !isArchivedProgram(c.program) &&
+          (cachedProg === null || weekCoversToday(cachedProg))
+        ) {
+          const prog = cachedProg;
           setProgram(prog);
           if (prog?.program_data?.days) {
             const todayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
@@ -520,12 +578,12 @@ export default function HomeScreen() {
           // cache — the fresh session_logs query below populates it. Cache skips this state.
           setWeek2Exists(c.week2Exists ?? false);
           setLoading(false);
+          setCacheStale(true);
           cacheApplied = true;
         }
-        setCacheStale(ageMs > 4 * 60 * 60 * 1000);
       }
     } catch {}
-    if (!cacheApplied) setLoading(true);
+    if (!cacheApplied && !freshShownRef.current) setLoading(true);
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current || myId !== loadIdRef.current) return;
@@ -535,13 +593,35 @@ export default function HomeScreen() {
 
     const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
-    const [progsRes, logsRes, profileRes, extStreakRes, cacheRes] = await Promise.all([
+    // Local calendar dates. The current-week query narrows to weeks starting in
+    // the last seven days (today - 6 … today), the only ones whose dates can
+    // cover today; the exact choice is still made below by the same rule as before.
+    const localDate = (d: Date) => d.toLocaleDateString('en-CA');
+    const now = new Date();
+    const todayDate  = localDate(now);
+    const weekFloor  = localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6));
+    // The streak walks back at most 365 days from today (calculateStreakValue,
+    // i = 0…365), so logs before local midnight 365 days ago can never affect
+    // it. The session count comes from an exact count query instead of rows.
+    const streakFloor = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 365).toISOString();
+
+    const fetchStart = Date.now();
+    const [weeksRes, currentRes, logsRes, countRes, profileRes, extStreakRes, cacheRes] = await Promise.all([
+      // Every live week, without program_data — enough for week numbers and dates.
       excludeArchived(
-        supabase.from('programs').select('*').eq('user_id', uid)
-          .not('is_draft', 'is', true),
+        supabase.from('programs').select('id, week_number, week_start_date, status, is_draft, created_at')
+          .eq('user_id', uid).not('is_draft', 'is', true),
       ).order('week_number', { ascending: true }),
+      // Full rows (program_data included) only for weeks that can cover today.
+      excludeArchived(
+        supabase.from('programs').select('*')
+          .eq('user_id', uid).not('is_draft', 'is', true),
+      ).lte('week_start_date', todayDate).gte('week_start_date', weekFloor),
       supabase.from('session_logs').select('completed_at, completed, session_name, session_time')
-        .eq('user_id', uid).eq('completed', true).order('completed_at', { ascending: false }),
+        .eq('user_id', uid).eq('completed', true).gte('completed_at', streakFloor)
+        .order('completed_at', { ascending: false }),
+      supabase.from('session_logs').select('id', { count: 'exact', head: true })
+        .eq('user_id', uid).eq('completed', true),
       supabase.from('profiles')
         .select('wearable_connected, wearable_type, apple_health_connected, goal, goal_time, age, gender, height_cm, weight_kg, preferred_units, current_training_days, rest_days, body_weight, weight_unit, height, weight, units, chest_strap_tip_shown, coached_upsell_dismissed, whoop_connected, garmin_connected, coros_connected, manual_hrv, manual_hrv_date, program_start_date, tier')
         .eq('id', uid)
@@ -559,17 +639,46 @@ export default function HomeScreen() {
     ]);
     if (!mounted.current || myId !== loadIdRef.current) return;
 
-    const progs = visiblePrograms((progsRes.data ?? []) as Program[], 'home');
+    // A failed read says nothing about the athlete's program. Keep whatever is
+    // on screen (cached content stays marked "Refreshing..."); the next focus or
+    // foreground retries.
+    if (weeksRes.error || logsRes.error) {
+      console.log('[home] load failed, keeping current content:', weeksRes.error?.message ?? logsRes.error?.message);
+      setLoading(false);
+      return;
+    }
 
-    let activeProg: Program | null = null;
-    for (const p of progs) {
+    const weeks = visiblePrograms((weeksRes.data ?? []) as ProgramWeekRow[], 'home');
+
+    // Same active-week rule as before, applied to the light rows.
+    let activeWeek: ProgramWeekRow | null = null;
+    for (const p of weeks) {
       const start = new Date(p.week_start_date + 'T00:00:00');
       const end   = new Date(start.getTime() + 7 * 86_400_000);
-      if (new Date() >= start && new Date() < end) { activeProg = p; break; }
+      if (new Date() >= start && new Date() < end) { activeWeek = p; break; }
     }
-    if (!activeProg && progs.length > 0) activeProg = progs[progs.length - 1];
+    if (!activeWeek && weeks.length > 0) activeWeek = weeks[weeks.length - 1];
 
-    const prog = activeProg;
+    // program_data for that one week: normally already in the current-week
+    // query; fetched by id only when it isn't (no week covers today, so the
+    // latest week is shown, or a date edge case).
+    let prog: Program | null = null;
+    if (activeWeek) {
+      prog = ((currentRes.data ?? []) as Program[]).find(p => p.id === activeWeek!.id) ?? null;
+      if (!prog) {
+        const { data: full, error: fullError } = await supabase
+          .from('programs').select('*').eq('id', activeWeek.id).maybeSingle();
+        if (!mounted.current || myId !== loadIdRef.current) return;
+        if (fullError || !full) {
+          console.log('[home] active week fetch failed, keeping current content:', fullError?.message);
+          setLoading(false);
+          return;
+        }
+        prog = full as Program;
+      }
+    }
+    perfLog('home fetch', Date.now() - fetchStart, `${weeks.length} weeks`);
+
     setProgram(prog);
 
     if (prog?.program_data?.days) {
@@ -578,10 +687,13 @@ export default function HomeScreen() {
       setTodayDay(matched ?? null);
     }
 
-    setWeek2Exists(progs.some(p => p.week_number === 2));
+    const week2 = weeks.some(p => p.week_number === 2);
+    setWeek2Exists(week2);
 
     const logs = logsRes.data ?? [];
-    setSessionCount(logs.length);
+    // Exact total from the count query; if only that failed, keep the last value.
+    const totalSessions = countRes.error ? null : (countRes.count ?? 0);
+    if (totalSessions !== null) setSessionCount(totalSessions);
 
     // Build the set of per-session completion keys for today (`${session_name}|${session_time}`)
     // so each AM/PM block can resolve its own completion. Uses the same local-date logic as before.
@@ -640,19 +752,25 @@ export default function HomeScreen() {
     setLoading(false);
     setResolved(true);
     setCacheStale(false);
+    freshShownRef.current = true;
+    lastFreshAtRef.current = Date.now();
     runCountupIfNeeded();
 
-    // Persist home data to AsyncStorage for instant render on next open
-    AsyncStorage.setItem('home_cache', JSON.stringify({
-      timestamp:      Date.now(),
-      program:        prog,
-      streak:         newStreak,
-      sessionCount:   logs.length,
-      week2Exists:    progs.some(p => p.week_number === 2),
-    })).catch(() => {});
+    // Persist home data to AsyncStorage for instant render on next open. Skipped
+    // if the session count couldn't be read, rather than caching a wrong number.
+    if (totalSessions !== null) {
+      AsyncStorage.setItem('home_cache', JSON.stringify({
+        timestamp:      Date.now(),
+        program:        prog,
+        streak:         newStreak,
+        sessionCount:   totalSessions,
+        week2Exists:    week2,
+      })).catch(() => {});
+    }
 
-    // Background prefetch data for Program and History tabs
-    prefetchTabCaches(uid, progs, profileRes.data).catch(() => {});
+    // Program and History tab caches — after the first screen has rendered, and
+    // at most once per PREFETCH_MIN_INTERVAL_MS rather than on every focus.
+    schedulePrefetch(uid, profileRes.data);
 
     // Apply cached health data immediately so metrics display before the background fetch.
     const cacheRow = cacheRes.data as Record<string, any> | null;
@@ -846,12 +964,26 @@ export default function HomeScreen() {
     console.log('[whoop-debug] fetchingFresh changed —', fetchingFresh);
   }, [fetchingFresh]);
 
+  // First content on screen after launch — from cache or from the server.
+  useEffect(() => {
+    if (loading || firstRenderLogged) return;
+    firstRenderLogged = true;
+    perfLog('first render', sinceAppStart(), cacheStale ? 'from cache' : 'from server');
+  }, [loading, cacheStale]);
+
   const loadDataRef      = useRef(loadData);
   const appStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { loadDataRef.current = loadData; }, [loadData]);
   useEffect(() => {
     const sub = AppState.addEventListener('change', next => {
       if (next === 'active') {
+        // Data refreshed moments ago is still current; a quick app switch
+        // shouldn't refetch everything. Pull-to-refresh and focus still do.
+        const sinceFresh = Date.now() - lastFreshAtRef.current;
+        if (sinceFresh < FOREGROUND_REFRESH_MIN_MS) {
+          console.log(`[home] foreground refresh skipped — refreshed ${Math.round(sinceFresh / 1000)}s ago`);
+          return;
+        }
         console.log('[health] auto-refresh triggered by: foreground');
         if (appStateTimerRef.current) clearTimeout(appStateTimerRef.current);
         appStateTimerRef.current = setTimeout(() => {
@@ -1254,9 +1386,13 @@ export default function HomeScreen() {
                     <Text style={[styles.viewWorkoutBtnText, { color: '#4aff78' }]}>SESSION COMPLETE ✓</Text>
                   </View>
                 ) : (
+                  // Held while cached content is on screen: today's completions
+                  // aren't cached, so a session could be logged twice, or against
+                  // a week the refresh is about to replace.
                   <TouchableOpacity
-                    style={[styles.viewWorkoutBtn, { marginTop: 12 }]}
+                    style={[styles.viewWorkoutBtn, { marginTop: 12 }, cacheStale && { opacity: 0.4 }]}
                     activeOpacity={0.85}
+                    disabled={cacheStale}
                     onPress={() => navigation.navigate('LogSession', {
                       sessionJson: JSON.stringify(session),
                       programId:   program.id,

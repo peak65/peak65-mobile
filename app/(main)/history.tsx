@@ -11,6 +11,7 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
+import { cacheUsable } from '../../lib/cachePolicy';
 import { Colors, Fonts } from '../../lib/theme';
 import TrendLineChart, { type TrendPoint } from '../components/TrendLineChart';
 import ZoneBars, { type ZoneMinutes } from '../../components/ZoneBars';
@@ -857,6 +858,10 @@ export default function HistoryScreen() {
   // can be an empty payload. `resolved` only flips once the server read has
   // finished, so an empty-state message never renders over unfetched data.
   const [resolved, setResolved]           = useState(false);
+  // True while history_cache is on screen and the refresh hasn't landed.
+  const [showingCache, setShowingCache]   = useState(false);
+  // True once server data has been shown; later loads skip the cache.
+  const freshShownRef                     = useRef(false);
   const [checkinOpen, setCheckinOpen]     = useState(false);
   const [activeTab, setActiveTab]         = useState<'weight' | 'bodyfat'>('weight');
   const [selectedItem, setSelectedItem]   = useState<HistoryItem | null>(null);
@@ -874,24 +879,27 @@ export default function HistoryScreen() {
   }, []);
 
   const load = useCallback(async () => {
-    // Apply history_cache immediately for instant render
+    // Stale-while-revalidate: on the first load, show history_cache straight
+    // away (up to the CACHE_MAX_AGE_MS ceiling), marked "Refreshing…", then
+    // refresh below. Skipped once server data is on screen.
     let cacheApplied = false;
     try {
-      const raw = await AsyncStorage.getItem('history_cache');
+      const raw = freshShownRef.current ? null : await AsyncStorage.getItem('history_cache');
       if (raw && mounted.current) {
         const c = JSON.parse(raw);
-        if (Date.now() - (c.timestamp ?? 0) < 4 * 60 * 60 * 1000) {
+        if (cacheUsable(c.timestamp)) {
           if (c.profile) setProfile(c.profile);
           setLogs(c.logs ?? []);
           setExternalWorkouts(c.externalWorkouts ?? []);
           setCheckins(c.checkins ?? []);
           if (c.profile?.weight_unit) setWeightUnit(c.profile.weight_unit as 'lbs' | 'kg');
           setLoading(false);
+          setShowingCache(true);
           cacheApplied = true;
         }
       }
     } catch {}
-    if (!cacheApplied) setLoading(true);
+    if (!cacheApplied && !freshShownRef.current) setLoading(true);
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current) { setLoading(false); return; }
@@ -920,6 +928,13 @@ export default function HistoryScreen() {
     ]);
 
     if (!mounted.current) { setLoading(false); return; }
+    // A failed read says nothing about the athlete's history — keep what's on
+    // screen (cached content stays marked) rather than blanking it.
+    if (logsRes.error || extRes.error || checkinsRes.error) {
+      console.log('[history] load failed, keeping current content:', (logsRes.error ?? extRes.error ?? checkinsRes.error)?.message);
+      setLoading(false);
+      return;
+    }
     setProfile(profRes.data);
     setLogs(logsRes.data ?? []);
     setExternalWorkouts(extRes.data ?? []);
@@ -932,6 +947,8 @@ export default function HistoryScreen() {
     setHasProgram(!!progRes.data);
     setLoading(false);
     setResolved(true);
+    setShowingCache(false);
+    freshShownRef.current = true;
   }, []);
 
   // Refresh on focus so a freshly-onboarded athlete — and a coach publishing
@@ -1097,6 +1114,7 @@ export default function HistoryScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
         <Text style={styles.heading}>HISTORY</Text>
+        {showingCache && <Text style={styles.refreshingText}>Refreshing…</Text>}
 
         {/* Stats summary */}
         <View style={styles.statsRow}>
@@ -1310,6 +1328,7 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   heading: { color: Colors.textPrimary, fontSize: 24, fontWeight: '800', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
+  refreshingText: { color: Colors.textSecondary, fontSize: 10, paddingHorizontal: 20, marginTop: -8, marginBottom: 8 },
   sectionHeading: {
     color: Colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
     textTransform: 'uppercase', paddingHorizontal: 20, marginTop: 20, marginBottom: 10,

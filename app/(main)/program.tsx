@@ -20,6 +20,7 @@ import { deriveZonesFromTimeTrial, type TrainingZones } from '../../lib/zoneDeri
 import { Colors, Fonts } from '../../lib/theme';
 import { groupBySuperset } from '../../lib/programGrouping';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
+import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
 import HRDetailModal, { type HRDetail } from '../../components/HRDetailModal';
 
@@ -518,8 +519,10 @@ function MarkCompleteCard({
 function DayCard({
   day, isToday, isComplete,
   userId, programId, weekNumber, savedTrials,
-  profile, completedSessionKeys,
+  profile, completedSessionKeys, locked,
 }: {
+  // True while cached data is showing: LOG SESSION waits for the refresh.
+  locked: boolean;
   day: ProgramDay;
   isToday: boolean;
   isComplete: boolean;
@@ -883,7 +886,8 @@ function DayCard({
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={pd.logBtn}
+                style={[pd.logBtn, locked && { opacity: 0.4 }]}
+                disabled={locked}
                 onPress={() => navigation.navigate('LogSession', {
                   sessionJson: JSON.stringify(session),
                   programId,
@@ -963,6 +967,10 @@ export default function ProgramScreen() {
   // can be an empty payload. `resolved` only flips once the server read has
   // finished, so an empty-state message never renders over unfetched data.
   const [resolved, setResolved]           = useState(false);
+  // True while program_cache is on screen and the refresh hasn't landed.
+  const [showingCache, setShowingCache]   = useState(false);
+  // True once server data has been shown; later loads skip the cache.
+  const freshShownRef                     = useRef(false);
   const [ttProfile, setTtProfile]         = useState<TimeTrialProfile | null>(null);
   const [athleteTier, setAthleteTier]     = useState<string | null>(null);
 
@@ -1022,15 +1030,21 @@ export default function ProgramScreen() {
   }
 
   const load = useCallback(async () => {
-    // Apply program_cache immediately for instant render
+    // Stale-while-revalidate: on the first load, show program_cache straight
+    // away (up to the CACHE_MAX_AGE_MS ceiling) and refresh below. Skipped once
+    // server data is on screen, so a focus reload never regresses it. While it
+    // shows, `showingCache` marks the week "Refreshing…" and holds LOG SESSION.
     let cacheApplied = false;
     try {
-      const raw = await AsyncStorage.getItem('program_cache');
+      const raw = freshShownRef.current ? null : await AsyncStorage.getItem('program_cache');
       if (raw) {
         const c = JSON.parse(raw);
-        if (Date.now() - (c.timestamp ?? 0) < 4 * 60 * 60 * 1000) {
-          // Cached rows can predate the archived filter — filter them the same way.
-          const progs = visiblePrograms((c.programs ?? []) as Program[], 'program-cache');
+        // Cached rows can predate the archived filter — filter them the same way.
+        const cachedProgs = visiblePrograms((c.programs ?? []) as Program[], 'program-cache');
+        // Only when a cached week still covers today: otherwise the tab would
+        // open on a week that has ended as though it were current.
+        if (cacheUsable(c.timestamp) && cachedProgs.some(p => weekCoversToday(p))) {
+          const progs = cachedProgs;
           setAllPrograms(progs);
           if (progs.length > 0) setWeekIdx(progs.length - 1);
           setTodayName(new Date().toLocaleDateString('en-US', { weekday: 'long' }));
@@ -1073,11 +1087,12 @@ export default function ProgramScreen() {
           setSavedTrialMap(tMap);
           setCompletedSessionKeys(sKeys);
           setLoading(false);
+          setShowingCache(true);
           cacheApplied = true;
         }
       }
     } catch {}
-    if (!cacheApplied) setLoading(true);
+    if (!cacheApplied && !freshShownRef.current) setLoading(true);
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) { setLoading(false); setResolved(true); return; }
@@ -1102,6 +1117,14 @@ export default function ProgramScreen() {
         .eq('id', session.user.id)
         .maybeSingle(),
     ]);
+
+    // A failed read says nothing about the program — keep what's on screen
+    // (cached content stays marked) rather than showing "No program found".
+    if (progsRes.error || logsRes.error) {
+      console.log('[program] load failed, keeping current content:', progsRes.error?.message ?? logsRes.error?.message);
+      setLoading(false);
+      return;
+    }
 
     const progs = visiblePrograms((progsRes.data ?? []) as Program[], 'program');
     setAllPrograms(progs);
@@ -1158,6 +1181,8 @@ export default function ProgramScreen() {
     setSavedTrialMap(tMap);
     setLoading(false);
     setResolved(true);
+    setShowingCache(false);
+    freshShownRef.current = true;
 
     // Check if we should generate next week on load
     if (!isEliteRef.current && active && !nextExists && !nextWeekTriggeredRef.current) {
@@ -1278,7 +1303,10 @@ export default function ProgramScreen() {
             >
               <Feather name="chevron-left" color={!canGoBack ? '#333' : Colors.textPrimary} size={28} />
             </TouchableOpacity>
-            <Text style={styles.weekLabel}>Week {displayWeekNum}</Text>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={styles.weekLabel}>Week {displayWeekNum}</Text>
+              {showingCache && <Text style={styles.refreshingText}>Refreshing…</Text>}
+            </View>
             <TouchableOpacity
               onPress={() => setWeekIdx(i => i + 1)}
               disabled={!canGoForward}
@@ -1335,6 +1363,7 @@ export default function ProgramScreen() {
                     savedTrials={savedTrials}
                     profile={ttProfile}
                     completedSessionKeys={completedSessionKeys}
+                    locked={showingCache}
                   />
                 </View>
                 );
@@ -1371,6 +1400,7 @@ const styles = StyleSheet.create({
   },
   weekArrow: { padding: 8 },
   weekLabel: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700', minWidth: 80, textAlign: 'center' },
+  refreshingText: { color: Colors.textSecondary, fontSize: 10, marginTop: 1 },
 
   dayList:      { paddingHorizontal: 16, gap: 10 },
   dayCard:      { backgroundColor: Colors.card, borderRadius: 14, overflow: 'hidden' },

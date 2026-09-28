@@ -169,29 +169,38 @@ export async function getPendingCandidates(userId: string): Promise<CandidateRow
   const today       = new Date().toLocaleDateString('en-CA');
   const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString();
 
-  // Auto-dismiss old candidates (> 3 days)
-  await supabase
-    .from('session_match_candidates')
-    .update({ status: 'dismissed' })
-    .eq('user_id', userId)
-    .in('status', ['pending', 'snoozed'])
-    .lt('created_at', threeDaysAgo);
+  // The three status updates run together. Run in series, the re-surface came
+  // last, so a candidate snoozed 3+ times had already been dismissed and could
+  // never re-surface. In parallel that ordering is gone, so the re-surface now
+  // excludes those candidates itself (NULL snooze_count still re-surfaces, as
+  // before). Every other overlap ends the same whichever update lands first: an
+  // old candidate re-surfaced to pending is still matched by the 3-day dismiss.
+  await Promise.all([
+    // Auto-dismiss old candidates (> 3 days)
+    supabase
+      .from('session_match_candidates')
+      .update({ status: 'dismissed' })
+      .eq('user_id', userId)
+      .in('status', ['pending', 'snoozed'])
+      .lt('created_at', threeDaysAgo),
 
-  // Dismiss snoozed candidates that have been snoozed 3+ times
-  await supabase
-    .from('session_match_candidates')
-    .update({ status: 'dismissed' })
-    .eq('user_id', userId)
-    .eq('status', 'snoozed')
-    .gte('snooze_count', 3);
+    // Dismiss snoozed candidates that have been snoozed 3+ times
+    supabase
+      .from('session_match_candidates')
+      .update({ status: 'dismissed' })
+      .eq('user_id', userId)
+      .eq('status', 'snoozed')
+      .gte('snooze_count', 3),
 
-  // Re-surface snoozed candidates whose snooze window has passed
-  await supabase
-    .from('session_match_candidates')
-    .update({ status: 'pending' })
-    .eq('user_id', userId)
-    .eq('status', 'snoozed')
-    .lte('snoozed_until', today);
+    // Re-surface snoozed candidates whose snooze window has passed
+    supabase
+      .from('session_match_candidates')
+      .update({ status: 'pending' })
+      .eq('user_id', userId)
+      .eq('status', 'snoozed')
+      .lte('snoozed_until', today)
+      .or('snooze_count.is.null,snooze_count.lt.3'),
+  ]);
 
   const { data: candidates } = await supabase
     .from('session_match_candidates')

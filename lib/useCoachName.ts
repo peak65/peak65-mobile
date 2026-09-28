@@ -11,8 +11,8 @@ export type CoachNameState = {
   resolved: boolean;
 };
 
-// Resolves the signed-in athlete's coach: coach_athletes → coach_id → profiles.
-// Two round-trips, so it only runs when `enabled` — screens shared with
+// Resolves the signed-in athlete's coach: coach_athletes → coach_id → profiles,
+// as one joined query. Only runs when `enabled` — screens shared with
 // non-coached athletes pass false and pay nothing.
 //
 // Every failure path is logged: previously these were swallowed, which made a
@@ -33,26 +33,50 @@ export function useCoachName(enabled: boolean = true): CoachNameState {
       const uid = session?.user?.id;
       if (!uid) { console.log('[useCoachName] no session'); return; }
 
-      const { data: ca, error: caErr } = await supabase
+      // One round trip: the link row with the coach's profile embedded. Row-level
+      // security applies to the embedded profile exactly as to a direct read.
+      const joined = await supabase
         .from('coach_athletes')
-        .select('coach_id')
+        .select('coach_id, coach:profiles!coach_id(first_name, last_name)')
         .eq('athlete_id', uid)
         .eq('status', 'active')
         .maybeSingle();
 
-      if (caErr) { console.log('[useCoachName] coach_athletes error:', caErr.message); return; }
+      let ca: { coach_id: string | null } | null;
+      let p: { first_name: string | null; last_name: string | null } | null;
+
+      if (!joined.error) {
+        ca = joined.data;
+        const embedded = (joined.data as any)?.coach;
+        p = Array.isArray(embedded) ? (embedded[0] ?? null) : (embedded ?? null);
+      } else {
+        // The embed needs a foreign key from coach_athletes.coach_id to profiles.
+        // If PostgREST can't resolve one, fall back to the original two lookups.
+        console.log('[useCoachName] joined lookup failed, using two lookups:', joined.error.message);
+        const { data: caRow, error: caErr } = await supabase
+          .from('coach_athletes')
+          .select('coach_id')
+          .eq('athlete_id', uid)
+          .eq('status', 'active')
+          .maybeSingle();
+        if (caErr) { console.log('[useCoachName] coach_athletes error:', caErr.message); return; }
+        ca = caRow;
+        if (!ca?.coach_id) { p = null; }
+        else {
+          const { data: pRow, error: pErr } = await supabase
+            .from('profiles')
+            .select('first_name, last_name')
+            .eq('id', ca.coach_id)
+            .maybeSingle();
+          if (pErr) { console.log('[useCoachName] coach profile error:', pErr.message); return; }
+          p = pRow;
+        }
+      }
+
       if (!ca?.coach_id) {
         console.log('[useCoachName] no active coach_athletes row for athlete', uid);
         return;
       }
-
-      const { data: p, error: pErr } = await supabase
-        .from('profiles')
-        .select('first_name, last_name')
-        .eq('id', ca.coach_id)
-        .maybeSingle();
-
-      if (pErr) { console.log('[useCoachName] coach profile error:', pErr.message); return; }
       if (!p) {
         console.log('[useCoachName] coach profile not readable for coach_id', ca.coach_id);
         return;

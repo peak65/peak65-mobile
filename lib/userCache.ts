@@ -10,6 +10,7 @@ const USER_CACHE_KEYS = [
   'countup_date',                // per-athlete stat count-up animation marker
   'last_missed_check',           // per-athlete missed-session prompt marker
   'dismissed_next_week_banner',  // per-athlete UI dismissal
+  'resolution_cache',            // last successful routing result, for offline starts
 ];
 
 // Tooltip dismissals are written one key per tooltip as `peak65_tooltip_<id>`,

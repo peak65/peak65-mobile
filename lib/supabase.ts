@@ -61,8 +61,16 @@ const SUPABASE_ANON_KEY =
   alter table public.session_logs add column if not exists completed boolean default false;
 */
 
+// Where supabase-js persists the session. This is the library's own default
+// (`sb-<project ref>-auth-token`), passed explicitly so the startup code can read
+// it without the two drifting apart. The key holds a session until auth itself
+// removes it — on sign-out, or when the refresh token is rejected — so its
+// presence means "signed in", even when the network is down.
+export const SUPABASE_AUTH_STORAGE_KEY = `sb-${new URL(SUPABASE_URL).hostname.split('.')[0]}-auth-token`;
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
+    storageKey: SUPABASE_AUTH_STORAGE_KEY,
     storage: AsyncStorage,
     autoRefreshToken: true,
     persistSession: true,

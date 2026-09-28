@@ -1,5 +1,8 @@
+// First import, so APP_START is taken as early as the bundle allows.
+import { perfLog, sinceAppStart } from '../lib/perf';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, Platform, Text, View } from 'react-native';
+import { Animated, Image, Platform, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   NavigationContainer,
@@ -17,7 +20,7 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { Feather } from '@expo/vector-icons';
-import { MessageSquare } from 'lucide-react-native';
+import { MessageSquare, WifiOff } from 'lucide-react-native';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -29,9 +32,9 @@ Notifications.setNotificationHandler({
   }),
 });
 
-import { supabase } from '../lib/supabase';
-import { detectCandidates } from '../lib/sessionMatcher';
+import { supabase, SUPABASE_AUTH_STORAGE_KEY } from '../lib/supabase';
 import { clearUserCache } from '../lib/userCache';
+import { cacheUsable } from '../lib/cachePolicy';
 import { syncBadge } from '../lib/badge';
 import { Colors } from '../lib/theme';
 import { LEGAL_VERSION } from '../lib/legal';
@@ -339,12 +342,29 @@ const TAP_SAFE_ROUTES = new Set<keyof MainStackParamList>([
 
 // ─── App state resolution ─────────────────────────────────────────────────────
 
-export type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'setup' | 'generating' | 'waiting' | 'authenticated' | 'legal';
+export type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'setup' | 'generating' | 'waiting' | 'authenticated' | 'legal' | 'offline';
+
+// The startup queries could not complete — network down or a server error. This
+// is NOT a sign-out: the athlete keeps their session and sees the offline state.
+class TransientResolveError extends Error {}
+
+// PostgREST reports a failed fetch (no network) as status 0.
+function isTransientStatus(status: number): boolean {
+  return status === 0 || status >= 500;
+}
+
+// Auth itself rejected the token. Only this, and a missing session, may send an
+// athlete back to Login.
+function isAuthRejection(status: number, code: string | undefined): boolean {
+  return status === 401 || (code ?? '').startsWith('PGRST30');
+}
 
 // A non-draft program is what separates "ready to train" from "still waiting".
-// Shared by the Pinnacle branch and the standard path below.
+// Shared by the Pinnacle branch and the standard path below. Throws on a failed
+// query: reading "no program" off a network error would route a trained athlete
+// to the generator.
 async function hasActiveProgram(userId: string): Promise<boolean> {
-  const { data } = await excludeArchived(
+  const { data, error } = await excludeArchived(
     supabase
       .from('programs')
       .select('id')
@@ -353,6 +373,7 @@ async function hasActiveProgram(userId: string): Promise<boolean> {
   )
     .limit(1)
     .maybeSingle();
+  if (error) throw new TransientResolveError(`programs: ${error.message}`);
   return !!data;
 }
 
@@ -383,24 +404,52 @@ async function resolveAppState(
   session: Session | null,
 ): Promise<ResolveResult> {
   if (!session) return { state: 'unauthenticated', isCoach: false };
+  const uid = session.user.id;
 
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('first_name, last_name, role, tier, program_status, onboarding_complete, legal_accepted_version')
-    .eq('id', session.user.id)
-    .maybeSingle();
+  // All three lookups need only the user id, so they start together instead of
+  // one after another. The routing below still consults them in the same order
+  // and only on the same paths as before; the program check is simply already
+  // in flight. It is marked handled here so the paths that never read it (a
+  // coach, onboarding, setup) can't raise an unhandled rejection.
+  const hasProgramP = hasActiveProgram(uid);
+  hasProgramP.catch(() => {});
 
-  console.log('[resolveAppState] userId:', session.user.id);
+  const [profileRes, coachRes] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('first_name, last_name, role, tier, program_status, onboarding_complete, legal_accepted_version')
+      .eq('id', uid)
+      .maybeSingle(),
+    supabase
+      .from('coaches')
+      .select('id')
+      .eq('id', uid)
+      .maybeSingle(),
+  ]);
+  const { data: profile, error: profileError, status: profileStatus } = profileRes;
+
+  console.log('[resolveAppState] userId:', uid);
   console.log('[resolveAppState] profile:', JSON.stringify(profile));
   console.log('[resolveAppState] profileError:', JSON.stringify(profileError));
 
-  // Profile query errored — session is likely stale or DB access was denied.
   if (profileError) {
-    await supabase.auth.signOut();
-    return { state: 'unauthenticated', isCoach: false };
+    // The token was rejected — the session really is over.
+    if (isAuthRejection(profileStatus, profileError.code)) {
+      await supabase.auth.signOut();
+      return { state: 'unauthenticated', isCoach: false };
+    }
+    // Anything else (no network, a server error) says nothing about the session.
+    throw new TransientResolveError(`profile: ${profileError.message}`);
   }
 
-  const base = await resolveRoute(session, profile);
+  // A network failure on the coaches lookup must not quietly route a coach as an
+  // athlete. A missing table (a non-transient error) still means "not a coach".
+  if (coachRes.error && isTransientStatus(coachRes.status)) {
+    throw new TransientResolveError(`coaches: ${coachRes.error.message}`);
+  }
+  const isCoachMember = !coachRes.error && !!coachRes.data;
+
+  const base = await resolveRoute(profile, isCoachMember, () => hasProgramP);
 
   // ── Legal gate ──────────────────────────────────────────────────────────────
   // Wraps the routing rather than sitting inside it, so every signed-in
@@ -429,8 +478,9 @@ async function resolveAppState(
 // Routing for a signed-in account whose profile loaded — where it belongs
 // before the legal gate is applied.
 async function resolveRoute(
-  session: Session,
   profile: Profile | null,
+  isCoachMember: boolean,
+  hasActiveProgramFn: () => Promise<boolean>,
 ): Promise<ResolveResult> {
   if (profile?.role === 'coach') {
     return { state: 'authenticated', isCoach: true };
@@ -442,14 +492,9 @@ async function resolveRoute(
   // role 'admin', which matches nothing above. Staff can also carry tier
   // 'elite', so if this ran after the Pinnacle branch below (as it once did)
   // that branch would swallow them and strip the Coach tab.
-  // If the coaches table doesn't exist yet, coachRes.error will be set — default to false.
-  const coachRes = await supabase
-    .from('coaches')
-    .select('id')
-    .eq('id', session.user.id)
-    .maybeSingle();
-
-  if (!coachRes.error && !!coachRes.data) {
+  // The lookup itself runs in parallel with the profile (resolveAppState); a
+  // missing coaches table arrives here as false.
+  if (isCoachMember) {
     return { state: 'authenticated', isCoach: true };
   }
 
@@ -467,50 +512,135 @@ async function resolveRoute(
   // automatic generators in Home and Program.
   if (profile?.tier === 'elite') {
     if (!profile?.onboarding_complete) return { state: 'setup', isCoach: false, isElite: true };
-    const hasProgram = await hasActiveProgram(session.user.id);
+    const hasProgram = await hasActiveProgramFn();
     return { state: 'authenticated', isCoach: false, isElite: true, awaitingProgram: !hasProgram };
   }
 
   if (!profile?.first_name) return { state: 'onboarding', isCoach: false };
 
-  const hasProgram = await hasActiveProgram(session.user.id);
+  const hasProgram = await hasActiveProgramFn();
 
   return { state: hasProgram ? 'authenticated' : 'generating', isCoach: false };
 }
 
-// Per-attempt budget for resolveAppState. Two attempts (16s) fit inside the
-// 20s loading watchdog below, so a slow-but-working network gets a genuine
-// second chance before anything falls back.
-const RESOLVE_ATTEMPT_MS = 8_000;
-const RESOLVE_ATTEMPTS   = 2;
+// ─── Slow and offline starts ─────────────────────────────────────────────────
 
-const RESOLVE_TIMED_OUT = Symbol('resolve-timed-out');
+// How long the logo may show before the app stops waiting on the network. The
+// real resolution keeps running and takes over whenever it lands.
+const FALLBACK_MS = 4_000;
 
-// Retries the real resolution instead of guessing a route. Guessing is what we
-// are specifically avoiding here: on timeout we have no profile row, so we
-// cannot tell an elite athlete from a Foundation one, and defaulting a
-// logged-in user to 'authenticated' would drop a Pinnacle athlete into Tabs —
-// bypassing the gate above and stranding them on "No program found."
-async function resolveWithRetry(
-  session: Session | null,
-): Promise<ResolveResult> {
-  for (let attempt = 1; attempt <= RESOLVE_ATTEMPTS; attempt++) {
-    const result = await Promise.race([
-      resolveAppState(session),
-      new Promise<typeof RESOLVE_TIMED_OUT>(resolve =>
-        setTimeout(() => resolve(RESOLVE_TIMED_OUT), RESOLVE_ATTEMPT_MS),
-      ),
-    ]);
-    if (result !== RESOLVE_TIMED_OUT) return result;
-    console.log(`[resolveAppState] attempt ${attempt}/${RESOLVE_ATTEMPTS} timed out after ${RESOLVE_ATTEMPT_MS}ms`);
+// Whether a session is saved on the device, and whose. supabase-js keeps it
+// under SUPABASE_AUTH_STORAGE_KEY until auth removes it (sign-out, or a rejected
+// refresh token), so a present key means signed in even when the network can't
+// confirm it. When INITIAL_SESSION arrives with null because an expired token
+// could not be refreshed offline, this is what stops that athlete being sent to
+// Login.
+async function readStoredSession(): Promise<{ exists: boolean; userId: string | null }> {
+  try {
+    const raw = await AsyncStorage.getItem(SUPABASE_AUTH_STORAGE_KEY);
+    if (!raw) return { exists: false, userId: null };
+    try {
+      const parsed = JSON.parse(raw);
+      return { exists: true, userId: parsed?.user?.id ?? null };
+    } catch {
+      return { exists: true, userId: null };
+    }
+  } catch {
+    // Storage unreadable — can't prove there's no session, so don't claim there isn't.
+    return { exists: true, userId: null };
   }
+}
 
-  // Every attempt timed out — the network is effectively down. Fall back to the
-  // login screen rather than a guessed destination: it is recoverable, it can
-  // never route someone into the wrong flow, and it matches what the 20s
-  // watchdog already does when loading stalls.
-  console.log('[resolveAppState] all attempts timed out — falling back to unauthenticated');
-  return { state: 'unauthenticated', isCoach: false };
+// The last successful routing result, so a signed-in athlete can open the app
+// offline. Only 'authenticated' is stored — never a pre-app state — and it is
+// used only for the same user, under the same legal version, within
+// CACHE_MAX_AGE_MS. The real resolution replaces it as soon as it lands.
+const RESOLUTION_CACHE_KEY = 'resolution_cache';
+
+type CachedResolution = {
+  userId: string;
+  legalVersion: string;
+  savedAt: number;
+  isCoach: boolean;
+  isElite: boolean;
+  awaitingProgram: boolean;
+};
+
+async function saveResolution(userId: string, r: ResolveResult): Promise<void> {
+  if (r.state !== 'authenticated') return;
+  const entry: CachedResolution = {
+    userId,
+    legalVersion:    LEGAL_VERSION,
+    savedAt:         Date.now(),
+    isCoach:         r.isCoach,
+    isElite:         !!r.isElite,
+    awaitingProgram: !!r.awaitingProgram,
+  };
+  try { await AsyncStorage.setItem(RESOLUTION_CACHE_KEY, JSON.stringify(entry)); } catch {}
+}
+
+async function readResolution(userId: string | null): Promise<ResolveResult | null> {
+  if (!userId) return null;
+  try {
+    const raw = await AsyncStorage.getItem(RESOLUTION_CACHE_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw) as CachedResolution;
+    if (c.userId !== userId || c.legalVersion !== LEGAL_VERSION || !cacheUsable(c.savedAt)) return null;
+    return { state: 'authenticated', isCoach: c.isCoach, isElite: c.isElite, awaitingProgram: c.awaitingProgram };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Offline UI ──────────────────────────────────────────────────────────────
+
+// Full screen: signed in, but nothing cached to show yet.
+function OfflineScreen({ retrying, onRetry, onSignOut }: {
+  retrying: boolean; onRetry: () => void; onSignOut: () => void;
+}) {
+  return (
+    <View style={{ flex: 1, backgroundColor: Colors.background, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+      <Image
+        source={require('../assets/peak65-logo.png')}
+        style={{ width: 150, height: 150 / 1.95, marginBottom: 28 }}
+        resizeMode="contain"
+      />
+      <Text style={{ color: Colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 8, textAlign: 'center' }}>
+        Can't reach Peak 65
+      </Text>
+      <Text style={{ color: Colors.textSecondary, fontSize: 14, lineHeight: 20, textAlign: 'center', marginBottom: 24 }}>
+        Check your connection. You're still signed in.
+      </Text>
+      <TouchableOpacity
+        onPress={onRetry}
+        disabled={retrying}
+        style={{ backgroundColor: Colors.accent, borderRadius: 10, paddingVertical: 14, paddingHorizontal: 40, opacity: retrying ? 0.5 : 1 }}
+      >
+        <Text style={{ color: Colors.background, fontSize: 15, fontWeight: '700' }}>{retrying ? 'Retrying…' : 'Retry'}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={onSignOut} style={{ marginTop: 18, padding: 8 }}>
+        <Text style={{ color: Colors.textSecondary, fontSize: 13 }}>Sign out</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// Small strip over the app while it runs on its saved routing result.
+function OfflineBanner({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
+  return (
+    <SafeAreaView edges={['top']} pointerEvents="box-none" style={{ position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center' }}>
+      <TouchableOpacity
+        onPress={onRetry}
+        disabled={retrying}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.nested, borderRadius: 14, paddingVertical: 5, paddingHorizontal: 12, marginTop: 4 }}
+      >
+        <WifiOff color={Colors.textSecondary} size={13} strokeWidth={2} />
+        <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>
+          {retrying ? 'Reconnecting…' : 'Offline · showing saved data · Retry'}
+        </Text>
+      </TouchableOpacity>
+    </SafeAreaView>
+  );
 }
 
 // ─── Branded loading screen ──────────────────────────────────────────────────
@@ -613,9 +743,16 @@ export default function RootLayout() {
   const [awaitingProgram, setAwaitingProgram] = useState(false);
   const [hasUnread,  setHasUnread]  = useState(false);
   const [legalParams, setLegalParams] = useState<MainStackParamList['LegalAccept']>({ next: 'authenticated', fullName: null });
-  const resolvingRef                = React.useRef(false);
+  // Increments per resolution so only the newest result is applied.
+  const resolveGenRef               = React.useRef(0);
   const appStateValueRef            = React.useRef(appState);
   appStateValueRef.current          = appState;
+  // Set while the network can't confirm the athlete: 'cached' shows the app from
+  // the saved routing result with a banner, 'screen' is the full offline screen.
+  const [offlineMode, setOfflineMode] = useState<'cached' | 'screen' | null>(null);
+  const offlineModeRef              = React.useRef(offlineMode);
+  offlineModeRef.current            = offlineMode;
+  const [retrying, setRetrying]     = useState(false);
   const isCoachRef                  = React.useRef(isCoach);
   isCoachRef.current                = isCoach;
 
@@ -687,6 +824,79 @@ export default function RootLayout() {
     }
   }, [fontsLoaded]);
 
+  // Applies a routing result. `fromCache` marks a saved result shown while the
+  // network is unreachable: it drives the offline banner, and the post-auth
+  // network work waits for a real resolution.
+  const applyResult = React.useCallback((r: ResolveResult, userId: string | null, fromCache: boolean) => {
+    setAppState(r.state);
+    setIsCoach(r.isCoach);
+    setIsElite(!!r.isElite);
+    setAwaitingProgram(!!r.awaitingProgram);
+    setLegalParams({ next: r.next ?? 'authenticated', fullName: r.fullName ?? null });
+    setOfflineMode(fromCache ? 'cached' : null);
+
+    if (!fromCache && r.state === 'authenticated' && userId) {
+      void saveResolution(userId, r);
+      // detectCandidates runs from Home's load, which follows immediately.
+      registerPushToken(userId).catch(() => {});
+      checkUnread(userId).then(u => setHasUnread(u)).catch(() => {});
+      void syncBadge(userId);
+    }
+  }, []);
+
+  // Network couldn't confirm anything, but a session is saved on the device.
+  // Show the app from the saved routing result if there is one, otherwise the
+  // offline screen — never Login.
+  const enterFallback = React.useCallback(async (userId: string | null, why: string) => {
+    const cached = await readResolution(userId);
+    // A real resolution may have landed while storage was being read.
+    if (appStateValueRef.current !== 'loading' && offlineModeRef.current === null) return;
+    console.log(`[layout] offline fallback (${why}) — ${cached ? 'using saved routing' : 'no saved routing'}`);
+    if (cached) applyResult(cached, userId, true);
+    else { setOfflineMode('screen'); setAppState('offline'); }
+  }, [applyResult]);
+
+  // Runs the real resolution. The newest call wins: a result from an older call
+  // is dropped instead of overwriting a newer one.
+  const runResolve = React.useCallback(async (session: Session | null, reason: string) => {
+    const gen = ++resolveGenRef.current;
+    const started = Date.now();
+    try {
+      const r = await resolveAppState(session);
+      if (gen !== resolveGenRef.current) return;
+      perfLog('startup chain', Date.now() - started, `${reason}, state=${r.state}`);
+
+      // 300ms minimum prevents a white flash when the splash transitions
+      // out before the JS bridge has finished painting the first frame.
+      const elapsed = Date.now() - started;
+      if (elapsed < 300) await new Promise(res => setTimeout(res, 300 - elapsed));
+      if (gen !== resolveGenRef.current) return;
+
+      applyResult(r, session?.user?.id ?? null, false);
+    } catch (err) {
+      if (gen !== resolveGenRef.current) return;
+      perfLog('startup chain', Date.now() - started, `${reason}, failed`);
+      console.log('[layout] resolve failed:', err instanceof Error ? err.message : err);
+      // Already showing the app from saved routing, or the offline screen — stay.
+      if (appStateValueRef.current === 'loading') await enterFallback(session?.user?.id ?? null, 'resolve failed');
+    }
+  }, [applyResult, enterFallback]);
+
+  // Resolves for a session that may be null. Null goes to Login only when no
+  // session is saved on the device; a saved one means the network, not the
+  // athlete, is the problem.
+  const handleSession = React.useCallback(async (session: Session | null, reason: string) => {
+    if (session) { await runResolve(session, reason); return; }
+    const stored = await readStoredSession();
+    if (stored.exists) {
+      console.log(`[layout] ${reason}: no session from auth, but one is saved — treating as offline`);
+      if (appStateValueRef.current === 'loading') await enterFallback(stored.userId, 'session unconfirmed');
+      return;
+    }
+    ++resolveGenRef.current; // a pending resolve for a previous session must not land after this
+    applyResult({ state: 'unauthenticated', isCoach: false }, null, false);
+  }, [runResolve, enterFallback, applyResult]);
+
   useEffect(() => {
     // INITIAL_SESSION fires after the Supabase client finishes reading the
     // persisted session from AsyncStorage — the earliest safe point to query.
@@ -695,70 +905,93 @@ export default function RootLayout() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         try {
-          // Token refresh doesn't change routing — skip to avoid remounting the navigator.
-          if (event === 'TOKEN_REFRESHED') return;
+          if (event === 'INITIAL_SESSION') perfLog('auth resolve', sinceAppStart(), session ? 'session' : 'no session');
 
-          // Catches every sign-out path, including the stale-session signOut in
+          // A refreshed token doesn't change routing — unless the app is running
+          // offline, where it means the network is back.
+          if (event === 'TOKEN_REFRESHED') {
+            if (offlineModeRef.current !== null && session) void runResolve(session, 'reconnected');
+            return;
+          }
+
+          // Catches every sign-out path, including the rejected-token signOut in
           // resolveAppState, so no cached athlete data survives an account switch.
           if (event === 'SIGNED_OUT') void clearUserCache();
 
-          // One resolve at a time — if a resolve is already in progress, drop the
-          // duplicate event (typically caused by rapid sign-in/sign-out races).
-          if (resolvingRef.current) return;
-          resolvingRef.current = true;
-
-          // For INITIAL_SESSION the state is already 'loading' (initial useState),
-          // so we don't need to set it again. For all other events reset to loading
+          // For INITIAL_SESSION keep whatever is showing (the logo, or an offline
+          // fallback that already fired). For every other event reset to loading
           // so the navigator unmounts cleanly before the new route is determined.
-          if (event !== 'INITIAL_SESSION') setAppState('loading');
+          if (event !== 'INITIAL_SESSION') { setOfflineMode(null); setAppState('loading'); }
 
-          const resolveStart = Date.now();
-          const { state: newState, isCoach: newIsCoach, isElite: newIsElite, awaitingProgram: newAwaiting, next: newNext, fullName: newFullName } =
-            await resolveWithRetry(session);
-
-          // 300ms minimum prevents a white flash when the splash transitions
-          // out before the JS bridge has finished painting the first frame.
-          const elapsed = Date.now() - resolveStart;
-          if (elapsed < 300) await new Promise(r => setTimeout(r, 300 - elapsed));
-
-          setAppState(newState);
-          setIsCoach(newIsCoach);
-          setIsElite(!!newIsElite);
-          setAwaitingProgram(!!newAwaiting);
-          setLegalParams({ next: newNext ?? 'authenticated', fullName: newFullName ?? null });
-
-          if (newState === 'authenticated' && session?.user?.id) {
-            detectCandidates(session.user.id).catch(() => {});
-            registerPushToken(session.user.id).catch(() => {});
-            checkUnread(session.user.id).then(u => setHasUnread(u)).catch(() => {});
-            void syncBadge(session.user.id);
-          }
+          await handleSession(session, event);
         } catch (err) {
           console.log('[layout] auth handler error:', err);
-          setAppState('unauthenticated');
-        } finally {
-          resolvingRef.current = false;
+          // Don't strand the athlete on the logo; the fallback decides between
+          // the app, the offline screen, and Login.
+          if (appStateValueRef.current === 'loading') await handleSession(null, 'handler error');
         }
       }
     );
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [runResolve, handleSession]);
 
-  // Watchdog: if loading is stuck for >20s (e.g. network totally unavailable),
-  // fall back to unauthenticated so the user sees the login screen instead of a dark screen.
+  // Fallback: if nothing has resolved within FALLBACK_MS — including auth itself
+  // still trying to refresh a token on a dead network — stop showing the logo.
+  // A saved session gets the app (or the offline screen); no saved session gets
+  // Login. The real resolution still takes over if it lands later.
   useEffect(() => {
     if (appState !== 'loading') return;
-    const t = setTimeout(() => {
-      if (appStateValueRef.current === 'loading') {
-        console.log('[layout] watchdog: loading stuck >20s, forcing unauthenticated');
-        setAppState('unauthenticated');
-      }
-    }, 20_000);
+    const t = setTimeout(async () => {
+      if (appStateValueRef.current !== 'loading') return;
+      const stored = await readStoredSession();
+      if (appStateValueRef.current !== 'loading') return;
+      if (stored.exists) await enterFallback(stored.userId, `still loading after ${FALLBACK_MS}ms`);
+      else applyResult({ state: 'unauthenticated', isCoach: false }, null, false);
+    }, FALLBACK_MS);
     return () => clearTimeout(t);
-  }, [appState]);
+  }, [appState, enterFallback, applyResult]);
+
+  const retryResolve = React.useCallback(async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      // getSession can itself wait on a token refresh; don't let Retry spin forever.
+      const got = await Promise.race([
+        supabase.auth.getSession().then(r => r.data.session),
+        new Promise<'timeout'>(res => setTimeout(() => res('timeout'), 8_000)),
+      ]);
+      if (got === 'timeout') return;
+      if (got) await runResolve(got, 'retry');
+      else {
+        const stored = await readStoredSession();
+        if (!stored.exists) applyResult({ state: 'unauthenticated', isCoach: false }, null, false);
+      }
+    } finally {
+      setRetrying(false);
+    }
+  }, [retrying, runResolve, applyResult]);
+
+  const signOutFromOffline = React.useCallback(async () => {
+    await clearUserCache();
+    // 'local' removes the saved session without calling the server. The default
+    // (global) sign-out returns an error offline and keeps the session, which
+    // would leave this athlete "signed in" on the next launch.
+    await supabase.auth.signOut({ scope: 'local' });
+    // Route explicitly in case the SIGNED_OUT event doesn't arrive.
+    ++resolveGenRef.current;
+    applyResult({ state: 'unauthenticated', isCoach: false }, null, false);
+  }, [applyResult]);
 
   if (appState === 'loading' || !fontsLoaded) return <BrandedLoadingScreen />;
+
+  if (appState === 'offline') {
+    return (
+      <ErrorBoundary>
+        <OfflineScreen retrying={retrying} onRetry={retryResolve} onSignOut={signOutFromOffline} />
+      </ErrorBoundary>
+    );
+  }
 
   if (appState === 'unauthenticated') {
     return (
@@ -783,9 +1016,12 @@ export default function RootLayout() {
       <CoachContext.Provider value={isCoach}>
         <ProgramStatusContext.Provider value={{ isElite, awaitingProgram }}>
           <UnreadContext.Provider value={{ hasUnread, setHasUnread }}>
-            <NavigationContainer ref={mainNavigationRef} onReady={flushPendingTap}>
+            {/* Keyed on the route so a real resolution that disagrees with the
+                saved one shown offline (e.g. the legal gate) remounts into it. */}
+            <NavigationContainer key={initialRoute} ref={mainNavigationRef} onReady={flushPendingTap}>
               <MainNavigator initialRoute={initialRoute} legalParams={legalParams} />
             </NavigationContainer>
+            {offlineMode === 'cached' && <OfflineBanner retrying={retrying} onRetry={retryResolve} />}
           </UnreadContext.Provider>
         </ProgramStatusContext.Provider>
       </CoachContext.Provider>
