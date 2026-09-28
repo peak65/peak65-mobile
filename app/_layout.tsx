@@ -2,7 +2,7 @@
 import { perfLog, sinceAppStart } from '../lib/perf';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, Platform, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { initialWindowMetrics } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   NavigationContainer,
@@ -632,21 +632,30 @@ function OfflineScreen({ retrying, onRetry, onSignOut }: {
   );
 }
 
+// The device's top safe-area inset (status bar, notch or Dynamic Island), read
+// from native at launch. The app is iPhone-only and portrait-only, so it never
+// changes while running. An absolutely positioned SafeAreaView did not apply it
+// here, which left the strip hidden behind the status bar.
+const TOP_INSET = initialWindowMetrics?.insets.top ?? 0;
+
 // Small strip over the app while it runs on its saved routing result.
 function OfflineBanner({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
   return (
-    <SafeAreaView edges={['top']} pointerEvents="box-none" style={{ position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center' }}>
+    <View pointerEvents="box-none" style={{ position: 'absolute', top: TOP_INSET, left: 0, right: 0, alignItems: 'center' }}>
       <TouchableOpacity
         onPress={onRetry}
         disabled={retrying}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.nested, borderRadius: 14, paddingVertical: 5, paddingHorizontal: 12, marginTop: 4 }}
+        // The whole strip, "Retry" included, is the touch target; the slop makes
+        // the thin pill easier to hit without reaching up into the status bar.
+        hitSlop={{ top: 6, bottom: 10, left: 8, right: 8 }}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.nested, borderRadius: 14, paddingVertical: 5, paddingHorizontal: 12, marginTop: 4, marginHorizontal: 16, maxWidth: '92%' }}
       >
         <WifiOff color={Colors.textSecondary} size={13} strokeWidth={2} />
-        <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>
+        <Text style={{ color: Colors.textSecondary, fontSize: 12, flexShrink: 1 }}>
           {retrying ? 'Reconnecting…' : 'Offline · showing saved data · Retry'}
         </Text>
       </TouchableOpacity>
-    </SafeAreaView>
+    </View>
   );
 }
 
