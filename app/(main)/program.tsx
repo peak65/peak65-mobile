@@ -19,6 +19,7 @@ import {
 import { deriveZonesFromTimeTrial, type TrainingZones } from '../../lib/zoneDerivation';
 import { Colors, Fonts } from '../../lib/theme';
 import { groupBySuperset } from '../../lib/programGrouping';
+import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
 import HRDetailModal, { type HRDetail } from '../../components/HRDetailModal';
 
@@ -665,13 +666,17 @@ function DayCard({
 
     // Hard 3 detection — triggers next week program generation
     try {
-      const { data: currentProgram } = await supabase
-        .from('programs')
-        .select('program_data, week_number')
-        .eq('user_id', userId)
+      // Top two live rows, so two live rows for the same top week are spotted
+      // and resolved to the newest instead of one being picked arbitrarily.
+      const { data: topRows } = await excludeArchived(
+        supabase
+          .from('programs')
+          .select('id, program_data, week_number, created_at')
+          .eq('user_id', userId),
+      )
         .order('week_number', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(2);
+      const currentProgram = visiblePrograms(topRows ?? [], 'hard3')[0] ?? null;
 
       if (currentProgram) {
         const programDays = (currentProgram.program_data as { days?: { day: string; type: string }[] })?.days || [];
@@ -787,13 +792,17 @@ function DayCard({
 
     // Hard 3 detection — triggers next week program generation
     try {
-      const { data: currentProgram } = await supabase
-        .from('programs')
-        .select('program_data, week_number')
-        .eq('user_id', userId)
+      // Top two live rows, so two live rows for the same top week are spotted
+      // and resolved to the newest instead of one being picked arbitrarily.
+      const { data: topRows } = await excludeArchived(
+        supabase
+          .from('programs')
+          .select('id, program_data, week_number, created_at')
+          .eq('user_id', userId),
+      )
         .order('week_number', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(2);
+      const currentProgram = visiblePrograms(topRows ?? [], 'hard3')[0] ?? null;
 
       if (currentProgram) {
         const programDays = (currentProgram.program_data as { days?: { day: string; type: string }[] })?.days || [];
@@ -991,8 +1000,9 @@ export default function ProgramScreen() {
     if (completedDayCount < trainingDaysCount && !isLastDay) return;
 
     const nextNum = prog.week_number + 1;
-    const { data: existing } = await supabase
-      .from('programs').select('id').eq('user_id', uid).eq('week_number', nextNum).limit(1);
+    const { data: existing } = await excludeArchived(
+      supabase.from('programs').select('id').eq('user_id', uid).eq('week_number', nextNum),
+    ).limit(1);
     if (existing?.length) { setNextWeekReady(true); return; }
 
     nextWeekTriggeredRef.current = true;
@@ -1019,7 +1029,8 @@ export default function ProgramScreen() {
       if (raw) {
         const c = JSON.parse(raw);
         if (Date.now() - (c.timestamp ?? 0) < 4 * 60 * 60 * 1000) {
-          const progs = (c.programs ?? []) as Program[];
+          // Cached rows can predate the archived filter — filter them the same way.
+          const progs = visiblePrograms((c.programs ?? []) as Program[], 'program-cache');
           setAllPrograms(progs);
           if (progs.length > 0) setWeekIdx(progs.length - 1);
           setTodayName(new Date().toLocaleDateString('en-US', { weekday: 'long' }));
@@ -1073,12 +1084,13 @@ export default function ProgramScreen() {
     setUserId(session.user.id);
 
     const [progsRes, logsRes, profileRes] = await Promise.all([
-      supabase
-        .from('programs')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .not('is_draft', 'is', true)
-        .order('week_number', { ascending: true }),
+      excludeArchived(
+        supabase
+          .from('programs')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .not('is_draft', 'is', true),
+      ).order('week_number', { ascending: true }),
       supabase
         .from('session_logs')
         .select('week_number, day_name, log_field, session_name, session_time, id, peak_hr, avg_hr, hr_recovery_1min, hr_recovery_2min, zone_minutes, hr_screenshot_url, hr_curve_screenshot_url')
@@ -1091,7 +1103,7 @@ export default function ProgramScreen() {
         .maybeSingle(),
     ]);
 
-    const progs = (progsRes.data ?? []) as Program[];
+    const progs = visiblePrograms((progsRes.data ?? []) as Program[], 'program');
     setAllPrograms(progs);
     if (progs.length > 0) setWeekIdx(progs.length - 1);
     setTodayName(new Date().toLocaleDateString('en-US', { weekday: 'long' }));

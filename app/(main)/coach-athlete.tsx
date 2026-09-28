@@ -20,6 +20,7 @@ import type { MainStackParamList, ProgramDay, ProgramSession, ExerciseItem } fro
 import TrendLineChart from '../components/TrendLineChart';
 import { groupBySuperset } from '../../lib/programGrouping';
 import { syncBadge } from '../../lib/badge';
+import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { Colors, Fonts } from '../../lib/theme';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
 
@@ -265,12 +266,13 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
         .select('id, first_name, last_name, avatar_url, goal, race_date, tier')
         .eq('id', athleteId)
         .maybeSingle(),
-      supabase
-        .from('programs')
-        .select('id, week_number, week_start_date, program_data, phase')
-        .eq('user_id', athleteId)
-        .not('is_draft', 'is', true)
-        .order('week_number', { ascending: true }),
+      excludeArchived(
+        supabase
+          .from('programs')
+          .select('id, week_number, week_start_date, program_data, phase, created_at')
+          .eq('user_id', athleteId)
+          .not('is_draft', 'is', true),
+      ).order('week_number', { ascending: true }),
     ]);
 
     if (!mounted.current) return;
@@ -281,7 +283,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
     // All non-draft weeks, ascending by week_number. Default the selected week to
     // the latest (last in the ascending list) so the initial view is unchanged.
     // Session logs for the selected week are loaded by a dedicated effect below.
-    const mappedWeeks: ProgramWeek[] = (programRes.data ?? []).map((p: any) => ({
+    const mappedWeeks: ProgramWeek[] = visiblePrograms((programRes.data ?? []) as any[], 'coach-athlete').map((p: any) => ({
       id:              p.id,
       week_number:     p.week_number,
       week_start_date: p.week_start_date,

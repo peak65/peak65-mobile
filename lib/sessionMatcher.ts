@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { excludeArchived, visiblePrograms } from './programFilters';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,11 +65,15 @@ export async function detectCandidates(userId: string): Promise<void> {
   const todayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
   // Find the active program for this week
-  const { data: programs } = await supabase
-    .from('programs')
-    .select('id, week_number, week_start_date, program_data')
-    .eq('user_id', userId)
-    .not('is_draft', 'is', true)
+  // Archived rows are filtered before the limit, so they can't take slots in the
+  // five-week window and push a live week out of it.
+  const { data: programs } = await excludeArchived(
+    supabase
+      .from('programs')
+      .select('id, week_number, week_start_date, program_data, created_at')
+      .eq('user_id', userId)
+      .not('is_draft', 'is', true),
+  )
     .order('week_number', { ascending: false })
     .limit(5);
 
@@ -76,7 +81,7 @@ export async function detectCandidates(userId: string): Promise<void> {
   let weekNumber: number | null      = null;
   let todaySessions: Array<{ name: string; duration_minutes: number }> = [];
 
-  for (const prog of programs ?? []) {
+  for (const prog of visiblePrograms(programs ?? [], 'sessionMatcher')) {
     const start = new Date(prog.week_start_date + 'T00:00:00');
     const end   = new Date(start.getTime() + 7 * 86_400_000);
     if (new Date() >= start && new Date() < end) {

@@ -10,6 +10,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { Colors, Fonts } from '../../lib/theme';
 import TrendLineChart, { type TrendPoint } from '../components/TrendLineChart';
 import ZoneBars, { type ZoneMinutes } from '../../components/ZoneBars';
@@ -605,13 +606,14 @@ function WorkoutDetailModal({
   async function loadPrograms() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) return;
-    const { data } = await supabase
-      .from('programs')
-      .select('id, week_number, program_data')
-      .eq('user_id', session.user.id)
-      .not('is_draft', 'is', true)
-      .order('week_number', { ascending: false });
-    setPrograms((data ?? []) as any[]);
+    const { data } = await excludeArchived(
+      supabase
+        .from('programs')
+        .select('id, week_number, program_data, created_at')
+        .eq('user_id', session.user.id)
+        .not('is_draft', 'is', true),
+    ).order('week_number', { ascending: false });
+    setPrograms(visiblePrograms((data ?? []) as any[], 'history-assign'));
     setAssignMode(true);
   }
 
@@ -911,8 +913,10 @@ export default function HistoryScreen() {
       supabase.from('external_workouts').select('*').eq('user_id', session.user.id)
         .order('start_time', { ascending: false }),
       // Does a real program exist yet? Drives the Pinnacle waiting copy below.
-      supabase.from('programs').select('id').eq('user_id', session.user.id)
-        .not('is_draft', 'is', true).limit(1).maybeSingle(),
+      excludeArchived(
+        supabase.from('programs').select('id').eq('user_id', session.user.id)
+          .not('is_draft', 'is', true),
+      ).limit(1).maybeSingle(),
     ]);
 
     if (!mounted.current) { setLoading(false); return; }

@@ -30,6 +30,7 @@ import { useCoachName } from '../../lib/useCoachName';
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Logo } from '../../components/Logo';
+import { excludeArchived, isArchivedProgram, visiblePrograms } from '../../lib/programFilters';
 import { isRestRow } from '../../lib/exerciseNotes';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
 import { Flags } from '../../lib/flags';
@@ -501,7 +502,9 @@ export default function HomeScreen() {
       if (raw && mounted.current && myId === loadIdRef.current) {
         const c = JSON.parse(raw);
         const ageMs = Date.now() - (c.timestamp ?? 0);
-        if (ageMs < 4 * 60 * 60 * 1000) {
+        // A cache written before archived rows were filtered can hold an archived
+        // week; skip it and let the fresh fetch below render instead.
+        if (ageMs < 4 * 60 * 60 * 1000 && !isArchivedProgram(c.program)) {
           const prog = c.program as Program | null;
           setProgram(prog);
           if (prog?.program_data?.days) {
@@ -533,9 +536,10 @@ export default function HomeScreen() {
     const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
     const [progsRes, logsRes, profileRes, extStreakRes, cacheRes] = await Promise.all([
-      supabase.from('programs').select('*').eq('user_id', uid)
-        .not('is_draft', 'is', true)
-        .order('week_number', { ascending: true }),
+      excludeArchived(
+        supabase.from('programs').select('*').eq('user_id', uid)
+          .not('is_draft', 'is', true),
+      ).order('week_number', { ascending: true }),
       supabase.from('session_logs').select('completed_at, completed, session_name, session_time')
         .eq('user_id', uid).eq('completed', true).order('completed_at', { ascending: false }),
       supabase.from('profiles')
@@ -555,7 +559,7 @@ export default function HomeScreen() {
     ]);
     if (!mounted.current || myId !== loadIdRef.current) return;
 
-    const progs = (progsRes.data ?? []) as Program[];
+    const progs = visiblePrograms((progsRes.data ?? []) as Program[], 'home');
 
     let activeProg: Program | null = null;
     for (const p of progs) {

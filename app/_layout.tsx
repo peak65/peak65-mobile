@@ -35,6 +35,7 @@ import { clearUserCache } from '../lib/userCache';
 import { syncBadge } from '../lib/badge';
 import { Colors } from '../lib/theme';
 import { LEGAL_VERSION } from '../lib/legal';
+import { excludeArchived } from '../lib/programFilters';
 import LoginScreen from './auth/login';
 import SignupScreen from './auth/signup';
 import OnboardingScreen from './onboarding/index';
@@ -343,11 +344,13 @@ export type AppState = 'loading' | 'unauthenticated' | 'onboarding' | 'setup' | 
 // A non-draft program is what separates "ready to train" from "still waiting".
 // Shared by the Pinnacle branch and the standard path below.
 async function hasActiveProgram(userId: string): Promise<boolean> {
-  const { data } = await supabase
-    .from('programs')
-    .select('id')
-    .eq('user_id', userId)
-    .not('is_draft', 'is', true)
+  const { data } = await excludeArchived(
+    supabase
+      .from('programs')
+      .select('id')
+      .eq('user_id', userId)
+      .not('is_draft', 'is', true),
+  )
     .limit(1)
     .maybeSingle();
   return !!data;
