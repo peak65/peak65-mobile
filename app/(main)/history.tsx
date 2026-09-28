@@ -12,11 +12,12 @@ import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable } from '../../lib/cachePolicy';
+import LoadFailedCard, { RefreshFailedLabel } from '../../components/LoadFailedCard';
 import { Colors, Fonts } from '../../lib/theme';
 import TrendLineChart, { type TrendPoint } from '../components/TrendLineChart';
 import ZoneBars, { type ZoneMinutes } from '../../components/ZoneBars';
 import type { TabParamList } from '../_layout';
-import { ProgramStatusContext } from '../_layout';
+import { ProgramStatusContext, ConnectivityContext } from '../_layout';
 
 const ORANGE    = '#ff9944';
 // Rendered rows in the check-in history list. The full record stays in state;
@@ -860,6 +861,12 @@ export default function HistoryScreen() {
   const [resolved, setResolved]           = useState(false);
   // True while history_cache is on screen and the refresh hasn't landed.
   const [showingCache, setShowingCache]   = useState(false);
+  // The last load failed. With nothing on screen this shows a Retry card; with
+  // cached history it replaces "Refreshing…". Never a spinner.
+  const [loadFailed, setLoadFailed]       = useState(false);
+  const { reportLoadSucceeded } = React.useContext(ConnectivityContext);
+  const reportLoadSucceededRef = useRef(reportLoadSucceeded);
+  reportLoadSucceededRef.current = reportLoadSucceeded;
   // True once server data has been shown; later loads skip the cache.
   const freshShownRef                     = useRef(false);
   const [checkinOpen, setCheckinOpen]     = useState(false);
@@ -879,6 +886,7 @@ export default function HistoryScreen() {
   }, []);
 
   const load = useCallback(async () => {
+    setLoadFailed(false);
     // Stale-while-revalidate: on the first load, show history_cache straight
     // away (up to the CACHE_MAX_AGE_MS ceiling), marked "Refreshing…", then
     // refresh below. Skipped once server data is on screen.
@@ -903,7 +911,9 @@ export default function HistoryScreen() {
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current) { setLoading(false); return; }
-    if (!session?.user) { setLoading(false); setResolved(true); return; }
+    // Inside the app a missing session means auth couldn't be confirmed (a real
+    // sign-out routes to Login), so this is a failed load, not an empty one.
+    if (!session?.user) { setLoading(false); setLoadFailed(true); return; }
 
     const [profRes, logsRes, checkinsRes, allCheckinsRes, extRes, progRes] = await Promise.all([
       supabase.from('profiles').select('fitness_goal, weight_unit, preferred_units, tier').eq('id', session.user.id).single(),
@@ -933,6 +943,7 @@ export default function HistoryScreen() {
     if (logsRes.error || extRes.error || checkinsRes.error) {
       console.log('[history] load failed, keeping current content:', (logsRes.error ?? extRes.error ?? checkinsRes.error)?.message);
       setLoading(false);
+      setLoadFailed(true);
       return;
     }
     setProfile(profRes.data);
@@ -949,6 +960,8 @@ export default function HistoryScreen() {
     setResolved(true);
     setShowingCache(false);
     freshShownRef.current = true;
+    setLoadFailed(false);
+    reportLoadSucceededRef.current();
   }, []);
 
   // Refresh on focus so a freshly-onboarded athlete — and a coach publishing
@@ -1114,7 +1127,9 @@ export default function HistoryScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
         <Text style={styles.heading}>HISTORY</Text>
-        {showingCache && <Text style={styles.refreshingText}>Refreshing…</Text>}
+        {showingCache && (loadFailed
+          ? <RefreshFailedLabel onRetry={() => { void load(); }} style={{ paddingHorizontal: 20, marginTop: -8, marginBottom: 8 }} />
+          : <Text style={styles.refreshingText}>Refreshing…</Text>)}
 
         {/* Stats summary */}
         <View style={styles.statsRow}>
@@ -1219,10 +1234,14 @@ export default function HistoryScreen() {
         {/* Sessions + External Workouts — interleaved by date */}
         <Text style={styles.sectionHeading}>SESSIONS</Text>
         {logs.length === 0 && externalWorkouts.length === 0 && !resolved ? (
-          // Server read still in flight — don't assert "no sessions" yet.
-          <View style={styles.emptyState}>
-            <ActivityIndicator color={Colors.accent} />
-          </View>
+          loadFailed ? (
+            <LoadFailedCard message="Couldn't load your history. Check your connection." onRetry={() => { void load(); }} />
+          ) : (
+            // Server read still in flight — don't assert "no sessions" yet.
+            <View style={styles.emptyState}>
+              <ActivityIndicator color={Colors.accent} />
+            </View>
+          )
         ) : logs.length === 0 && externalWorkouts.length === 0 ? (
           <View style={styles.emptyState}>
             <Feather name="activity" color={Colors.textSecondary} size={32} />

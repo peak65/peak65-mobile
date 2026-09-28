@@ -25,11 +25,12 @@ import {
   selectSleepSource, resolveAllSources,
 } from '../../lib/wearablePriority';
 import type { Program, ProgramDay, ProgramSession, ExerciseItem, TabParamList, MainStackParamList } from '../_layout';
-import { ProgramStatusContext } from '../_layout';
+import { ProgramStatusContext, ConnectivityContext } from '../_layout';
 import { useCoachName } from '../../lib/useCoachName';
 import { detectCandidates, getPendingCandidates, type CandidateRow } from '../../lib/sessionMatcher';
 import WorkoutConfirmationCard from '../../components/WorkoutConfirmationCard';
 import { Logo } from '../../components/Logo';
+import LoadFailedCard, { RefreshFailedLabel } from '../../components/LoadFailedCard';
 import { excludeArchived, isArchivedProgram, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
 import { perfLog, sinceAppStart } from '../../lib/perf';
@@ -447,6 +448,13 @@ export default function HomeScreen() {
   const freshShownRef     = useRef(false);
   // When server data last landed, for the foreground-return throttle.
   const lastFreshAtRef    = useRef(0);
+  // The last load failed. With nothing on screen this shows a Retry card; with
+  // cached content it replaces "Refreshing...". Never a spinner — a spinner
+  // only ever means a request is in flight.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const { reportLoadSucceeded } = React.useContext(ConnectivityContext);
+  const reportLoadSucceededRef = useRef(reportLoadSucceeded);
+  reportLoadSucceededRef.current = reportLoadSucceeded;
 
   useEffect(() => {
     mounted.current = true;
@@ -543,6 +551,7 @@ export default function HomeScreen() {
 
   const loadData = useCallback(async () => {
     const myId = ++loadIdRef.current;
+    setLoadFailed(false);
 
     // Stale-while-revalidate: on the first load, show cached home data straight
     // away (whatever its age, up to the CACHE_MAX_AGE_MS ceiling) and refresh
@@ -587,7 +596,9 @@ export default function HomeScreen() {
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!mounted.current || myId !== loadIdRef.current) return;
-    if (!session?.user) { setLoading(false); setResolved(true); return; }
+    // Inside the app a missing session means auth couldn't be confirmed (a real
+    // sign-out routes to Login), so this is a failed load, not an empty one.
+    if (!session?.user) { setLoading(false); setLoadFailed(true); return; }
     const uid = session.user.id;
     setUserId(uid);
 
@@ -645,6 +656,7 @@ export default function HomeScreen() {
     if (weeksRes.error || logsRes.error) {
       console.log('[home] load failed, keeping current content:', weeksRes.error?.message ?? logsRes.error?.message);
       setLoading(false);
+      setLoadFailed(true);
       return;
     }
 
@@ -672,6 +684,7 @@ export default function HomeScreen() {
         if (fullError || !full) {
           console.log('[home] active week fetch failed, keeping current content:', fullError?.message);
           setLoading(false);
+          setLoadFailed(true);
           return;
         }
         prog = full as Program;
@@ -751,6 +764,8 @@ export default function HomeScreen() {
     setCacheStale(false);
     freshShownRef.current = true;
     lastFreshAtRef.current = Date.now();
+    setLoadFailed(false);
+    reportLoadSucceededRef.current();
     runCountupIfNeeded();
 
     // Persist home data to AsyncStorage for instant render on next open. Skipped
@@ -1031,7 +1046,9 @@ export default function HomeScreen() {
           <Logo width={150} />
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={styles.headerDate}>{todayLabel()}</Text>
-            {cacheStale && <Text style={{ color: Colors.textSecondary, fontSize: 10, marginTop: 1 }}>Refreshing...</Text>}
+            {cacheStale && (loadFailed
+              ? <RefreshFailedLabel onRetry={() => { void loadData(); }} style={{ marginTop: 1 }} />
+              : <Text style={{ color: Colors.textSecondary, fontSize: 10, marginTop: 1 }}>Refreshing...</Text>)}
           </View>
         </View>
 
@@ -1166,10 +1183,14 @@ export default function HomeScreen() {
             </View>
           )
         ) : !todayDay && !program && !resolved ? (
-          // Server read still in flight — say nothing rather than the wrong thing.
-          <View style={styles.emptyBlock}>
-            <ActivityIndicator color={Colors.accent} />
-          </View>
+          loadFailed ? (
+            <LoadFailedCard message="Couldn't load your training. Check your connection." onRetry={() => { void loadData(); }} />
+          ) : (
+            // Server read still in flight — say nothing rather than the wrong thing.
+            <View style={styles.emptyBlock}>
+              <ActivityIndicator color={Colors.accent} />
+            </View>
+          )
         ) : !todayDay ? (
           <View style={styles.emptyBlock}>
             {program && program.week_start_date ? (() => {

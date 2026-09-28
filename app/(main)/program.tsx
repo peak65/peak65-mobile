@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import type { Program, ProgramDay, ProgramSession, ExerciseItem, MainStackParamList } from '../_layout';
-import { ProgramStatusContext } from '../_layout';
+import { ProgramStatusContext, ConnectivityContext } from '../_layout';
 import { useCoachName } from '../../lib/useCoachName';
 import {
   matchTimeTrial, getWorkoutHRDetail,
@@ -18,6 +18,7 @@ import {
 } from '../../lib/healthKit';
 import { deriveZonesFromTimeTrial, type TrainingZones } from '../../lib/zoneDerivation';
 import { Colors, Fonts } from '../../lib/theme';
+import LoadFailedCard, { RefreshFailedLabel } from '../../components/LoadFailedCard';
 import { groupBySuperset } from '../../lib/programGrouping';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
@@ -969,6 +970,12 @@ export default function ProgramScreen() {
   const [resolved, setResolved]           = useState(false);
   // True while program_cache is on screen and the refresh hasn't landed.
   const [showingCache, setShowingCache]   = useState(false);
+  // The last load failed. With no weeks on screen this shows a Retry card; with
+  // cached weeks it replaces "Refreshing…". Never a spinner.
+  const [loadFailed, setLoadFailed]       = useState(false);
+  const { reportLoadSucceeded } = React.useContext(ConnectivityContext);
+  const reportLoadSucceededRef = useRef(reportLoadSucceeded);
+  reportLoadSucceededRef.current = reportLoadSucceeded;
   // True once server data has been shown; later loads skip the cache.
   const freshShownRef                     = useRef(false);
   const [ttProfile, setTtProfile]         = useState<TimeTrialProfile | null>(null);
@@ -1030,6 +1037,7 @@ export default function ProgramScreen() {
   }
 
   const load = useCallback(async () => {
+    setLoadFailed(false);
     // Stale-while-revalidate: on the first load, show program_cache straight
     // away (up to the CACHE_MAX_AGE_MS ceiling) and refresh below. Skipped once
     // server data is on screen, so a focus reload never regresses it. While it
@@ -1095,7 +1103,9 @@ export default function ProgramScreen() {
     if (!cacheApplied && !freshShownRef.current) setLoading(true);
 
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) { setLoading(false); setResolved(true); return; }
+    // Inside the app a missing session means auth couldn't be confirmed (a real
+    // sign-out routes to Login), so this is a failed load, not an empty one.
+    if (!session?.user) { setLoading(false); setLoadFailed(true); return; }
     setUserId(session.user.id);
 
     const [progsRes, logsRes, profileRes] = await Promise.all([
@@ -1123,6 +1133,7 @@ export default function ProgramScreen() {
     if (progsRes.error || logsRes.error) {
       console.log('[program] load failed, keeping current content:', progsRes.error?.message ?? logsRes.error?.message);
       setLoading(false);
+      setLoadFailed(true);
       return;
     }
 
@@ -1183,6 +1194,8 @@ export default function ProgramScreen() {
     setResolved(true);
     setShowingCache(false);
     freshShownRef.current = true;
+    setLoadFailed(false);
+    reportLoadSucceededRef.current();
 
     // Check if we should generate next week on load
     if (!isEliteRef.current && active && !nextExists && !nextWeekTriggeredRef.current) {
@@ -1238,7 +1251,10 @@ export default function ProgramScreen() {
   // would wrongly hide the banner. The empty program list keeps the banner
   // clearing the moment the coach's program lands.
   const isEliteAthlete    = athleteTier === 'elite' || isElite;
-  const showCoachBuilding = isEliteAthlete && allPrograms.length === 0;
+  // A failed load with no weeks to show. Checked before the coach-building
+  // card, which would otherwise claim a program is being built.
+  const showLoadFailed    = loadFailed && allPrograms.length === 0;
+  const showCoachBuilding = !showLoadFailed && isEliteAthlete && allPrograms.length === 0;
 
   const isViewingCurrentWeek = (() => {
     if (!currentProgram?.week_start_date) return false;
@@ -1294,7 +1310,7 @@ export default function ProgramScreen() {
           {/* The week selector is meaningless with no program — a Pinnacle
               athlete waiting on their coach would otherwise see a live
               "Week 1" stepper above an empty state. */}
-          {!showCoachBuilding && (
+          {!showCoachBuilding && !showLoadFailed && (
           <View style={styles.weekRow}>
             <TouchableOpacity
               onPress={() => setWeekIdx(i => i - 1)}
@@ -1305,7 +1321,9 @@ export default function ProgramScreen() {
             </TouchableOpacity>
             <View style={{ alignItems: 'center' }}>
               <Text style={styles.weekLabel}>Week {displayWeekNum}</Text>
-              {showingCache && <Text style={styles.refreshingText}>Refreshing…</Text>}
+              {showingCache && (loadFailed
+                ? <RefreshFailedLabel onRetry={() => { void load(); }} style={{ marginTop: 1 }} />
+                : <Text style={styles.refreshingText}>Refreshing…</Text>)}
             </View>
             <TouchableOpacity
               onPress={() => setWeekIdx(i => i + 1)}
@@ -1317,7 +1335,9 @@ export default function ProgramScreen() {
           </View>
           )}
 
-          {showCoachBuilding ? (
+          {showLoadFailed ? (
+            <LoadFailedCard message="Couldn't load your program. Check your connection." onRetry={() => { void load(); }} />
+          ) : showCoachBuilding ? (
             // Hold the card until the coach's name is known, so it never renders
             // "Your coach" and then swaps to the real name a moment later.
             coachResolved ? (

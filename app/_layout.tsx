@@ -193,6 +193,13 @@ export const UnreadContext = React.createContext<{
   setHasUnread: (v: boolean) => void;
 }>({ hasUnread: false, setHasUnread: () => {} });
 
+// Screens call reportLoadSucceeded after any successful server load. While the
+// app is running on its saved routing result (the offline banner), that is proof
+// the network is back: the banner clears and the real resolution runs.
+export const ConnectivityContext = React.createContext<{
+  reportLoadSucceeded: () => void;
+}>({ reportLoadSucceeded: () => {} });
+
 // Pinnacle status, resolved once in resolveAppState and read by the tabs.
 // isElite gates every automatic program generator; awaitingProgram switches
 // Home / Program / History to the "coach is building your program" state.
@@ -882,6 +889,20 @@ export default function RootLayout() {
     }
   }, [applyResult, enterFallback]);
 
+  // A screen loaded from the server, so the network is back: drop the offline
+  // banner now, and confirm the saved routing with the real resolution (which
+  // also runs the post-auth work skipped while offline). A failure there leaves
+  // the app as it is.
+  const reportLoadSucceeded = React.useCallback(() => {
+    if (offlineModeRef.current !== 'cached') return;
+    offlineModeRef.current = null;
+    setOfflineMode(null);
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) void runResolve(session, 'load succeeded');
+    });
+  }, [runResolve]);
+  const connectivityValue = React.useMemo(() => ({ reportLoadSucceeded }), [reportLoadSucceeded]);
+
   // Resolves for a session that may be null. Null goes to Login only when no
   // session is saved on the device; a saved one means the network, not the
   // athlete, is the problem.
@@ -1016,12 +1037,14 @@ export default function RootLayout() {
       <CoachContext.Provider value={isCoach}>
         <ProgramStatusContext.Provider value={{ isElite, awaitingProgram }}>
           <UnreadContext.Provider value={{ hasUnread, setHasUnread }}>
+          <ConnectivityContext.Provider value={connectivityValue}>
             {/* Keyed on the route so a real resolution that disagrees with the
                 saved one shown offline (e.g. the legal gate) remounts into it. */}
             <NavigationContainer key={initialRoute} ref={mainNavigationRef} onReady={flushPendingTap}>
               <MainNavigator initialRoute={initialRoute} legalParams={legalParams} />
             </NavigationContainer>
             {offlineMode === 'cached' && <OfflineBanner retrying={retrying} onRetry={retryResolve} />}
+          </ConnectivityContext.Provider>
           </UnreadContext.Provider>
         </ProgramStatusContext.Provider>
       </CoachContext.Provider>
