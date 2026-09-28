@@ -725,9 +725,6 @@ export default function HomeScreen() {
     setProfileGoal(profileData?.goal ?? null);
     setPreferredUnits(profileData?.preferred_units ?? null);
 
-    // ── [DIAG] Profile token dump ──────────────────────────────────────────────
-    // ──────────────────────────────────────────────────────────────────────────
-
     const isElite = isEliteHyroxProfile(profileData?.goal ?? null, profileData?.goal_time ?? null);
     const newStreak = calculateStreakValue(sessionDates, externalDates, restDayNames, isElite);
     console.log('[streak] isEliteHyrox:', isElite, 'streak:', newStreak);
@@ -788,7 +785,7 @@ export default function HomeScreen() {
         exerciseMinutes:   null,
         lastActiveCalSync: null,
       });
-      console.log('[cache] applied — hrv:', cachedRd.hrv?.value, '| sleep:', cachedRd.sleepHours?.value, '| rhr:', cachedRd.restingHR?.value, '| steps:', cachedRd.steps?.value, '| active:', cachedRd.activeCalories?.value, '| total:', cachedRd.totalCalories?.value);
+      console.log('[cache] applied — health reading from', cacheRow?.date ?? 'unknown date');
     } else {
       console.log('[cache] no cache row — will show shimmer until fresh data arrives');
     }
@@ -806,7 +803,6 @@ export default function HomeScreen() {
       getTodayHealthData()
         .then(async (data) => {
           if (!mounted.current || myId !== loadIdRef.current) return;
-          console.log('[health] getTodayHealthData result:', JSON.stringify(data));
           setHealthData(data);
 
           if (profileData) {
@@ -873,33 +869,14 @@ export default function HomeScreen() {
 
       fetchTodayHealthData()
         .then(async rd => {
-          console.log('[whoop-debug] fetchTodayHealthData .then — myId:', myId, 'current:', loadIdRef.current, 'mounted:', mounted.current);
           if (!mounted.current || myId !== loadIdRef.current) {
-            console.log('[whoop-debug] BAILED after fetchTodayHealthData — not setting readinessData');
             return;
           }
-          console.log('[health] fetchTodayHealthData result:', JSON.stringify(rd));
           // Whoop data (if any) is written to daily_health_readings by the backend cron
           // and surfaced via the cached read above — no direct Whoop fetch on-device.
-          console.log('[whoop-debug] calling setReadinessData (Apple Health path) — hrv:', rd.hrv?.value, '| sleep:', rd.sleepHours?.value, '| rhr:', rd.restingHR?.value, '| steps:', rd.steps?.value, '| active:', rd.activeCalories?.value, '| total:', rd.totalCalories?.value);
           setReadinessData(rd);
           setFetchingFresh(false);
           saveHealthCache(uid, rd, new Date().toLocaleDateString('en-CA')).catch(() => {});
-          if (profileData) {
-            const wearables = getConnectedWearables(profileData);
-            const tdee = computeTDEEFromProfile(profileData);
-            const base = tdee.ok ? tdee.value : null;
-            const tDays = profileData.current_training_days != null
-              ? (parseInt(profileData.current_training_days, 10) || 4)
-              : profileData.rest_days != null ? Math.max(0, 7 - profileData.rest_days) : 4;
-            const localBmr = base != null ? Math.round(base / getActivityMultiplier(tDays)) : null;
-            const sources = resolveAllSources(wearables, rd, profileData, base, localBmr);
-            console.log('[home] totalCal final:', sources.totalCal.value, '| source:', sources.totalCal.source);
-          }
-          const hrv   = rd.hrv?.value         ?? null;
-          const sleep = rd.sleepHours?.value   ?? null;
-          const rhr   = rd.restingHR?.value    ?? null;
-          console.log('[home] readiness row final values:', { hrv, sleep, rhr });
         })
         .catch(e => { console.log('[home] readiness fetch error:', e); setFetchingFresh(false); });
 
@@ -955,14 +932,6 @@ export default function HomeScreen() {
     console.log('[health] auto-refresh triggered by: focus');
     loadData();
   }, [loadData]));
-
-  useEffect(() => {
-    console.log('[whoop-debug] readinessData changed —', readinessData == null ? 'NULL' : `hrv:${readinessData.hrv?.value ?? 'null'} sleep:${readinessData.sleepHours?.value ?? 'null'} rhr:${readinessData.restingHR?.value ?? 'null'} steps:${readinessData.steps?.value ?? 'null'} active:${readinessData.activeCalories?.value ?? 'null'} total:${readinessData.totalCalories?.value ?? 'null'}`);
-  }, [readinessData]);
-
-  useEffect(() => {
-    console.log('[whoop-debug] fetchingFresh changed —', fetchingFresh);
-  }, [fetchingFresh]);
 
   // First content on screen after launch — from cache or from the server.
   useEffect(() => {
@@ -1489,7 +1458,6 @@ export default function HomeScreen() {
               const projectedTotal = hoursIntoCycle > 2 && hoursIntoCycle < 22
                 ? Math.round(whoopTotal * 24 / hoursIntoCycle)
                 : null;
-              console.log('[home] Total Cal display: Whoop cycle total:', whoopTotal, '| hoursIntoCycle:', hoursIntoCycle.toFixed(1), '| projected:', projectedTotal);
               return (
                 <View style={[styles.statCard, { flex: 1 }]}>
                   <Target color={Colors.textSecondary} size={20} strokeWidth={1.5} />
@@ -1511,7 +1479,6 @@ export default function HomeScreen() {
               ? basalSoFar + activeSoFar
               : basalSoFar ?? null;
             const projected    = base != null && activeSoFar != null ? base + activeSoFar : null;
-            console.log('[home] Total Cal display: activeSoFar:', activeSoFar, '| bmr:', bmr, '| tdeeBase:', tdeeBase, '| projected:', projected);
             const syncTime     = healthData?.lastActiveCalSync
               ? new Date(healthData.lastActiveCalSync).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
               : null;

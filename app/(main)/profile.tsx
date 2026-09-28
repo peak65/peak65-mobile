@@ -380,14 +380,13 @@ export default function ProfileScreen() {
   // profileOverride: pass freshly-loaded data from `load` before setProfile resolves.
   async function loadHealthData(userId: string, profileOverride?: Profile | null) {
     const profileData = profileOverride ?? profile;
-    console.log('[profile] loadHealthData called, userId:', userId);
+    console.log('[profile] loadHealthData called');
     setHealthLoading(true);
     try {
       console.log('[profile] calling fetchTodayHealthData');
       // Whoop data is fetched and written to daily_health_readings by the backend
       // cron now — mobile only reads HealthKit here and reads the table for display.
       const data = await fetchTodayHealthData();
-      console.log('[profile] got health data:', JSON.stringify(data));
 
       // Calculate TDEE from profile and override basal/total calories
       if (profileData) {
@@ -399,13 +398,11 @@ export default function ProfileScreen() {
           const activeSource = data.activeCalories?.source;
           data.basalCalories = { value: tdeeBase, source: 'Calculated' };
           if (activeSource === 'Whoop') {
-            console.log('[whoop] strain kcal:', activeVal, 'tdee base:', tdeeBase, 'total:', tdeeBase + activeVal);
           }
           data.totalCalories = {
             value: tdeeBase + activeVal,
             source: activeSource ? `${activeSource} + Calculated` : 'Calculated',
           };
-          console.log('[profile] TDEE base:', tdeeBase, 'total:', data.totalCalories.value);
         } else {
           setTdeeMissingFields(tdee.missing);
           data.basalCalories = null;
@@ -858,7 +855,6 @@ export default function ProfileScreen() {
       const isOura  = url.startsWith('peak65://auth/oura/callback');
       if (!isWhoop && !isOura) return;
       const label = isOura ? 'Oura' : 'Whoop';
-      console.log(`[${label.toLowerCase()}] deep link received:`, url);
       const queryIdx = url.indexOf('?');
       const status = queryIdx !== -1
         ? new URLSearchParams(url.slice(queryIdx + 1)).get('status')
@@ -1501,7 +1497,6 @@ export default function ProfileScreen() {
               </View>
             );
           })()}
-          <SettingRow label="Garmin" value="Coming Soon" />
         </View>
 
         {/* Today's Health Data — only when Apple Health is connected */}

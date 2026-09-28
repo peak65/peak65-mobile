@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "peak65-mobile",
+    "name": "Peak 65",
     "slug": "peak65-mobile",
     "scheme": "peak65",
     "version": "1.0.0",
@@ -14,11 +14,18 @@
       "backgroundColor": "#080808"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.peak65.app",
+      "buildNumber": "64",
       "infoPlist": {
+        "CFBundleDisplayName": "Peak 65",
         "NSSupportsLiveActivities": true,
-        "NSSupportsLiveActivitiesFrequentUpdates": true
+        "NSSupportsLiveActivitiesFrequentUpdates": true,
+        "NSPhotoLibraryUsageDescription": "Peak 65 uses your photo library only when you choose a heart rate screenshot from your watch app to upload to a session.",
+        "NSCameraUsageDescription": "Peak 65 does not use your camera. Heart rate screenshots are chosen from your photo library.",
+        "NSMicrophoneUsageDescription": "Peak 65 does not use your microphone or record audio.",
+        "NSHealthShareUsageDescription": "Peak 65 reads your Apple Health data to personalize your training and track recovery.",
+        "NSHealthUpdateUsageDescription": "Peak 65 does not write any data to Apple Health. It only reads your health data."
       },
       "splash": {
         "image": "./assets/splash.png",
@@ -45,7 +52,21 @@
         {
           "isClinicalDataEnabled": false,
           "healthSharePermission": "Peak 65 reads your Apple Health data to personalize your training and track recovery.",
-          "healthUpdatePermission": "Peak 65 may write workout data to Apple Health."
+          "healthUpdatePermission": "Peak 65 does not write any data to Apple Health. It only reads your health data."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Peak 65 uses your photo library only when you choose a heart rate screenshot from your watch app to upload to a session.",
+          "cameraPermission": "Peak 65 does not use your camera. Heart rate screenshots are chosen from your photo library.",
+          "microphonePermission": "Peak 65 does not use your microphone or record audio."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Peak 65 does not use your microphone or record audio."
         }
       ],
       "expo-font"

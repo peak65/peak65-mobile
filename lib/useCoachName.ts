@@ -74,11 +74,11 @@ export function useCoachName(enabled: boolean = true): CoachNameState {
       }
 
       if (!ca?.coach_id) {
-        console.log('[useCoachName] no active coach_athletes row for athlete', uid);
+        console.log('[useCoachName] no active coach_athletes row');
         return;
       }
       if (!p) {
-        console.log('[useCoachName] coach profile not readable for coach_id', ca.coach_id);
+        console.log('[useCoachName] coach profile not readable');
         return;
       }
 

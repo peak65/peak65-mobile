@@ -141,7 +141,7 @@ export async function calculatePeakScore(
       coaching_line: coachingLine,
     }, { onConflict: 'user_id,score_date' });
 
-    console.log('[peakScore] score:', score, 'zone:', zone, 'baselineDay:', baselineDay);
+    console.log('[peakScore] computed');
     return { score, zone, coachingLine, baselineDay, hrvBaseline, rhrBaseline, sleepBaseline };
   } catch (e) {
     console.log('[peakScore] error:', e);

@@ -223,7 +223,11 @@ export function resolveAllSources(
   const totalCal  = selectTotalCalorieSource(wearables, healthData, tdeeBase, activeCal, bmr);
 
   console.log('[wearable] connected:', wearables);
-  console.log('[wearable] sources selected:', { activeCal, hrv, rhr, sleep, steps, totalCal });
+  // Sources only — the values are the athlete's health data.
+  console.log('[wearable] sources selected:', {
+    activeCal: activeCal?.source ?? null, hrv: hrv?.source ?? null, rhr: rhr?.source ?? null,
+    sleep: sleep?.source ?? null, steps: steps?.source ?? null, totalCal: totalCal?.source ?? null,
+  });
 
   return { activeCal, hrv, rhr, sleep, steps, totalCal };
 }

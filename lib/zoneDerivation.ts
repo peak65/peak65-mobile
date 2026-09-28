@@ -143,5 +143,5 @@ export async function refinePaceZones(
     last_zone_update: new Date().toISOString(),
   }).eq('id', userId);
 
-  console.log('[zones] refined: new z2_max_hr=', newZ2Max, 'source=', zoneSource, 'calibration runs=', calRuns);
+  console.log('[zones] refined — source:', zoneSource, 'calibration runs:', calRuns);
 }

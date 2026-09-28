@@ -188,7 +188,7 @@ function tagged(r: HealthReading | null, source: string): HealthReading | null {
 // Walk priority levels in order; return the most recent sample from the first
 // level that has any matching samples.
 function pickBest(samples: HKSample[], priorities: PriorityLevel[], includeIphone: boolean, metric: string): HealthReading | null {
-  console.log(`[healthkit] ${metric} unique sources:`, [...new Set(samples.map(s => getSampleSource(s)))]);
+  console.log(`[healthkit] ${metric} source count:`, new Set(samples.map(s => getSampleSource(s))).size);
   const allPriorities = includeIphone ? [...priorities, IPHONE_PRIORITY] : priorities;
 
   for (const { name, keys } of allPriorities) {
@@ -196,7 +196,6 @@ function pickBest(samples: HKSample[], priorities: PriorityLevel[], includeIphon
     if (matched.length > 0) {
       console.log(`[healthkit] ${metric} matched priority:`, name, 'count:', matched.length);
       console.log(`[healthkit] ${metric} first sample keys:`, Object.keys(matched[0] ?? {}));
-      console.log(`[healthkit] ${metric} first sample:`, JSON.stringify(matched[0]));
       matched.sort((a, b) =>
         new Date(b.endDate ?? b.startDate).getTime() - new Date(a.endDate ?? a.startDate).getTime()
       );
@@ -209,7 +208,7 @@ function pickBest(samples: HKSample[], priorities: PriorityLevel[], includeIphon
 
 // Sum all samples from the first priority level that has matches.
 function pickBestSum(samples: HKSample[], priorities: PriorityLevel[], includeIphone: boolean, metric: string): HealthReading | null {
-  console.log(`[healthkit] ${metric} unique sources:`, [...new Set(samples.map(s => getSampleSource(s)))]);
+  console.log(`[healthkit] ${metric} source count:`, new Set(samples.map(s => getSampleSource(s))).size);
   const allPriorities = includeIphone ? [...priorities, IPHONE_PRIORITY] : priorities;
 
   for (const { name, keys } of allPriorities) {
@@ -217,7 +216,6 @@ function pickBestSum(samples: HKSample[], priorities: PriorityLevel[], includeIp
     if (matched.length > 0) {
       console.log(`[healthkit] ${metric} matched priority:`, name, 'count:', matched.length);
       console.log(`[healthkit] ${metric} first sample keys:`, Object.keys(matched[0] ?? {}));
-      console.log(`[healthkit] ${metric} first sample:`, JSON.stringify(matched[0]));
       const sum = Math.round(matched.reduce((acc, s) => acc + sampleNumericValue(s), 0));
       return { value: sum, source: getSampleSource(matched[0]) || 'Unknown' };
     }
@@ -306,7 +304,7 @@ function sumAsleepHours(samples: HKSample[], metric: string): number | null {
   if (ms <= 0) return null;
 
   const hours = Math.min(Math.round((ms / (1000 * 60 * 60)) * 10) / 10, 16); // sanity cap
-  console.log(`[healthkit] ${metric} merged:`, merged.length, 'session intervals:', session.length, 'hours:', hours);
+  console.log(`[healthkit] ${metric} merged:`, merged.length, 'session intervals:', session.length);
   return hours > 0.25 ? hours : null;
 }
 
@@ -314,7 +312,7 @@ function sumAsleepHours(samples: HKSample[], metric: string): number | null {
 // its summed asleep hours. A source that recorded only InBed/Awake yields null,
 // so the walk continues to the next priority level.
 function pickBestSleep(samples: HKSample[], priorities: PriorityLevel[], metric: string): HealthReading | null {
-  console.log(`[healthkit] ${metric} unique sources:`, [...new Set(samples.map(s => getSampleSource(s)))]);
+  console.log(`[healthkit] ${metric} source count:`, new Set(samples.map(s => getSampleSource(s))).size);
 
   for (const { name, keys } of priorities) {
     const matched = samples.filter(s => sourceMatches(getSampleSource(s), keys));
@@ -431,7 +429,6 @@ async function fetchEnergySamples(
     if (samples.length > 0) {
       const first = samples[0];
       console.log(`[healthkit] ${label}: returning ${samples.length} samples from type="${typeStr}"`);
-      console.log(`[healthkit] ${label} sample resolved source:`, getSampleSource(first), 'top:', first?.sourceName, 'meta:', first?.metadata?.[0]?.sourceName);
       return samples;
     }
     console.log(`[healthkit] ${label}: empty result for type="${typeStr}"`);
@@ -523,12 +520,12 @@ export async function fetchTodayHealthData(): Promise<WearableHealthData> {
     ),
   ]);
 
-  const hrvSamples   = settled(hrvR);   console.log('[healthkit] hrv raw samples:', JSON.stringify(hrvSamples));
-  const rhrSamples   = settled(rhrR);   console.log('[healthkit] rhr raw samples:', JSON.stringify(rhrSamples));
-  const sleepSamples = settled(sleepR); console.log('[healthkit] sleep raw samples:', JSON.stringify(sleepSamples));
-  const stepsSamples = settled(stepsR); console.log('[healthkit] steps raw samples:', JSON.stringify(stepsSamples));
-  const activeSamples = settled(activeR); console.log('[healthkit] active calories raw samples:', JSON.stringify(activeSamples));
-  const basalSamples  = settled(basalR);  console.log('[healthkit] basal calories raw samples:', JSON.stringify(basalSamples));
+  const hrvSamples   = settled(hrvR);   console.log('[healthkit] hrv samples:', hrvSamples.length);
+  const rhrSamples   = settled(rhrR);   console.log('[healthkit] rhr samples:', rhrSamples.length);
+  const sleepSamples = settled(sleepR); console.log('[healthkit] sleep samples:', sleepSamples.length);
+  const stepsSamples = settled(stepsR); console.log('[healthkit] steps samples:', stepsSamples.length);
+  const activeSamples = settled(activeR); console.log('[healthkit] active calories samples:', activeSamples.length);
+  const basalSamples  = settled(basalR);  console.log('[healthkit] basal calories samples:', basalSamples.length);
 
   // Apple-devices-only gate. Anything a third-party app wrote into HealthKit is
   // dropped here, before aggregation — so a Whoop or Zepp reading yields no
@@ -557,12 +554,12 @@ export async function fetchTodayHealthData(): Promise<WearableHealthData> {
   const active = tagged(pickBestSum(activeApple, ACCEPT_ALL, false, 'active'), 'Apple Watch');
   const basal  = tagged(pickBestSum(basalApple,  ACCEPT_ALL, false, 'basal'),  'Apple Watch');
 
-  console.log('[hrv] source selected:', hrv?.source ?? 'none', 'value:', hrv?.value ?? null);
-  console.log('[rhr] source selected:', restHR?.source ?? 'none', 'value:', restHR?.value ?? null);
-  console.log('[sleep] source selected:', sleep?.source ?? 'none', 'value:', sleep?.value ?? null);
-  console.log('[steps] source selected:', steps?.source ?? 'none', 'value:', steps?.value ?? null);
-  console.log('[active] source selected:', active?.source ?? 'none', 'value:', active?.value ?? null);
-  console.log('[basal] source selected:', basal?.source ?? 'none', 'value:', basal?.value ?? null);
+  console.log('[hrv] source selected:', hrv?.source ?? 'none');
+  console.log('[rhr] source selected:', restHR?.source ?? 'none');
+  console.log('[sleep] source selected:', sleep?.source ?? 'none');
+  console.log('[steps] source selected:', steps?.source ?? 'none');
+  console.log('[active] source selected:', active?.source ?? 'none');
+  console.log('[basal] source selected:', basal?.source ?? 'none');
 
   const total: HealthReading | null =
     active !== null || basal !== null
@@ -576,7 +573,6 @@ export async function fetchTodayHealthData(): Promise<WearableHealthData> {
     hrv, restingHR: restHR, sleepHours: sleep,
     steps, activeCalories: active, basalCalories: basal, totalCalories: total,
   };
-  console.log('[healthkit] returning:', JSON.stringify(result));
   return result;
 }
 
@@ -910,9 +906,6 @@ async function queryWorkoutSamples(startDate: string, endDate: string): Promise<
     if (data.length > 0) {
       console.log('[workouts] successful query method: getAnchoredWorkouts()');
       console.log('[workouts] first sample keys:', Object.keys(data[0] ?? {}));
-      console.log('[workouts] first sample:', JSON.stringify(data[0]));
-      const s = data[0];
-      console.log('[workouts] distance field check - distance:', s.distance, 'totalDistance:', s.totalDistance, 'distanceInMeters:', s.distanceInMeters);
       return data.map(normalizeRawWorkout);
     }
   } else {
@@ -984,11 +977,6 @@ function deduplicateWorkouts(workouts: any[]): any[] {
       const diffMinutes = Math.abs(aStart - bStart) / 1000 / 60;
       const typeMatch   = sameWorkoutType(aType, bType);
       const within60    = diffMinutes < 60;
-      console.log('[workouts] comparing:', {
-        typeA: aType, typeB: bType, sameType: typeMatch,
-        startA: workouts[i].startDate, startB: workouts[j].startDate,
-        diffMinutes: Math.round(diffMinutes * 10) / 10,
-      });
       if (typeMatch && within60) {
         group.push(workouts[j]);
         used.add(j);
@@ -1001,7 +989,6 @@ function deduplicateWorkouts(workouts: any[]): any[] {
   }
 
   console.log('[workouts] deduplication: found', result.length, 'unique sessions from', workouts.length, 'raw workouts');
-  console.log('[workouts] selected sources:', result.map((w: any) => w.sourceName ?? 'unknown'));
   return result;
 }
 
@@ -1023,7 +1010,6 @@ export async function fetchTodayWorkouts(userId?: string): Promise<WorkoutSample
     const durationSeconds = w.duration != null
       ? Number(w.duration)
       : (new Date(w.endDate).getTime() - new Date(w.startDate).getTime()) / 1000;
-    console.log('[workouts] workout duration seconds:', durationSeconds, 'type:', w.workoutActivityType ?? w.type, 'source:', w.sourceName);
     return durationSeconds > 600; // 10 minutes
   });
 
@@ -1067,7 +1053,6 @@ export async function fetchTodayWorkouts(userId?: string): Promise<WorkoutSample
     if (distRaw != null) {
       const rawMiles = Number(distRaw);
       distKm = Math.round(rawMiles * 1.60934 * 100) / 100; // miles → km
-      console.log('[workouts] raw distance (miles):', rawMiles, 'converted to km:', distKm);
     }
 
     const calories = w.totalEnergyBurned ?? w.calories ?? null;

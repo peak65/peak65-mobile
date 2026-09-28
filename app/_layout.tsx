@@ -428,8 +428,8 @@ async function resolveAppState(
   ]);
   const { data: profile, error: profileError, status: profileStatus } = profileRes;
 
-  console.log('[resolveAppState] userId:', uid);
-  console.log('[resolveAppState] profile:', JSON.stringify(profile));
+  // Never the row itself: it carries the athlete's name, role and tier.
+  console.log('[resolveAppState] profile found:', !!profile, '| legal accepted:', profile?.legal_accepted_version === LEGAL_VERSION);
   console.log('[resolveAppState] profileError:', JSON.stringify(profileError));
 
   if (profileError) {

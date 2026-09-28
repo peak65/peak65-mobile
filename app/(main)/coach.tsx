@@ -59,7 +59,7 @@ export default function CoachScreen({ navigation }: Props) {
       .select('id, athlete_id, tier, profile:profiles!athlete_id(first_name, last_name)')
       .eq('coach_id', user.id);
 
-    console.log('[coach] raw rows:', JSON.stringify(rows?.slice(0, 3)), '| error:', error?.message);
+    console.log('[coach] athlete rows:', rows?.length ?? 0, '| error:', error?.message);
 
     if (!mounted.current) return;
     if (error || !rows || rows.length === 0) {

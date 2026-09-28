@@ -158,7 +158,7 @@ function HRUploadPrompt({
 
       const data = await res.json();
       if (!data.success || data.analysis?.image_valid === false) {
-        console.log('[hr-upload] analysis invalid:', JSON.stringify(data).slice(0, 300));
+        console.log('[hr-upload] analysis invalid — fields returned:', Object.keys(data ?? {}).join(', '));
         setErrorMsg(
           data.analysis?.image_valid === false
             ? 'Couldn’t read that image clearly — try a clearer screenshot.'

@@ -769,7 +769,7 @@ function DayCard({
           userAge:          profile.age,
         });
         await upsertZones(zones);
-        console.log('[program] zones updated from 800m threshold split:', raw);
+        console.log('[program] zones updated from 800m threshold split');
       }
     }
   }

@@ -170,7 +170,7 @@ export default function MessagesScreen() {
   async function handleSend() {
     const body = input.trim();
     if (!body || !userId || sending) return;
-    console.log('[messages] handleSend fired, userId:', userId, 'body length:', body.length);
+    console.log('[messages] handleSend fired, body length:', body.length);
     const tempId = `temp-${Date.now()}`;
     const tempMsg: Msg = { id: tempId, sender_id: userId, body, created_at: new Date().toISOString(), read_at: null };
     setMsgs(prev => [...prev, tempMsg]);

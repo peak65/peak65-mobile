@@ -212,7 +212,8 @@ export default function LogSessionScreen() {
         completed_at:         new Date().toISOString(),
         session_date:         new Date().toISOString().split('T')[0],
       };
-      console.log('[log-session] inserting payload:', JSON.stringify(payload, null, 2));
+      // Never the payload itself: it carries the athlete's notes and results.
+      console.log('[log-session] inserting session log — type:', sessionType, '| pace pieces:', paceResults.length);
 
       const { data, error } = await supabase
         .from('session_logs')
