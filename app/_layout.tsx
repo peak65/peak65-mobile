@@ -917,7 +917,11 @@ export default function RootLayout() {
   // athlete, is the problem.
   const handleSession = React.useCallback(async (session: Session | null, reason: string) => {
     if (session) { await runResolve(session, reason); return; }
+    // Auth events no longer wait for each other, so a newer event may start its
+    // resolve while storage is read; if one has, this null result is stale.
+    const gen = resolveGenRef.current;
     const stored = await readStoredSession();
+    if (gen !== resolveGenRef.current) return;
     if (stored.exists) {
       console.log(`[layout] ${reason}: no session from auth, but one is saved — treating as offline`);
       if (appStateValueRef.current === 'loading') await enterFallback(stored.userId, 'session unconfirmed');
@@ -932,8 +936,24 @@ export default function RootLayout() {
     // persisted session from AsyncStorage — the earliest safe point to query.
     // getSession() can race against that read and return null even when a
     // valid session exists, causing the user to be routed to onboarding.
+    //
+    // The callback must return synchronously and never await. auth-js calls it
+    // from inside its own initialize() (SIGNED_IN for a still-valid saved token)
+    // and waits for it; every supabase query waits for that same initialize, so
+    // awaiting one here deadlocks the launch. The work is started and left to
+    // run; runResolve's generation counter keeps a later event's result from
+    // being overwritten by an earlier one that finishes late.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
+        const onHandlerError = (err: unknown) => {
+          console.log('[layout] auth handler error:', err);
+          // Don't strand the athlete on the logo; the fallback decides between
+          // the app, the offline screen, and Login.
+          if (appStateValueRef.current === 'loading') {
+            handleSession(null, 'handler error').catch(e => console.log('[layout] auth handler error:', e));
+          }
+        };
+
         try {
           if (event === 'INITIAL_SESSION') perfLog('auth resolve', sinceAppStart(), session ? 'session' : 'no session');
 
@@ -953,12 +973,9 @@ export default function RootLayout() {
           // so the navigator unmounts cleanly before the new route is determined.
           if (event !== 'INITIAL_SESSION') { setOfflineMode(null); setAppState('loading'); }
 
-          await handleSession(session, event);
+          handleSession(session, event).catch(onHandlerError);
         } catch (err) {
-          console.log('[layout] auth handler error:', err);
-          // Don't strand the athlete on the logo; the fallback decides between
-          // the app, the offline screen, and Login.
-          if (appStateValueRef.current === 'loading') await handleSession(null, 'handler error');
+          onHandlerError(err);
         }
       }
     );
