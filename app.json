@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.peak65.app",
-      "buildNumber": "64",
+      "buildNumber": "69",
       "infoPlist": {
         "CFBundleDisplayName": "Peak 65",
         "NSSupportsLiveActivities": true,
