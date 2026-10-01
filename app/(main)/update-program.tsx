@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Animated, Platform, KeyboardAvoidingView,
+  ActivityIndicator, Platform, KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -76,14 +76,6 @@ const GF_EQUIPMENT = [
 
 const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-const GEN_MESSAGES = [
-  'Analyzing your profile...',
-  'Rebuilding your training plan...',
-  'Calibrating to your goals...',
-  'Writing your coaching cues...',
-  'Almost ready...',
-];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getRequiredRestDays(trainingDays: string): number {
@@ -128,7 +120,7 @@ export default function UpdateProgramScreen({ navigation }: Props) {
   const [userId, setUserId]         = useState('');
   const [loading, setLoading]       = useState(true);
   // Pinnacle athletes' programs are hand-built by their coach. This screen
-  // deletes and rebuilds programs, so it must refuse to run for them.
+  // rewrites their training settings, so it must refuse to run for them.
   const [isElite, setIsElite]       = useState(false);
   const [step, setStep]             = useState(0);
   const [form, setForm]             = useState<FormData>({
@@ -137,33 +129,35 @@ export default function UpdateProgramScreen({ navigation }: Props) {
     sessionLength: '', availability: '', equipment: [],
   });
   const [original, setOriginal]     = useState<FormData | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [genError, setGenError]     = useState(false);
-  const [genMsgIdx, setGenMsgIdx]   = useState(0);
-  const [genBarWidth, setGenBarWidth] = useState(0);
+  // The profile couldn't be read. The screen stays closed: without the profile
+  // there is no tier, so the Pinnacle guard below can't be applied.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [saved, setSaved]           = useState(false);
   const [androidDateOpen, setAndroidDateOpen] = useState(false);
 
-  const msgOpacity   = useRef(new Animated.Value(0)).current;
-  const progressAnim = useRef(new Animated.Value(0)).current;
-  const cycleRef     = useRef<Animated.CompositeAnimation | null>(null);
-  const progRef      = useRef<Animated.CompositeAnimation | null>(null);
-  const alive        = useRef(true);
-  const backup       = useRef<any[]>([]);
-  const didDeletePrograms = useRef(false);
+  const mounted      = useRef(true);
   const hasLoadedRef = useRef(false);
 
   // ── Load profile ──────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    (async () => {
+  async function loadProfile() {
+    setLoading(true);
+    setLoadFailed(false);
+    try {
       const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) { setLoading(false); return; }
-      setUserId(auth.user.id);
+      if (!mounted.current) return;
+      if (!auth.user) { setLoadFailed(true); setLoading(false); return; }
 
-      const { data: p } = await supabase
+      const { data: p, error } = await supabase
         .from('profiles').select('*')
         .eq('id', auth.user.id).maybeSingle();
-      if (!p) { setLoading(false); return; }
+      if (!mounted.current) return;
+      if (error || !p) { setLoadFailed(true); setLoading(false); return; }
+
+      // Set only once the profile has loaded, so nothing can save without it.
+      setUserId(auth.user.id);
 
       if (p.tier === 'elite') { setIsElite(true); setLoading(false); return; }
 
@@ -198,13 +192,19 @@ export default function UpdateProgramScreen({ navigation }: Props) {
       setOriginal({ ...init });
       setLoading(false);
       setTimeout(() => { hasLoadedRef.current = true; }, 0);
-    })();
+    } catch (e) {
+      console.log('[update-program] load error:', e);
+      if (!mounted.current) return;
+      setLoadFailed(true);
+      setLoading(false);
+    }
+  }
 
-    return () => {
-      alive.current = false;
-      cycleRef.current?.stop();
-      progRef.current?.stop();
-    };
+  useEffect(() => {
+    mounted.current = true;
+    void loadProfile();
+    return () => { mounted.current = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Clear rest/double day selections when training days count changes (skip on initial load)
@@ -244,8 +244,9 @@ export default function UpdateProgramScreen({ navigation }: Props) {
   }
 
   function handleBack() {
-    if (generating) return;
-    if (step === 0) { navigation.goBack(); return; }
+    // Always a way off the screen, even mid-save. A save still in flight
+    // finishes on its own; its result is dropped once the screen is gone.
+    if (saving || step === 0) { navigation.goBack(); return; }
     setStep(s => s - 1);
   }
 
@@ -302,139 +303,54 @@ export default function UpdateProgramScreen({ navigation }: Props) {
     }));
   }
 
-  // ── Generating animation ──────────────────────────────────────────────────
-
-  function startAnimation() {
-    alive.current = true;
-    progressAnim.setValue(0);
-    msgOpacity.setValue(0);
-    setGenMsgIdx(0);
-    animMsg(0);
-    const p = Animated.timing(progressAnim, { toValue: 1, duration: 90_000, useNativeDriver: false });
-    progRef.current = p;
-    p.start();
-  }
-
-  function animMsg(idx: number) {
-    if (!alive.current) return;
-    setGenMsgIdx(idx);
-    const seq = Animated.sequence([
-      Animated.timing(msgOpacity, { toValue: 1, duration: 600,  useNativeDriver: true }),
-      Animated.delay(3000),
-      Animated.timing(msgOpacity, { toValue: 0, duration: 400,  useNativeDriver: true }),
-    ]);
-    cycleRef.current = seq;
-    seq.start(({ finished }) => {
-      if (finished && alive.current) animMsg((idx + 1) % GEN_MESSAGES.length);
-    });
-  }
-
-  function stopAnimation() {
-    alive.current = false;
-    cycleRef.current?.stop();
-    progRef.current?.stop();
-  }
-
   // ── Confirm ───────────────────────────────────────────────────────────────
 
+  // Saves the training settings to the profile. Nothing here touches the
+  // program: the current week stays as it is.
   async function handleConfirm() {
-    if (!userId) return;
-    // Never delete or rebuild a coach-built program. Unreachable behind the
+    if (!userId || saving) return;
+    // Never change a coach-managed athlete's settings. Unreachable behind the
     // render guard below; kept here so no future edit can route around it.
     if (isElite) return;
-    setGenerating(true);
-    setGenError(false);
-    startAnimation();
+    setSaving(true);
+    setSaveFailed(false);
 
-    try {
-      // 1. Backup + delete existing programs
-      const { data: programs } = await supabase
-        .from('programs').select('*').eq('user_id', userId);
-      backup.current = programs ?? [];
-      await supabase.from('programs').delete().eq('user_id', userId);
-      didDeletePrograms.current = true;
+    const restDaysCount = getRequiredRestDays(form.trainingDays);
+    const validDoubleDays = form.doubleDays.filter(d => !form.restDayPreferences.includes(d));
 
-      // 2. Update profile
-      const restDaysCount = getRequiredRestDays(form.trainingDays);
-      const validDoubleDays = form.doubleDays.filter(d => !form.restDayPreferences.includes(d));
+    const patch: Record<string, any> = {
+      goal:                   form.goal,
+      current_training_days:  form.trainingDays || null,
+      rest_day_preferences:   form.restDayPreferences.length > 0 ? form.restDayPreferences : null,
+      rest_days:              form.trainingDays ? restDaysCount : null,
+      double_day_preferences: validDoubleDays.length > 0 ? validDoubleDays : null,
+      session_length:         form.sessionLength || null,
+      availability:           form.availability || null,
+      equipment_access:       form.equipment.length > 0 ? form.equipment : null,
+    };
 
-      const patch: Record<string, any> = {
-        goal:                   form.goal,
-        current_training_days:  form.trainingDays || null,
-        rest_day_preferences:   form.restDayPreferences.length > 0 ? form.restDayPreferences : null,
-        rest_days:              form.trainingDays ? restDaysCount : null,
-        double_day_preferences: validDoubleDays.length > 0 ? validDoubleDays : null,
-        session_length:         form.sessionLength || null,
-        availability:           form.availability || null,
-        equipment_access:       form.equipment.length > 0 ? form.equipment : null,
-      };
-
-      if (form.goal === 'hyrox') {
-        patch.hyrox_division      = form.division       || null;
-        patch.race_date           = form.raceDate        || null;
-        patch.hyrox_goal_time     = form.hyroxGoalTime   || null;
-        patch.station_weaknesses  = form.stationWeaknesses.length > 0 ? form.stationWeaknesses : null;
-      }
-      if (form.goal === 'general_fitness') {
-        patch.fitness_goal = form.fitnessGoal || null;
-      }
-
-      await supabase.from('profiles').update(patch).eq('id', userId);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // 3. Generate new program
-      const controller = new AbortController();
-      let timedOut = false;
-      const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 120_000);
-      const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ userId }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      stopAnimation();
-      (navigation as any).navigate('Tabs', { screen: 'Program' });
-    } catch (e) {
-      console.log('[update-program] generate error:', e);
-      stopAnimation();
-      setGenError(true);
-
-      if (didDeletePrograms.current && backup.current.length > 0) {
-        try {
-          await supabase.from('programs').upsert(backup.current, { onConflict: 'id' });
-        } catch (restoreErr) {
-          console.log('[update-program] restore error:', restoreErr);
-        }
-      }
+    if (form.goal === 'hyrox') {
+      patch.hyrox_division      = form.division       || null;
+      patch.race_date           = form.raceDate        || null;
+      patch.hyrox_goal_time     = form.hyroxGoalTime   || null;
+      patch.station_weaknesses  = form.stationWeaknesses.length > 0 ? form.stationWeaknesses : null;
     }
-  }
-
-  async function handleRetry() {
-    // Same rule as handleConfirm — no regeneration for a coached athlete.
-    if (isElite) return;
-    setGenError(false);
-    startAnimation();
-    try {
-      const controller = new AbortController();
-      let timedOut = false;
-      const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 120_000);
-      const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ userId }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      stopAnimation();
-      (navigation as any).navigate('Tabs', { screen: 'Program' });
-    } catch (e) {
-      stopAnimation();
-      setGenError(true);
+    if (form.goal === 'general_fitness') {
+      patch.fitness_goal = form.fitnessGoal || null;
     }
+
+    let ok = false;
+    try {
+      const { error } = await supabase.from('profiles').update(patch).eq('id', userId);
+      if (error) console.log('[update-program] save error:', error.message);
+      ok = !error;
+    } catch (e) {
+      console.log('[update-program] save error:', e);
+    }
+    if (!mounted.current) return;
+    setSaving(false);
+    if (ok) setSaved(true);
+    else setSaveFailed(true);
   }
 
   // ── Render helpers ────────────────────────────────────────────────────────
@@ -682,8 +598,8 @@ export default function UpdateProgramScreen({ navigation }: Props) {
             <Text style={s.label}>Review your changes</Text>
             <Text style={s.sublabel}>
               {hasChanges
-                ? 'Changed fields are highlighted. Confirming will rebuild your program.'
-                : 'No changes detected. Confirming will still rebuild your program with the same settings.'}
+                ? "Changed fields are highlighted. This week's training stays as it is. Your programming from next week will reflect these settings."
+                : 'No changes detected. Saving will keep your settings as they are.'}
             </Text>
             <View style={s.reviewCard}>
               {fields.map(f => {
@@ -709,11 +625,56 @@ export default function UpdateProgramScreen({ navigation }: Props) {
 
   // ── Loading ───────────────────────────────────────────────────────────────
 
-  if (loading) return null;
+  // Every state below has a back button: nothing on this screen may strand the athlete.
+  const backHeader = (
+    <View style={s.header}>
+      <TouchableOpacity
+        style={s.backBtn}
+        onPress={() => navigation.goBack()}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      >
+        <Feather name="arrow-left" color={Colors.textPrimary} size={22} />
+      </TouchableOpacity>
+      <View style={{ flex: 1 }} />
+      <View style={s.backBtn} />
+    </View>
+  );
 
-  // Pinnacle athletes never reach the edit flow. Their coach owns the program,
-  // and this screen's first act is to delete every program row. Rendered before
-  // the generating branch so no state can slip past it.
+  if (loading) {
+    return (
+      <SafeAreaView style={s.container} edges={['top', 'bottom']}>
+        <Logo width={150} />
+        {backHeader}
+        <View style={s.blockedBody}>
+          <ActivityIndicator color={Colors.accent} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Without the profile there's no tier to check, so the form stays closed.
+  if (loadFailed) {
+    return (
+      <SafeAreaView style={s.container} edges={['top', 'bottom']}>
+        <Logo width={150} />
+        {backHeader}
+        <View style={s.blockedBody}>
+          <Text style={s.blockedHeading}>Couldn't load your settings.</Text>
+          <Text style={s.blockedSub}>Check your connection and try again.</Text>
+          <TouchableOpacity style={s.blockedBtn} onPress={() => { void loadProfile(); }}>
+            <Text style={s.blockedBtnText}>Try Again</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={s.skipBtn}>
+            <Text style={s.skipText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Pinnacle athletes never reach the edit flow. Their coach owns the program
+  // and the settings behind it. Rendered before the saved branch so no state can
+  // slip past it.
   if (isElite) {
     return (
       <SafeAreaView style={s.container} edges={['top', 'bottom']}>
@@ -740,30 +701,21 @@ export default function UpdateProgramScreen({ navigation }: Props) {
     );
   }
 
-  // ── Generating screen ─────────────────────────────────────────────────────
+  // ── Saved ─────────────────────────────────────────────────────────────────
 
-  if (generating) {
-    const animWidth = progressAnim.interpolate({ inputRange: [0, 1], outputRange: [0, genBarWidth] });
+  if (saved) {
     return (
       <SafeAreaView style={s.container} edges={['top', 'bottom']}>
         <Logo width={150} />
-        <View style={s.genBody}>
-          <Text style={s.genHeading}>Rebuilding your program</Text>
-          {genError ? (
-            <TouchableOpacity onPress={handleRetry} style={s.retryBtn}>
-              <Text style={s.retryText}>Something went wrong. Tap to try again.</Text>
-            </TouchableOpacity>
-          ) : (
-            <Animated.Text style={[s.genMsg, { opacity: msgOpacity }]}>
-              {GEN_MESSAGES[genMsgIdx]}
-            </Animated.Text>
-          )}
-        </View>
-        <View
-          style={s.progressTrack}
-          onLayout={e => setGenBarWidth(e.nativeEvent.layout.width)}
-        >
-          <Animated.View style={[s.progressFill, { width: animWidth }]} />
+        {backHeader}
+        <View style={s.blockedBody}>
+          <Text style={s.blockedHeading}>Your settings are saved.</Text>
+          <Text style={s.blockedSub}>
+            This week's training stays as it is. Your programming from next week will reflect these settings.
+          </Text>
+          <TouchableOpacity style={s.blockedBtn} onPress={() => navigation.goBack()}>
+            <Text style={s.blockedBtnText}>Done</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -810,18 +762,23 @@ export default function UpdateProgramScreen({ navigation }: Props) {
         )}
 
         <View style={s.footer}>
+          {isReviewStep && saveFailed && (
+            <Text style={s.saveError}>
+              Your settings weren't saved. Check your connection and try again.
+            </Text>
+          )}
           {isRaceDateStep && (
             <TouchableOpacity style={s.skipBtn} onPress={handleNext}>
               <Text style={s.skipText}>I don't have a race yet</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            style={[s.continueBtn, !canContinue() && s.continueBtnDisabled]}
+            style={[s.continueBtn, (!canContinue() || saving) && s.continueBtnDisabled]}
             onPress={isReviewStep ? handleConfirm : handleNext}
-            disabled={!canContinue()}
+            disabled={!canContinue() || saving}
           >
             <Text style={s.continueBtnText}>
-              {isReviewStep ? 'Confirm & Rebuild' : 'Continue'}
+              {isReviewStep ? (saving ? 'Saving...' : saveFailed ? 'Try Again' : 'Save Settings') : 'Continue'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -911,20 +868,5 @@ const s = StyleSheet.create({
   reviewOld:    { color: Colors.textSecondary, fontSize: 12, textDecorationLine: 'line-through' },
   reviewNew:    { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', textAlign: 'right' },
 
-  // Generating
-  genBody: {
-    flex: 1, alignItems: 'center', justifyContent: 'center', gap: 28, paddingHorizontal: 24,
-  },
-  genHeading: { color: Colors.textPrimary, fontSize: 18, fontWeight: '600', textAlign: 'center' },
-  genMsg: {
-    color: Colors.accent, fontSize: 26, fontFamily: Fonts.metric,
-    textAlign: 'center', letterSpacing: -0.3, lineHeight: 34,
-  },
-  retryBtn:  { paddingVertical: 8, paddingHorizontal: 16 },
-  retryText: { color: Colors.accent, fontSize: 15, textAlign: 'center', textDecorationLine: 'underline' },
-  progressTrack: {
-    height: 2, backgroundColor: Colors.nested, borderRadius: 1,
-    marginHorizontal: 24, marginBottom: 24, overflow: 'hidden',
-  },
-  progressFill: { height: 2, backgroundColor: Colors.accent, borderRadius: 1 },
+  saveError: { color: Colors.red, fontSize: 14, textAlign: 'center', lineHeight: 20 },
 });

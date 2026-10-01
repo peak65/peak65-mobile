@@ -241,7 +241,9 @@ function MultiSelectModal({
 
 // ─── Weakness + goal options ──────────────────────────────────────────────────
 
-const REGEN_TRIGGER_FIELDS = new Set(['rest_days', 'session_length', 'availability', 'equipment_access']);
+// Settings that shape programming. Saving one shows the saving / saved banner;
+// nothing here rebuilds the program — the change applies from next week.
+const PROGRAMMING_FIELDS = new Set(['rest_days', 'session_length', 'availability', 'equipment_access']);
 
 // ─── Account deletion ─────────────────────────────────────────────────────────
 
@@ -356,8 +358,11 @@ export default function ProfileScreen() {
 
   // Goal switching
   const [goalSwitchOpen, setGoalSwitchOpen]     = useState(false);
-  const [goalSwitchStep, setGoalSwitchStep]     = useState<'confirm'|'collect'|'generating'|'done'>('confirm');
+  const [goalSwitchStep, setGoalSwitchStep]     = useState<'confirm'|'collect'|'saving'|'done'>('confirm');
   const [targetGoal, setTargetGoal]             = useState('');
+  // The goal when the modal opened. Recorded as previous_goal, so a retry after
+  // a failed save can't record the new goal as the previous one.
+  const [gsFromGoal, setGsFromGoal]             = useState<string | null>(null);
   const [gsRaceDate, setGsRaceDate]             = useState('');
   const [gsDivision, setGsDivision]             = useState('');
   const [gsGoalTime, setGsGoalTime]             = useState('');
@@ -366,16 +371,42 @@ export default function ProfileScreen() {
   const [gsPrimaryGoal, setGsPrimaryGoal]       = useState('');
   const [whoopConnecting, setWhoopConnecting]     = useState(false);
   const [ouraConnecting, setOuraConnecting]       = useState(false);
-  const [programRegenStatus, setProgramRegenStatus] = useState<'idle' | 'regenerating' | 'done'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
 
   const mounted      = useRef(true);
   const loadIdRef    = useRef(0);
   const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Newest settings save; only it may turn the banner to "saved".
+  const saveSeqRef   = useRef(0);
+  // Newest goal-switch save, and whether its modal is still the one showing.
+  const goalSaveRunRef    = useRef(0);
+  const goalSwitchOpenRef = useRef(goalSwitchOpen);
+  goalSwitchOpenRef.current = goalSwitchOpen;
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+      if (saveStatusTimerRef.current) clearTimeout(saveStatusTimerRef.current);
+    };
   }, []);
+
+  // Shows the save banner. 'saved' and 'failed' clear themselves; any new
+  // status replaces the previous one and its timer.
+  function showSaveStatus(status: 'idle' | 'saving' | 'saved' | 'failed') {
+    if (saveStatusTimerRef.current) {
+      clearTimeout(saveStatusTimerRef.current);
+      saveStatusTimerRef.current = null;
+    }
+    setSaveStatus(status);
+    if (status === 'saved' || status === 'failed') {
+      saveStatusTimerRef.current = setTimeout(() => {
+        saveStatusTimerRef.current = null;
+        setSaveStatus('idle');
+      }, status === 'saved' ? 3000 : 5000);
+    }
+  }
 
   // profileOverride: pass freshly-loaded data from `load` before setProfile resolves.
   async function loadHealthData(userId: string, profileOverride?: Profile | null) {
@@ -460,43 +491,39 @@ export default function ProfileScreen() {
 
   async function executeGoalSwitch() {
     if (!profile) return;
-    // Pinnacle athletes' programs are hand-built by their coach. Save the goal
-    // change, but never archive or rebuild the program. The control that opens
-    // this modal is hidden for elite — this is the backstop.
-    const skipRegen = profile.tier === 'elite';
-    setGoalSwitchStep('generating');
-    try {
-      if (!skipRegen) {
-        await supabase.from('programs').update({ status: 'archived' }).eq('user_id', profile.id);
-      }
-      const patch: Partial<Profile> = {
-        goal: targetGoal,
-        previous_goal: profile.goal,
-        goal_switched_at: new Date().toISOString(),
-      };
-      if (targetGoal === 'hyrox') {
-        if (gsDivision) patch.hyrox_division = gsDivision;
-        if (gsRaceDate) patch.race_date = gsRaceDate;
-        if (gsGoalTime) patch.goal_time = gsGoalTime;
-        if (gsWeaknesses.length) patch.station_weaknesses = gsWeaknesses;
-        patch.run_confidence = gsRunConfidence;
-      } else {
-        if (gsPrimaryGoal) patch.primary_goal = gsPrimaryGoal;
-      }
-      await updateProfile(patch);
-      if (!skipRegen) {
-        const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: profile.id }),
-        });
-        if (!res.ok) throw new Error('generate-assessment returned ' + res.status);
-      }
+    // Saves the goal only. The program is not touched: the current week stays
+    // as it is and programming follows the new goal from next week. Pinnacle
+    // athletes can't open this modal (the Goal row is hidden for them).
+    const run = ++goalSaveRunRef.current;
+    setGoalSwitchStep('saving');
+    const patch: Partial<Profile> = {
+      goal: targetGoal,
+      previous_goal: gsFromGoal,
+      goal_switched_at: new Date().toISOString(),
+    };
+    if (targetGoal === 'hyrox') {
+      if (gsDivision) patch.hyrox_division = gsDivision;
+      if (gsRaceDate) patch.race_date = gsRaceDate;
+      if (gsGoalTime) patch.goal_time = gsGoalTime;
+      if (gsWeaknesses.length) patch.station_weaknesses = gsWeaknesses;
+      patch.run_confidence = gsRunConfidence;
+    } else {
+      if (gsPrimaryGoal) patch.primary_goal = gsPrimaryGoal;
+    }
+    const ok = await saveProfile(patch);
+    if (!mounted.current) return;
+
+    // The athlete closed (or reopened) the modal while this was saving: report
+    // the result on the screen instead.
+    if (run !== goalSaveRunRef.current || !goalSwitchOpenRef.current) {
+      showSaveStatus(ok ? 'saved' : 'failed');
+      return;
+    }
+    if (ok) {
       setGoalSwitchStep('done');
-    } catch (e) {
-      console.log('[goalSwitch] error:', e);
+    } else {
       setGoalSwitchStep('collect');
-      Alert.alert('Error', 'Something went wrong generating your program. Please try again.');
+      Alert.alert('Goal not saved', "Your goal wasn't changed. Check your connection and try again.");
     }
   }
 
@@ -551,31 +578,48 @@ export default function ProfileScreen() {
     };
   }, []);
 
+  // Writes to the profile and shows the new values straight away. Returns
+  // whether the save landed. On failure the fields it changed are put back,
+  // unless a later edit has already changed them again.
+  async function saveProfile(patch: Partial<Profile>): Promise<boolean> {
+    if (!profile) return false;
+    const before = profile;
+    setProfile(prev => (prev ? { ...prev, ...patch } : prev));
+
+    let ok = false;
+    try {
+      const { error } = await supabase.from('profiles').update(patch).eq('id', before.id);
+      if (error) console.log('[profile] save error:', error.message);
+      ok = !error;
+    } catch (e) {
+      console.log('[profile] save error:', e);
+    }
+
+    if (!ok && mounted.current) {
+      setProfile(prev => {
+        if (!prev) return prev;
+        const restored: Record<string, unknown> = { ...prev };
+        for (const k of Object.keys(patch) as (keyof Profile)[]) {
+          if (prev[k] === patch[k]) restored[k] = before[k];
+        }
+        return restored as unknown as Profile;
+      });
+    }
+    return ok;
+  }
+
   async function updateProfile(patch: Partial<Profile>) {
     if (!profile) return;
-    const updated = { ...profile, ...patch };
-    setProfile(updated);
-    await supabase.from('profiles').update(patch).eq('id', profile.id);
+    // Programming settings get a saving / saved banner. Pinnacle athletes' rows
+    // for these fields are hidden; their coach owns programming.
+    const showProgress = profile.tier !== 'elite' && Object.keys(patch).some(k => PROGRAMMING_FIELDS.has(k));
+    const seq = showProgress ? ++saveSeqRef.current : 0;
+    if (showProgress) showSaveStatus('saving');
 
-    // Pinnacle athletes' programs belong to their coach — the benign field value
-    // above is still saved, but nothing here may archive or rebuild a program.
-    // The rows that write these fields are hidden for elite; this is the backstop.
-    if (profile.tier !== 'elite' && Object.keys(patch).some(k => REGEN_TRIGGER_FIELDS.has(k))) {
-      setProgramRegenStatus('regenerating');
-      try {
-        await supabase.from('programs').update({ status: 'archived' }).eq('user_id', profile.id);
-        await fetch('https://peak65.vercel.app/api/generate-assessment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: profile.id }),
-        });
-        setProgramRegenStatus('done');
-        setTimeout(() => setProgramRegenStatus('idle'), 3000);
-      } catch (e) {
-        console.log('[profile] regen error:', e);
-        setProgramRegenStatus('idle');
-      }
-    }
+    const ok = await saveProfile(patch);
+    if (!mounted.current) return;
+    if (!ok) { showSaveStatus('failed'); return; }
+    if (showProgress && seq === saveSeqRef.current) showSaveStatus('saved');
   }
 
   async function handleSignOut() {
@@ -1088,7 +1132,7 @@ export default function ProfileScreen() {
         visible={goalSwitchOpen}
         transparent
         animationType="slide"
-        onRequestClose={() => goalSwitchStep !== 'generating' && setGoalSwitchOpen(false)}
+        onRequestClose={() => setGoalSwitchOpen(false)}
       >
         <View style={styles.pickerBackdrop}>
           <View style={[styles.pickerSheet, { maxHeight: '90%', paddingBottom: 40 }]}>
@@ -1109,7 +1153,7 @@ export default function ProfileScreen() {
                   </View>
                 </View>
                 <Text style={styles.gsSub}>
-                  This will archive your current program and generate a new one tailored to your new goal.
+                  Your new goal is saved straight away. This week's training stays as it is; your programming follows your new goal from next week.
                 </Text>
                 <TouchableOpacity style={styles.saveBtn} onPress={() => setGoalSwitchStep('collect')}>
                   <Text style={styles.saveBtnText}>CONTINUE</Text>
@@ -1169,7 +1213,7 @@ export default function ProfileScreen() {
                   </TouchableOpacity>
                 ))}
                 <TouchableOpacity style={[styles.saveBtn, { marginTop: 16, marginBottom: 8 }]} onPress={executeGoalSwitch}>
-                  <Text style={styles.saveBtnText}>GENERATE MY PROGRAM</Text>
+                  <Text style={styles.saveBtnText}>SAVE MY GOAL</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setGoalSwitchStep('confirm')} style={{ alignItems: 'center', paddingBottom: 8 }}>
                   <Text style={styles.cancelText}>Back</Text>
@@ -1192,7 +1236,7 @@ export default function ProfileScreen() {
                   onPress={executeGoalSwitch}
                   disabled={!gsPrimaryGoal}
                 >
-                  <Text style={styles.saveBtnText}>GENERATE MY PROGRAM</Text>
+                  <Text style={styles.saveBtnText}>SAVE MY GOAL</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setGoalSwitchStep('confirm')} style={{ marginTop: 8, alignItems: 'center' }}>
                   <Text style={styles.cancelText}>Back</Text>
@@ -1200,23 +1244,25 @@ export default function ProfileScreen() {
               </>
             )}
 
-            {goalSwitchStep === 'generating' && (
+            {goalSwitchStep === 'saving' && (
               <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                 <ActivityIndicator color={Colors.accent} size="large" />
-                <Text style={[styles.pickerTitle, { marginTop: 20 }]}>Building Your Program...</Text>
+                <Text style={[styles.pickerTitle, { marginTop: 20 }]}>Saving Your Goal...</Text>
                 <Text style={styles.gsSub}>
-                  Your coach is reviewing your profile and generating a personalised plan.
+                  You can close this. If it doesn't save, you'll see a message on this screen.
                 </Text>
+                <TouchableOpacity onPress={() => setGoalSwitchOpen(false)} style={{ marginTop: 8, alignItems: 'center' }}>
+                  <Text style={styles.cancelText}>Close</Text>
+                </TouchableOpacity>
               </View>
             )}
 
             {goalSwitchStep === 'done' && (
               <View style={{ alignItems: 'center', paddingVertical: 20 }}>
                 <Text style={{ fontSize: 52, marginBottom: 12 }}>✅</Text>
-                <Text style={styles.pickerTitle}>Program Ready!</Text>
+                <Text style={styles.pickerTitle}>Goal Saved</Text>
                 <Text style={styles.gsSub}>
-                  Your new {targetGoal === 'hyrox' ? 'Hyrox' : 'General Fitness'} program has been generated.
-                  Head to the Program tab to view it.
+                  Your goal is now {targetGoal === 'hyrox' ? 'Hyrox' : 'General Fitness'}. This week's training stays as it is; your programming follows your new goal from next week.
                 </Text>
                 <TouchableOpacity
                   style={[styles.saveBtn, { marginTop: 20, width: '100%' }]}
@@ -1341,16 +1387,22 @@ export default function ProfileScreen() {
           {!!goalBadge && <Text style={styles.goalBadge}>{goalBadge}</Text>}
         </View>
 
-        {/* Program regen status banner */}
-        {programRegenStatus !== 'idle' && (
-          <View style={styles.regenBanner}>
-            {programRegenStatus === 'regenerating' ? (
+        {/* Settings save banner */}
+        {saveStatus !== 'idle' && (
+          <View style={[styles.saveBanner, saveStatus === 'failed' && styles.saveBannerFailed]}>
+            {saveStatus === 'saving' ? (
               <>
                 <ActivityIndicator size="small" color={Colors.accent} style={{ marginRight: 8 }} />
-                <Text style={styles.regenBannerText}>Updating your program...</Text>
+                <Text style={styles.saveBannerText}>Saving...</Text>
               </>
+            ) : saveStatus === 'saved' ? (
+              <Text style={styles.saveBannerText}>
+                Saved ✓ This week's training stays as it is. Your programming from next week will reflect the change.
+              </Text>
             ) : (
-              <Text style={styles.regenBannerText}>Your program has been updated ✓</Text>
+              <Text style={styles.saveBannerText}>
+                That change wasn't saved. Check your connection and try again.
+              </Text>
             )}
           </View>
         )}
@@ -1371,6 +1423,9 @@ export default function ProfileScreen() {
           <SettingRow label="Goal" value={GOAL_OPTIONS.find(o => o.value === profile?.goal)?.label ?? ''} onPress={() => {
             const newGoal = profile?.goal === 'hyrox' ? 'general_fitness' : 'hyrox';
             setTargetGoal(newGoal);
+            setGsFromGoal(profile?.goal ?? null);
+            // A save still running from an earlier opening reports to the banner.
+            goalSaveRunRef.current++;
             setGsDivision(profile?.hyrox_division ?? '');
             setGsRaceDate('');
             setGsGoalTime('');
@@ -1809,13 +1864,14 @@ const styles = StyleSheet.create({
   gsConfidenceBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   gsConfidenceBtnText: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700' },
 
-  // Program regen banner
-  regenBanner: {
+  // Settings save banner
+  saveBanner: {
     marginHorizontal: 16, marginTop: 8, backgroundColor: '#111',
     borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center',
     borderLeftWidth: 3, borderLeftColor: Colors.accent,
   },
-  regenBannerText: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
+  saveBannerFailed: { borderLeftColor: Colors.red },
+  saveBannerText: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', flexShrink: 1 },
 
   // Wearable connection banner
   wearableBanner: {
