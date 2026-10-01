@@ -9,6 +9,7 @@ import { MessageSquare } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import Tooltip from '../components/Tooltip';
 import { supabase } from '../../lib/supabase';
+import { authHeaders, getAccessToken } from '../../lib/apiAuth';
 import { Colors } from '../../lib/theme';
 import { UnreadContext } from '../_layout';
 import { syncBadge } from '../../lib/badge';
@@ -52,11 +53,6 @@ function buildItems(msgs: Msg[]): ListItem[] {
     items.push(m);
   }
   return items;
-}
-
-async function getAccessToken(): Promise<string | null> {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token ?? null;
 }
 
 export default function MessagesScreen() {
@@ -192,11 +188,13 @@ export default function MessagesScreen() {
       console.log('[messages] send-message response status:', res.status, 'ok:', res.ok);
       if (!res.ok) throw new Error('send failed');
       if (!hasCoach) {
-        fetch(`${API_BASE}/api/ai-reply`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, messageBody: body }),
-        }).catch(() => {});
+        authHeaders()
+          .then(headers => fetch(`${API_BASE}/api/ai-reply`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ userId, messageBody: body }),
+          }))
+          .catch(() => {});
       }
       await new Promise<void>(resolve => setTimeout(resolve, 2000));
       try {

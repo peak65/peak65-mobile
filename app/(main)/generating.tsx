@@ -5,6 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
+import { authHeaders } from '../../lib/apiAuth';
 import type { MainStackParamList } from '../_layout';
 import { Colors, Fonts } from '../../lib/theme';
 import { Logo } from '../../components/Logo';
@@ -98,7 +99,7 @@ export default function GeneratingScreen({ navigation }: Props) {
     try {
       const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        headers: await authHeaders({ 'Accept': 'application/json' }),
         body: JSON.stringify({ userId }),
         signal: controller.signal,
       });

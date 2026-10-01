@@ -8,6 +8,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Notifications from 'expo-notifications';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
+import { authHeaders } from '../../lib/apiAuth';
 import type { MainStackParamList } from '../_layout';
 import { Colors, Fonts } from '../../lib/theme';
 import { Logo } from '../../components/Logo';
@@ -513,7 +514,7 @@ export default function OnboardingScreen({ navigation }: Props) {
     try {
       const res = await fetch('https://peak65.vercel.app/api/generate-assessment', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: await authHeaders({ Accept: 'application/json' }),
         body: JSON.stringify({ userId: authData.user.id }),
         signal: controller.signal,
       });

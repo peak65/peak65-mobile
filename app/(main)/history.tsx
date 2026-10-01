@@ -10,6 +10,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { authHeaders } from '../../lib/apiAuth';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable } from '../../lib/cachePolicy';
 import LoadFailedCard, { RefreshFailedLabel } from '../../components/LoadFailedCard';
@@ -314,7 +315,7 @@ function SessionDetailModal({
       const base64Image = result.assets[0].base64 as string;
       const res = await fetch('https://peak65.vercel.app/api/extract-hr-zones', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ imageBase64: base64Image, sessionLogId: log.id, tier, userId }),
       });
       if (!res.ok) throw new Error(`API error ${res.status}`);
@@ -566,7 +567,7 @@ function WorkoutDetailModal({
       const base64Image = result.assets[0].base64 as string;
       const res = await fetch('https://peak65.vercel.app/api/extract-hr-zones', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ imageBase64: base64Image, sessionLogId: localWorkout.id, tier, userId }),
       });
       if (!res.ok) throw new Error(`API error ${res.status}`);
@@ -597,11 +598,14 @@ function WorkoutDetailModal({
 
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
-      fetch('https://peak65.vercel.app/api/update-athlete-intelligence', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: session.user.id }),
-      }).catch(() => {});
+      const userId = session.user.id;
+      authHeaders()
+        .then(headers => fetch('https://peak65.vercel.app/api/update-athlete-intelligence', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ userId }),
+        }))
+        .catch(() => {});
     }
   }
 

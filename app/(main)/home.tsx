@@ -13,6 +13,7 @@ import { Feather } from '@expo/vector-icons';
 import { Zap, Target, Activity, Moon, Heart, Flame, Dumbbell } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../lib/supabase';
+import { authHeaders } from '../../lib/apiAuth';
 import {
   getTodayHealthData, fetchTodayHealthData, fetchTodayWorkouts,
   type HealthData, type WearableHealthData,
@@ -530,7 +531,7 @@ export default function HomeScreen() {
     try {
       const res = await fetch('https://peak65.vercel.app/api/generate-week2', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ userId: uid }),
       });
       if (res.ok) { setWeek2Exists(true); setWeek2Ready(true); }
@@ -927,11 +928,13 @@ export default function HomeScreen() {
           .gte('completed_at', `${yesterdayStr}T00:00:00`)
           .lt('completed_at', `${todayDateKey}T00:00:00`);
         if ((yesterdayCount ?? 0) === 0) {
-          fetch('https://peak65.vercel.app/api/ai-message', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: uid, triggerType: 'missed_session' }),
-          }).catch(() => {});
+          authHeaders()
+            .then(headers => fetch('https://peak65.vercel.app/api/ai-message', {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ userId: uid, triggerType: 'missed_session' }),
+            }))
+            .catch(() => {});
         }
       }
     }

@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { authHeaders } from '../../lib/apiAuth';
 import type { Program, ProgramDay, ProgramSession, ExerciseItem, MainStackParamList } from '../_layout';
 import { ProgramStatusContext, ConnectivityContext } from '../_layout';
 import { useCoachName } from '../../lib/useCoachName';
@@ -1025,7 +1026,7 @@ export default function ProgramScreen() {
     try {
       const res = await fetch('https://peak65.vercel.app/api/generate-next-week', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ userId: uid, currentWeekNumber: prog.week_number }),
       });
       if (res.ok) setNextWeekReady(true);

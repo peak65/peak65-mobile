@@ -9,6 +9,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { decode } from 'base64-arraybuffer';
 import type { ProgramSession } from '../app/_layout';
 import { supabase } from '../lib/supabase';
+import { authHeaders } from '../lib/apiAuth';
 
 type PickedImage = { base64: string; uri: string };
 
@@ -144,7 +145,7 @@ function HRUploadPrompt({
 
       const res = await fetch('https://peak65.vercel.app/api/extract-hr-zones', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify(body),
       });
 
