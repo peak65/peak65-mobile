@@ -14,7 +14,8 @@ import { fetchTodayHealthData, fetchTodayWorkouts, type WearableHealthData } fro
 import { computeTDEEFromProfile, type TDEEResult } from '../../lib/tdee';
 import { calculatePeakScore } from '../../lib/peakScore';
 import { getConnectedWearables, resolveAllSources } from '../../lib/wearablePriority';
-import { getWhoopAuthUrl } from '../../lib/whoopApi';
+import { fetchWhoopSignedState, getWhoopAuthUrl } from '../../lib/whoopApi';
+import { getAccessToken } from '../../lib/apiAuth';
 import { fetchOuraSignedState, getOuraAuthUrl } from '../../lib/ouraApi';
 import { clearUserCache } from '../../lib/userCache';
 import { LEGAL_URLS } from '../../lib/legal';
@@ -797,21 +798,24 @@ export default function ProfileScreen() {
 
   async function connectWhoop() {
     setWhoopConnecting(true);
-    const { data: { session } } = await supabase.auth.getSession();
-    const userId = session?.user?.id;
-    if (!userId) {
-      Alert.alert('Error', 'Could not start Whoop connection. Please sign in again.');
-      setWhoopConnecting(false);
-      return;
-    }
-    // state carries the userId; the backend redirect (getpeak65.com/api/whoop/connect)
-    // performs the code exchange and stores tokens server-side.
-    const url = getWhoopAuthUrl(userId);
-    Linking.openURL(url).catch(e => {
-      console.log('[whoop] openURL error:', e);
+    try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        Alert.alert('Error', 'Could not start Whoop connection. Please sign in again.');
+        return;
+      }
+      // Signed state from the backend — never the raw user id.
+      const state = await fetchWhoopSignedState(accessToken);
+      const url = getWhoopAuthUrl(state);
+      await Linking.openURL(url);
+    } catch (e: any) {
+      console.log('[whoop] connect error:', e?.message ?? e);
       Alert.alert('Error', 'Could not open Whoop authorization page.');
+    } finally {
+      // Never leave the row stuck on "Connecting..." if the athlete backs out
+      // without returning. The deep-link handler re-sets it while it refetches.
       setWhoopConnecting(false);
-    });
+    }
   }
 
   function disconnectWhoop() {

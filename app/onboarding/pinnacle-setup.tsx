@@ -8,7 +8,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
-import { getWhoopAuthUrl } from '../../lib/whoopApi';
+import { fetchWhoopSignedState, getWhoopAuthUrl } from '../../lib/whoopApi';
+import { getAccessToken } from '../../lib/apiAuth';
 import type { MainStackParamList } from '../_layout';
 import { Colors } from '../../lib/theme';
 import { Logo } from '../../components/Logo';
@@ -158,21 +159,27 @@ export default function PinnacleSetupScreen({ navigation }: Props) {
 
   async function connectWhoop() {
     setWhoopLaunching(true);
-    const { data: { session } } = await supabase.auth.getSession();
-    const userId = session?.user?.id;
-    if (!userId) {
-      Alert.alert('Error', 'Could not start Whoop connection. Please sign in again.');
+    try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        Alert.alert('Error', 'Could not start Whoop connection. Please sign in again.');
+        return;
+      }
+      // Signed state from the backend — never the raw user id. The backend
+      // redirect performs the code exchange and stores tokens server-side. We
+      // don't wait on the round-trip — the athlete can finish setup either way.
+      const state = await fetchWhoopSignedState(accessToken);
+      const url = getWhoopAuthUrl(state);
+      await Linking.openURL(url);
+    } catch (e: any) {
+      console.log('[pinnacle-setup] whoop connect error:', e?.message ?? e);
+      Alert.alert(
+        "Couldn't start Whoop",
+        'You can carry on with setup and connect Whoop later from your profile.',
+      );
+    } finally {
       setWhoopLaunching(false);
-      return;
     }
-    // state carries the userId; the backend redirect performs the code exchange
-    // and stores tokens server-side. We don't wait on the round-trip — the
-    // athlete can finish setup either way.
-    const url = getWhoopAuthUrl(userId);
-    Linking.openURL(url).catch(e => {
-      console.log('[pinnacle-setup] whoop openURL error:', e);
-      Alert.alert('Error', 'Could not open Whoop authorization page.');
-    }).finally(() => setWhoopLaunching(false));
   }
 
   // ── Finish ─────────────────────────────────────────────────────────────────
