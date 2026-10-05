@@ -162,7 +162,9 @@ export type MainStackParamList = {
 
 export type TabParamList = {
   Home: undefined;
-  Program: undefined;
+  // openNewestAt: set by a "program ready" notification tap (a fresh value per
+  // tap) so the tab opens on the newest week for that visit.
+  Program: { openNewestAt?: number } | undefined;
   History: undefined;
   Messages: undefined;
   Coach: undefined;
@@ -795,7 +797,13 @@ export default function RootLayout() {
       kind === 'program' ? 'Program' :
       isCoachRef.current ? 'Coach' :
                            'Messages';
-    mainNavigationRef.navigate('Tabs', { screen });
+    // A program tap opens the newest week — the one the push is about. Every
+    // other way into the tab opens the week covering today.
+    if (screen === 'Program') {
+      mainNavigationRef.navigate('Tabs', { screen: 'Program', params: { openNewestAt: Date.now() } });
+    } else {
+      mainNavigationRef.navigate('Tabs', { screen });
+    }
   }, []);
 
   // Notification taps: the listener covers a running app; the last response

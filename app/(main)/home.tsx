@@ -34,6 +34,7 @@ import { Logo } from '../../components/Logo';
 import LoadFailedCard, { RefreshFailedLabel } from '../../components/LoadFailedCard';
 import { excludeArchived, isArchivedProgram, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
+import { weekCoveringToday } from '../../lib/weekSelection';
 import { perfLog, sinceAppStart } from '../../lib/perf';
 import { isRestRow } from '../../lib/exerciseNotes';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
@@ -664,12 +665,7 @@ export default function HomeScreen() {
     const weeks = visiblePrograms((weeksRes.data ?? []) as ProgramWeekRow[], 'home');
 
     // Same active-week rule as before, applied to the light rows.
-    let activeWeek: ProgramWeekRow | null = null;
-    for (const p of weeks) {
-      const start = new Date(p.week_start_date + 'T00:00:00');
-      const end   = new Date(start.getTime() + 7 * 86_400_000);
-      if (new Date() >= start && new Date() < end) { activeWeek = p; break; }
-    }
+    let activeWeek: ProgramWeekRow | null = weekCoveringToday(weeks);
     if (!activeWeek && weeks.length > 0) activeWeek = weeks[weeks.length - 1];
 
     // program_data for that one week: normally already in the current-week

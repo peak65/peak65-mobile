@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, RefreshControl,
-  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, Modal,
+  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, Modal, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { authHeaders } from '../../lib/apiAuth';
-import type { Program, ProgramDay, ProgramSession, ExerciseItem, MainStackParamList } from '../_layout';
+import type { Program, ProgramDay, ProgramSession, ExerciseItem, MainStackParamList, TabParamList } from '../_layout';
 import { ProgramStatusContext, ConnectivityContext } from '../_layout';
 import { useCoachName } from '../../lib/useCoachName';
 import {
@@ -23,6 +23,7 @@ import LoadFailedCard, { RefreshFailedLabel } from '../../components/LoadFailedC
 import { groupBySuperset } from '../../lib/programGrouping';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
+import { formatWeekStart, weekCoveringToday, weekHasStarted, weekToOpen } from '../../lib/weekSelection';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
 import HRDetailModal, { type HRDetail } from '../../components/HRDetailModal';
 
@@ -520,7 +521,7 @@ function MarkCompleteCard({
 
 function DayCard({
   day, isToday, isComplete,
-  userId, programId, weekNumber, savedTrials,
+  userId, programId, weekNumber, weekStartDate, savedTrials,
   profile, completedSessionKeys, locked,
 }: {
   // True while cached data is showing: LOG SESSION waits for the refresh.
@@ -531,6 +532,9 @@ function DayCard({
   userId: string | null;
   programId: string;
   weekNumber: number;
+  // The selected week's start date. Logging into a week that hasn't started
+  // asks first.
+  weekStartDate: string | null;
   savedTrials: Set<string>;
   profile: TimeTrialProfile | null;
   completedSessionKeys: Map<string, HRDetail>;
@@ -565,6 +569,21 @@ function DayCard({
   const [completeSaving, setCompleteSaving] = useState(false);
 
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+
+  // Looking and logging ahead are both allowed; logging into a week that hasn't
+  // started just shouldn't happen by accident.
+  function confirmIfWeekNotStarted(proceed: () => void) {
+    const week = { week_start_date: weekStartDate };
+    if (weekHasStarted(week)) { proceed(); return; }
+    Alert.alert(
+      `Week ${weekNumber} starts ${formatWeekStart(week)}. Log this session there anyway?`,
+      undefined,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log it', onPress: proceed },
+      ],
+    );
+  }
 
   // ── Time trial state ─────────────────────────────────────────────────────────
   const [ttStatus, setTtStatus]               = useState<'idle'|'matching'|'matched'|'multiple'|'notFound'|'zonesSet'>('idle');
@@ -890,12 +909,12 @@ function DayCard({
               <TouchableOpacity
                 style={[pd.logBtn, locked && { opacity: 0.4 }]}
                 disabled={locked}
-                onPress={() => navigation.navigate('LogSession', {
+                onPress={() => confirmIfWeekNotStarted(() => navigation.navigate('LogSession', {
                   sessionJson: JSON.stringify(session),
                   programId,
                   weekNumber,
                   dayName: day.day,
-                })}
+                }))}
               >
                 <Text style={pd.logBtnTxt}>LOG SESSION →</Text>
               </TouchableOpacity>
@@ -958,6 +977,22 @@ export default function ProgramScreen() {
 
   const [allPrograms, setAllPrograms]     = useState<Program[]>([]);
   const [weekIdx, setWeekIdx]             = useState(0);
+
+  // True for the visit opened by a "program ready" tap: open on the newest week
+  // rather than the current one. Cleared on blur and when an arrow is tapped.
+  const route = useRoute<RouteProp<TabParamList, 'Program'>>();
+  const openNewestRef          = useRef(false);
+  const handledOpenNewestAtRef = useRef<number | undefined>(undefined);
+
+  // The week the tab opens on: the week covering today, else the latest that
+  // has started, else the newest (lib/weekSelection.ts) — or the newest, for a
+  // notification tap.
+  function openingWeekIdx(progs: Program[]): number {
+    if (openNewestRef.current) return progs.length - 1;
+    const week = weekToOpen(progs);
+    const i = week ? progs.indexOf(week) : -1;
+    return i >= 0 ? i : progs.length - 1;
+  }
   const [completedMap, setCompletedMap]   = useState<Record<number, Set<string>>>({});
   const [savedTrialMap, setSavedTrialMap] = useState<Record<number, Set<string>>>({});
   // Per-session completion keys: `${week_number}|${day_name}|${session_name}|${session_time}`
@@ -994,13 +1029,17 @@ export default function ProgramScreen() {
   const [activeProgram, setActiveProgram]       = useState<Program | null>(null);
   const [generatingNextWeek, setGeneratingNextWeek] = useState(false);
   const [nextWeekReady, setNextWeekReady]       = useState(false);
-  const [nextWeekBannerDismissed, setNextWeekBannerDismissed] = useState(false);
+  // The week number whose "is ready" banner was dismissed. A different week
+  // becoming ready shows the banner again. (Older builds stored 'true', which
+  // parses to no week, so the banner returns once for them.)
+  const [dismissedReadyWeek, setDismissedReadyWeek] = useState<number | null>(null);
   const nextWeekTriggeredRef = useRef(false);
 
   useEffect(() => {
     AsyncStorage.getItem('dismissed_next_week_banner').then(val => {
-      if (val === 'true') setNextWeekBannerDismissed(true);
-    });
+      const n = val != null ? parseInt(val, 10) : NaN;
+      if (!Number.isNaN(n)) setDismissedReadyWeek(n);
+    }).catch(() => {});
   }, []);
 
   async function checkAndGenerateNextWeek(uid: string, prog: Program, completedDayCount: number, trainingDaysCount: number) {
@@ -1055,14 +1094,9 @@ export default function ProgramScreen() {
         if (cacheUsable(c.timestamp) && cachedProgs.some(p => weekCoversToday(p))) {
           const progs = cachedProgs;
           setAllPrograms(progs);
-          if (progs.length > 0) setWeekIdx(progs.length - 1);
+          if (progs.length > 0) setWeekIdx(openingWeekIdx(progs));
           setTodayName(new Date().toLocaleDateString('en-US', { weekday: 'long' }));
-          let active: Program | null = null;
-          for (const p of progs) {
-            const start = new Date(p.week_start_date + 'T00:00:00');
-            const end   = new Date(start.getTime() + 7 * 86_400_000);
-            if (new Date() >= start && new Date() < end) { active = p; break; }
-          }
+          let active: Program | null = weekCoveringToday(progs);
           if (!active && progs.length > 0) active = progs[progs.length - 1];
           setActiveProgram(active);
           const nextNum = active?.week_number ? active.week_number + 1 : null;
@@ -1140,16 +1174,12 @@ export default function ProgramScreen() {
 
     const progs = visiblePrograms((progsRes.data ?? []) as Program[], 'program');
     setAllPrograms(progs);
-    if (progs.length > 0) setWeekIdx(progs.length - 1);
+    if (progs.length > 0) setWeekIdx(openingWeekIdx(progs));
     setTodayName(new Date().toLocaleDateString('en-US', { weekday: 'long' }));
 
-    // Track active program for next-week generation
-    let active: Program | null = null;
-    for (const p of progs) {
-      const start = new Date(p.week_start_date + 'T00:00:00');
-      const end   = new Date(start.getTime() + 7 * 86_400_000);
-      if (new Date() >= start && new Date() < end) { active = p; break; }
-    }
+    // Track active program for next-week generation. Unchanged rule: the week
+    // covering today, else the newest — separate from the week the tab opens on.
+    let active: Program | null = weekCoveringToday(progs);
     if (!active && progs.length > 0) active = progs[progs.length - 1];
     setActiveProgram(active);
 
@@ -1215,7 +1245,19 @@ export default function ProgramScreen() {
     setRefreshing(false);
   }, [load]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // A "program ready" notification tap carries openNewestAt (a fresh value per
+  // tap). It opens the newest week for this visit only; an ordinary focus opens
+  // the current week. Listed as a dependency so a tap that arrives while this
+  // tab is already showing still re-runs the load.
+  const openNewestAt = route.params?.openNewestAt;
+  useFocusEffect(useCallback(() => {
+    if (openNewestAt != null && openNewestAt !== handledOpenNewestAtRef.current) {
+      handledOpenNewestAtRef.current = openNewestAt;
+      openNewestRef.current = true;
+    }
+    load();
+    return () => { openNewestRef.current = false; };
+  }, [load, openNewestAt]));
 
   // Scroll to today's card after loading completes using measured layout positions
   useEffect(() => {
@@ -1288,12 +1330,13 @@ export default function ProgramScreen() {
               </View>
             </View>
           )}
-          {nextWeekReady && !generatingNextWeek && !nextWeekBannerDismissed && activeProgram && allPrograms.some(p => p.week_number === activeProgram.week_number + 1) && (
+          {nextWeekReady && !generatingNextWeek && activeProgram && dismissedReadyWeek !== activeProgram.week_number + 1 && allPrograms.some(p => p.week_number === activeProgram.week_number + 1) && (
             <TouchableOpacity
               style={[styles.nextWeekBanner, styles.nextWeekBannerReady]}
               onPress={() => {
-                AsyncStorage.setItem('dismissed_next_week_banner', 'true');
-                setNextWeekBannerDismissed(true);
+                const readyWeek = activeProgram.week_number + 1;
+                AsyncStorage.setItem('dismissed_next_week_banner', String(readyWeek)).catch(() => {});
+                setDismissedReadyWeek(readyWeek);
               }}
               activeOpacity={0.8}
             >
@@ -1314,7 +1357,7 @@ export default function ProgramScreen() {
           {!showCoachBuilding && !showLoadFailed && (
           <View style={styles.weekRow}>
             <TouchableOpacity
-              onPress={() => setWeekIdx(i => i - 1)}
+              onPress={() => { openNewestRef.current = false; setWeekIdx(i => i - 1); }}
               disabled={!canGoBack}
               style={styles.weekArrow}
             >
@@ -1327,7 +1370,7 @@ export default function ProgramScreen() {
                 : <Text style={styles.refreshingText}>Refreshing…</Text>)}
             </View>
             <TouchableOpacity
-              onPress={() => setWeekIdx(i => i + 1)}
+              onPress={() => { openNewestRef.current = false; setWeekIdx(i => i + 1); }}
               disabled={!canGoForward}
               style={styles.weekArrow}
             >
@@ -1381,6 +1424,7 @@ export default function ProgramScreen() {
                     userId={userId}
                     programId={currentProgram?.id ?? ''}
                     weekNumber={displayWeekNum}
+                    weekStartDate={currentProgram?.week_start_date ?? null}
                     savedTrials={savedTrials}
                     profile={ttProfile}
                     completedSessionKeys={completedSessionKeys}
