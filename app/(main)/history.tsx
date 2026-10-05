@@ -10,6 +10,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { canShowUndo, confirmUndo, dropLogFromCaches, reportUndoResult, undoSessionLog } from '../../lib/sessionLogUndo';
 import { authHeaders } from '../../lib/apiAuth';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable } from '../../lib/cachePolicy';
@@ -68,6 +69,9 @@ type SessionLog = {
   zone_minutes: ZoneMinutes | null;
   hr_screenshot_url: string | null;
   hr_curve_screenshot_url: string | null;
+  // Set by the database on insert. The undo window runs from it. Missing on
+  // rows saved in an older cache, which simply don't offer Undo.
+  logged_at?: string | null;
 };
 
 // A session has rich HR if the server extracted zone minutes or stored a
@@ -224,12 +228,32 @@ function isStrengthLog(log: SessionLog): boolean {
 function SessionDetailModal({
   log: logProp,
   onClose,
+  onRemoved,
 }: {
   log: SessionLog;
   onClose: () => void;
+  // The session no longer exists on the server (undone, or already gone).
+  onRemoved: (id: string) => void;
 }) {
   const [log, setLog] = useState(logProp);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'loading'>('idle');
+  const [undoing, setUndoing] = useState(false);
+
+  function handleUndo() {
+    if (undoing) return;
+    const id = log.id;
+    confirmUndo(async () => {
+      setUndoing(true);
+      const result = await undoSessionLog(id);
+      setUndoing(false);
+      // Removed from the list only once the server confirms it's gone; any
+      // failure leaves it on screen.
+      if (reportUndoResult(result)) {
+        void dropLogFromCaches(id);
+        onRemoved(id);
+      }
+    });
+  }
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [imgFailed, setImgFailed] = useState(false);
   const [curveUrl, setCurveUrl] = useState<string | null>(null);
@@ -498,6 +522,13 @@ function SessionDetailModal({
                   <Text style={styles.saveBtnText}>UPLOAD HR DATA</Text>
                 </TouchableOpacity>
               )
+            )}
+
+            {/* Undo — only within 24 hours of logged_at. The server re-checks. */}
+            {canShowUndo(log.logged_at) && uploadStatus !== 'loading' && (
+              <TouchableOpacity style={styles.undoBtn} onPress={handleUndo} disabled={undoing}>
+                <Text style={styles.undoBtnText}>{undoing ? 'Deleting...' : 'Logged by mistake? Undo'}</Text>
+              </TouchableOpacity>
             )}
           </ScrollView>
         </View>
@@ -1061,7 +1092,14 @@ export default function HistoryScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Session detail modal */}
       {selectedItem?.kind === 'session' && (
-        <SessionDetailModal log={selectedItem.data} onClose={() => setSelectedItem(null)} />
+        <SessionDetailModal
+          log={selectedItem.data}
+          onClose={() => setSelectedItem(null)}
+          onRemoved={id => {
+            setLogs(prev => prev.filter(l => l.id !== id));
+            setSelectedItem(null);
+          }}
+        />
       )}
       {/* External workout detail modal */}
       {selectedItem?.kind === 'workout' && (
@@ -1478,6 +1516,8 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginTop: 14,
   },
   saveBtnText: { color: Colors.background, fontSize: 16, fontWeight: '700' },
+  undoBtn:     { alignItems: 'center', paddingVertical: 14, marginTop: 12 },
+  undoBtnText: { color: Colors.textSecondary, fontSize: 14, textDecorationLine: 'underline' },
   cancelText: { color: Colors.textSecondary, fontSize: 15, textAlign: 'center' },
 
   // Empty state

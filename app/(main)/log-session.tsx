@@ -8,6 +8,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../../lib/supabase';
 import HRUploadPrompt from '../../components/HRUploadPrompt';
+import { canShowUndo, confirmUndo, dropLogFromCaches, reportUndoResult, undoSessionLog } from '../../lib/sessionLogUndo';
 import { Colors, Fonts } from '../../lib/theme';
 import { getSessionPaceTargets } from '../../lib/pace';
 import { isRestRow } from '../../lib/exerciseNotes';
@@ -89,6 +90,11 @@ export default function LogSessionScreen() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [sessionLogId, setSessionLogId] = useState<string | null>(null);
+  // When the save landed, by this phone's clock. The row was created moments
+  // ago, so this only gates showing Undo; the server judges the real window
+  // from logged_at.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [undoing, setUndoing] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
   React.useEffect(() => {
@@ -223,6 +229,7 @@ export default function LogSessionScreen() {
 
       if (error) throw error;
       setSessionLogId(data?.id ?? null);
+      setSavedAt(Date.now());
       setSaved(true);
     } catch (err) {
       // FIX 1: log full error object
@@ -231,6 +238,28 @@ export default function LogSessionScreen() {
     }
     setSaving(false);
   }
+
+  // ── Undo ────────────────────────────────────────────────────────────────────
+
+  function handleUndo() {
+    if (!sessionLogId || undoing) return;
+    const id = sessionLogId;
+    confirmUndo(async () => {
+      setUndoing(true);
+      const result = await undoSessionLog(id);
+      setUndoing(false);
+      // Back to the screen this was logged from. Its focus reload re-reads
+      // session_logs, so the session shows as not completed again.
+      const gone = reportUndoResult(result, () => navigation.goBack());
+      if (gone) void dropLogFromCaches(id);
+    });
+  }
+
+  const undoControl = sessionLogId && canShowUndo(savedAt) ? (
+    <TouchableOpacity style={ls.undoBtn} onPress={handleUndo} disabled={undoing}>
+      <Text style={ls.undoBtnTxt}>{undoing ? 'Deleting...' : 'Logged by mistake? Undo'}</Text>
+    </TouchableOpacity>
+  ) : null;
 
   return (
     <SafeAreaView style={ls.container} edges={['top', 'bottom']}>
@@ -459,6 +488,7 @@ export default function LogSessionScreen() {
               <TouchableOpacity style={ls.saveBtn} onPress={() => navigation.goBack()}>
                 <Text style={ls.saveBtnTxt}>DONE</Text>
               </TouchableOpacity>
+              {undoControl}
             </View>
           )}
 
@@ -475,6 +505,7 @@ export default function LogSessionScreen() {
                 onNetworkError={() => {}}
                 onSkip={() => navigation.goBack()}
               />
+              {undoControl}
             </View>
           )}
 
@@ -532,6 +563,8 @@ const ls = StyleSheet.create({
   saveBtnDisabled: { opacity: 0.4 },
   saveBtnTxt:      { color: '#080808', fontSize: 16, fontWeight: '700', letterSpacing: 1 },
   savedContainer:  { paddingTop: 16 },
+  undoBtn:         { alignItems: 'center', paddingVertical: 14, marginHorizontal: 20, marginTop: 8 },
+  undoBtnTxt:      { color: Colors.textSecondary, fontSize: 14, textDecorationLine: 'underline' },
   hrHeading:       { color: '#e8ff47', fontSize: 13, fontWeight: '700', letterSpacing: 2, textTransform: 'uppercase', textAlign: 'center', marginBottom: 0 },
   strengthDoneCard:{ marginHorizontal: 20, marginBottom: 16, paddingVertical: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.card },
   strengthDoneTxt: { color: '#e8ff47', fontSize: 20, fontWeight: '700', letterSpacing: 2, fontFamily: Fonts.metric },
