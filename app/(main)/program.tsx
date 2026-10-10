@@ -25,7 +25,7 @@ import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
 import { formatWeekStart, weekCoveringToday, weekHasStarted, weekToOpen } from '../../lib/weekSelection';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
-import { activeRoundReps, displayReps } from '../../lib/roundReps';
+import { activeRoundReps, displayReps, extrasQualifier } from '../../lib/roundReps';
 import HRDetailModal, { type HRDetail } from '../../components/HRDetailModal';
 
 function toHRDetail(log: any): HRDetail {
@@ -121,12 +121,21 @@ function SessionDocument({ session }: { session: ProgramSession }) {
     } else {
       // The interval value lives in either `duration` or `reps` — prefer duration.
       // Sets are shown whenever sets > 1, regardless of `type` (unless hideSets).
-      const value = (duration && duration.trim() !== '') ? duration : ex.reps;
+      // The tests read the raw value; only what is printed goes through
+      // lib/roundReps.ts, so a drop set's extras ride along — after a duration
+      // too, and even where the reps test would hide the value — and nothing
+      // without extras prints differently.
+      const hasDuration = !!duration && duration.trim() !== '';
+      const value = hasDuration ? duration : ex.reps;
+      const extras = extrasQualifier(ex);
+      const printed = hasDuration ? (extras ? `${duration} (${extras})` : duration) : displayReps(ex);
       const setsNum = ex.sets ? Number(ex.sets) : 0;
       if (value && setsNum > 1 && !hideSets) {
-        parts.push(`${ex.sets} × ${value}`);
+        parts.push(`${ex.sets} × ${printed}`);
       } else if (value && value !== '1') {
-        parts.push(value);
+        parts.push(printed);
+      } else if (extras) {
+        parts.push(printed);
       }
     }
 

@@ -37,7 +37,7 @@ import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
 import { weekCoveringToday } from '../../lib/weekSelection';
 import { perfLog, sinceAppStart } from '../../lib/perf';
 import { isRestRow } from '../../lib/exerciseNotes';
-import { activeRoundReps, displayReps } from '../../lib/roundReps';
+import { activeRoundReps, displayReps, extrasQualifier } from '../../lib/roundReps';
 import { forTimeHeading } from '../../lib/programGrouping';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
 import { Flags } from '../../lib/flags';
@@ -1266,9 +1266,13 @@ export default function HomeScreen() {
                         const parts: string[] = [];
                         const setsNum = ex.sets ? Number(ex.sets) : 0;
                         // A per-round ladder replaces sets×reps (lib/roundReps.ts).
+                        // The tests read raw reps; only what is printed goes through
+                        // displayReps, so a drop set's extras ride along (and still show
+                        // where the reps test would hide the value).
                         if (activeRoundReps(ex).length > 0)      parts.push(displayReps(ex));
-                        else if (!hideSets && setsNum > 1 && ex.reps) parts.push(`${ex.sets}×${ex.reps}`);
-                        else if (ex.reps && ex.reps !== '1')     parts.push(ex.reps);
+                        else if (!hideSets && setsNum > 1 && ex.reps) parts.push(`${ex.sets}×${displayReps(ex)}`);
+                        else if (ex.reps && ex.reps !== '1')     parts.push(displayReps(ex));
+                        else if (extrasQualifier(ex))            parts.push(displayReps(ex));
                         if (ex.duration)                         parts.push(ex.duration);
                         else if (ex.distance)                    parts.push(ex.distance);
                         return parts.join(' · ');

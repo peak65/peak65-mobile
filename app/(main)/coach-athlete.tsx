@@ -23,7 +23,7 @@ import { syncBadge } from '../../lib/badge';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { Colors, Fonts } from '../../lib/theme';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
-import { activeRoundReps, displayReps } from '../../lib/roundReps';
+import { activeRoundReps, displayReps, extrasQualifier } from '../../lib/roundReps';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CoachAthleteDetail'>;
 
@@ -912,7 +912,15 @@ function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string, fo
   } else if (forTime) {
     const value = duration || (ex.reps ?? '');
     if (value) parts.push(value);
-  } else if (ex.sets) parts.push(`${ex.sets}×${duration || (ex.reps ?? '')}`);
+  } else {
+    // Only what is printed goes through lib/roundReps.ts, so a drop set's extras
+    // ride along — after a duration too, and on an exercise with no sets, which
+    // otherwise prints no reps here. Without extras, unchanged.
+    const extras = extrasQualifier(ex);
+    const printed = duration ? (extras ? `${duration} (${extras})` : duration) : displayReps(ex);
+    if (ex.sets) parts.push(`${ex.sets}×${printed}`);
+    else if (extras) parts.push(printed);
+  }
   if (ex.distance) parts.push(ex.distance);
   if (rest) parts.push(`${rest} rest`);
   if (load) parts.push(`Load: ${load}`);

@@ -84,6 +84,9 @@ export type ExerciseItem = {
   // Per-round reps: one entry per round (circuit / EMOM) or per set. Read only
   // through lib/roundReps.ts, which decides when it applies.
   round_reps?: string[] | null;
+  // Drop sets: more work straight on inside a set, { reps, load, on }. Read only
+  // through lib/roundReps.ts (extrasQualifier / displayReps).
+  extra_segments?: { reps: string; load?: string | null; on?: 'all' | 'last' | number[] | null }[] | null;
   circuit_rest?: string | null;
   block_id?: string | null;
   block_name?: string | null;
