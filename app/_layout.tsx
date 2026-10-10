@@ -94,6 +94,12 @@ export type ExerciseItem = {
   amrap_id?: string | null;
   amrap_label?: string | null;
   amrap_time_cap?: number | null;
+  // For Time: fixed work, the clock is the score. Rounds, an optional cap in
+  // minutes, and round_reps work as in a circuit; there is no prescribed rest.
+  for_time_id?: string | null;
+  for_time_label?: string | null;
+  for_time_rounds?: number | null;
+  for_time_cap?: number | null;
   time_window?: string | null;
 };
 

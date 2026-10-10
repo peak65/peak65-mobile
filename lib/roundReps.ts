@@ -7,6 +7,7 @@
 //     Wall Balls 30 / 40 / 50 across 3 rounds is
 //     { reps: '30', round_reps: ['30', '40', '50'] }.
 //   - in an EMOM: the EMOM's rounds (emom_rounds).
+//   - in a For Time: its rounds (for_time_rounds) — 40 / 30 / 20 / 10 over 4.
 //   - anywhere else — a standalone exercise, a superset member, an exercise in a
 //     Part — its OWN sets, when sets > 1: a 12 / 10 / 8 / 6 pyramid is
 //     { sets: 4, reps: '12', round_reps: ['12', '10', '8', '6'] }.
@@ -28,6 +29,8 @@ type WithRoundReps = {
   emom_id?: string | null;
   emom_rounds?: number | null;
   amrap_id?: string | null;
+  for_time_id?: string | null;
+  for_time_rounds?: number | null;
 };
 
 /** The entries as a clean list, from the stored array or the editor's "30-40-50" text. */
@@ -42,7 +45,7 @@ export function roundRepsList(value: unknown): string[] {
 
 /** Is this exercise in a group whose rounds the list applies to? */
 export function inRoundGroup(ex: WithRoundReps): boolean {
-  return !!ex.circuit_id || !!ex.emom_id;
+  return !!ex.circuit_id || !!ex.emom_id || !!ex.for_time_id;
 }
 
 /** The exercise's own set count (stored as a number, typed in the editor as text). */
@@ -61,6 +64,7 @@ export function roundRepsApply(ex: WithRoundReps): boolean {
 export function roundCount(ex: WithRoundReps): number | null {
   if (ex.circuit_id) return ex.circuit_rounds ?? 4;
   if (ex.emom_id) return ex.emom_rounds && ex.emom_rounds > 0 ? ex.emom_rounds : null;
+  if (ex.for_time_id) return ex.for_time_rounds && ex.for_time_rounds > 0 ? ex.for_time_rounds : null;
   return roundRepsApply(ex) ? setCount(ex) : null;
 }
 

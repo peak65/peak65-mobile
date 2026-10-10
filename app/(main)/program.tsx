@@ -20,7 +20,7 @@ import {
 import { deriveZonesFromTimeTrial, type TrainingZones } from '../../lib/zoneDerivation';
 import { Colors, Fonts } from '../../lib/theme';
 import LoadFailedCard, { RefreshFailedLabel } from '../../components/LoadFailedCard';
-import { groupBySuperset } from '../../lib/programGrouping';
+import { forTimeHeading, groupBySuperset } from '../../lib/programGrouping';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
 import { formatWeekStart, weekCoveringToday, weekHasStarted, weekToOpen } from '../../lib/weekSelection';
@@ -94,7 +94,7 @@ function isStrengthSession(session: ProgramSession): boolean {
 function SessionDocument({ session }: { session: ProgramSession }) {
   const blocks = session.blocks ?? [];
 
-  function renderExerciseLine(ex: ExerciseItem, index: number, prefix?: string, hideSets?: boolean): React.ReactNode {
+  function renderExerciseLine(ex: ExerciseItem, index: number, prefix?: string, hideSets?: boolean, hideRest?: boolean): React.ReactNode {
     // A rest row is a break between movements: no name, detail or cue.
     if (isRestRow(ex)) {
       return (
@@ -130,7 +130,8 @@ function SessionDocument({ session }: { session: ProgramSession }) {
       }
     }
 
-    const rest = displayRest(ex.rest);
+    // A For Time has no prescribed rest, so a member's own rest is not shown.
+    const rest = hideRest ? null : displayRest(ex.rest);
     if (rest) parts.push(`${rest} rest`);
 
     if (load) parts.push(`Load: ${load}`);
@@ -221,6 +222,22 @@ function SessionDocument({ session }: { session: ProgramSession }) {
                     </View>
                   </View>
                 ))}
+              </View>
+            );
+          }
+          if (group.kind === 'fortime' || group.kind === 'part-fortime') {
+            // For Time: never numbered, never advance the counter. Header carries
+            // the label, rounds and cap (lib/programGrouping.ts forTimeHeading).
+            // The rounds are the multiplier, so members show no sets; there is
+            // no prescribed rest, so no rest line and no member rest.
+            const members = group.members;
+            return (
+              <View key={gi} style={pd.circuitSection}>
+                {group.kind === 'part-fortime' && group.blockName ? (
+                  <Text style={pd.subBlockLabel}>{group.blockName}</Text>
+                ) : null}
+                <Text style={pd.circuitRounds}>{forTimeHeading(members[0].ex)}</Text>
+                {members.map(({ ex }, mi) => renderExerciseLine(ex, mi, undefined, true, true))}
               </View>
             );
           }

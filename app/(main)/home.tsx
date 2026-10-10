@@ -38,6 +38,7 @@ import { weekCoveringToday } from '../../lib/weekSelection';
 import { perfLog, sinceAppStart } from '../../lib/perf';
 import { isRestRow } from '../../lib/exerciseNotes';
 import { activeRoundReps, displayReps } from '../../lib/roundReps';
+import { forTimeHeading } from '../../lib/programGrouping';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
 import { Flags } from '../../lib/flags';
 
@@ -1322,6 +1323,18 @@ export default function HomeScreen() {
                                     <View style={{ flex: 1 }}>{line(m, `${kp}-aml-${j}-${mi}`, true, false)}</View>
                                   </View>
                                 ))}
+                              </View>,
+                            );
+                          } else if (ex.for_time_id) {
+                            // For Time: header carries label, rounds and cap; members
+                            // show no sets (the rounds are the multiplier).
+                            const fId = ex.for_time_id;
+                            const members: ExerciseItem[] = [];
+                            while (j < slice.length && slice[j].for_time_id === fId) { members.push(slice[j]); j++; }
+                            nodes.push(
+                              <View key={`${kp}-ft-${j}`}>
+                                <Text style={styles.circuitRoundsLabel}>{forTimeHeading(members[0])}</Text>
+                                {members.map((m, mi) => line(m, `${kp}-ftm-${j}-${mi}`, true, true))}
                               </View>,
                             );
                           } else if (ex.circuit_id) {

@@ -1,5 +1,5 @@
 // Shared exercise-grouping logic for rendering a session's blocks.
-// Reconstructs circuit / superset / emom / part-* groups from the per-exercise
+// Reconstructs circuit / superset / emom / amrap / fortime / part-* groups from the per-exercise
 // *_id fields. Single source of truth used by both the athlete Program view
 // (app/(main)/program.tsx) and the coach athlete view (app/(main)/coach-athlete.tsx).
 
@@ -15,7 +15,34 @@ export type ExGroup =
   | { kind: 'emom'; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; rounds: number | null; totalMinutes: number | null }
   | { kind: 'part-emom'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; rounds: number | null; totalMinutes: number | null }
   | { kind: 'amrap'; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; timeCap: number | null }
-  | { kind: 'part-amrap'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; timeCap: number | null };
+  | { kind: 'part-amrap'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; timeCap: number | null }
+  | { kind: 'fortime'; members: { ex: ExerciseItem; origIdx: number }[] }
+  | { kind: 'part-fortime'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] };
+
+// "FOR TIME — 40-30-20-10 · 4 ROUNDS · 25 MIN CAP". Ported from the web's
+// forTimeHeading (src/lib/printableProgram.ts) so every place a For Time is
+// shown names it the same way. The cap is optional and only shown when set.
+export function forTimeHeading(first: {
+  for_time_label?: string | null;
+  for_time_rounds?: number | null;
+  for_time_cap?: number | null;
+}): string {
+  const text = (v: string | null | undefined): string | null => {
+    if (v == null) return null;
+    const s = String(v).trim();
+    return s.length ? s : null;
+  };
+  const num = (v: number | null | undefined): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null;
+  const parts: string[] = [];
+  const label = text(first.for_time_label);
+  const rounds = num(first.for_time_rounds);
+  const cap = num(first.for_time_cap);
+  if (label) parts.push(label.toUpperCase());
+  if (rounds != null && rounds > 0) parts.push(`${rounds} ROUND${rounds === 1 ? '' : 'S'}`);
+  if (cap != null && cap > 0) parts.push(`${cap} MIN CAP`);
+  return parts.length ? `FOR TIME — ${parts.join(' · ')}` : 'FOR TIME';
+}
 
 export function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
   const groups: ExGroup[] = [];
@@ -32,6 +59,7 @@ export function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
       }
       const firstEmomId = members[0].ex.emom_id;
       const firstAmrapId = members[0].ex.amrap_id;
+      const firstForTimeId = members[0].ex.for_time_id;
       const firstCircuitId = members[0].ex.circuit_id;
       if (firstEmomId && members.every((m) => m.ex.emom_id === firstEmomId)) {
         groups.push({ kind: 'part-emom', blockName, members,
@@ -42,6 +70,8 @@ export function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
         groups.push({ kind: 'part-amrap', blockName, members,
           label: members[0].ex.amrap_label ?? null,
           timeCap: members[0].ex.amrap_time_cap ?? null });
+      } else if (firstForTimeId && members.every((m) => m.ex.for_time_id === firstForTimeId)) {
+        groups.push({ kind: 'part-fortime', blockName, members });
       } else if (firstCircuitId && members.every((m) => m.ex.circuit_id === firstCircuitId)) {
         groups.push({ kind: 'part-circuit', blockName, members, rounds: members[0].ex.circuit_rounds ?? 4, rest: members[0].ex.circuit_rest ?? null });
       } else {
@@ -86,6 +116,18 @@ export function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
           label: members[0].ex.amrap_label ?? null,
           timeCap: members[0].ex.amrap_time_cap ?? null,
         });
+      }
+    } else if (ex.for_time_id) {
+      const fId = ex.for_time_id;
+      const members: { ex: ExerciseItem; origIdx: number }[] = [];
+      while (i < exercises.length && exercises[i].for_time_id === fId) {
+        members.push({ ex: exercises[i], origIdx: i });
+        i++;
+      }
+      if (members.length === 1) {
+        groups.push({ kind: 'single', ex: members[0].ex, origIdx: members[0].origIdx });
+      } else {
+        groups.push({ kind: 'fortime', members });
       }
     } else if (ex.circuit_id) {
       const cId = ex.circuit_id;

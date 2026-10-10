@@ -18,7 +18,7 @@ import { AlertTriangle, Check, ChevronLeft, ChevronRight } from 'lucide-react-na
 import { supabase } from '../../lib/supabase';
 import type { MainStackParamList, ProgramDay, ProgramSession, ExerciseItem } from '../_layout';
 import TrendLineChart from '../components/TrendLineChart';
-import { groupBySuperset } from '../../lib/programGrouping';
+import { forTimeHeading, groupBySuperset } from '../../lib/programGrouping';
 import { syncBadge } from '../../lib/badge';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { Colors, Fonts } from '../../lib/theme';
@@ -886,7 +886,9 @@ function missSummary(log: SessionLogRow): string {
 // One exercise in the coach view: name on the first line, the prescription on
 // an indented second line, and the coaching cue (if any) on a third. `prefix`
 // carries superset letters or an EMOM time window. Rest rows render as a break.
-function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string) {
+// `forTime`: a For Time member — the group's rounds are the multiplier, so no
+// sets prefix, and there is no prescribed rest.
+function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string, forTime?: boolean) {
   if (isRestRow(ex)) {
     return (
       <View key={key} style={styles.restBreak}>
@@ -899,7 +901,7 @@ function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string) {
 
   const { pace, load, cue } = parseExerciseNotes(ex.notes || ex.note);
   const duration = ex.duration?.trim();
-  const rest = displayRest(ex.rest);
+  const rest = forTime ? null : displayRest(ex.rest);
 
   const parts: string[] = [];
   // A per-round ladder replaces sets×reps (lib/roundReps.ts); a duration still
@@ -907,6 +909,9 @@ function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string) {
   if (activeRoundReps(ex).length > 0) {
     parts.push(displayReps(ex));
     if (duration) parts.push(duration);
+  } else if (forTime) {
+    const value = duration || (ex.reps ?? '');
+    if (value) parts.push(value);
   } else if (ex.sets) parts.push(`${ex.sets}×${duration || (ex.reps ?? '')}`);
   if (ex.distance) parts.push(ex.distance);
   if (rest) parts.push(`${rest} rest`);
@@ -977,6 +982,17 @@ function SessionDetail({ day, logs }: { day: ProgramDay; logs: SessionLogRow[] }
                       ) : null}
                       <Text style={styles.detailGroupHeader}>{header}</Text>
                       {group.members.map((m, mi) => coachExerciseLine(m.ex, mi, m.ex.time_window ?? undefined))}
+                    </View>
+                  );
+                }
+                if (group.kind === 'fortime' || group.kind === 'part-fortime') {
+                  return (
+                    <View key={gi} style={styles.detailGroup}>
+                      {group.kind === 'part-fortime' && group.blockName ? (
+                        <Text style={styles.detailSubBlockName}>{group.blockName}</Text>
+                      ) : null}
+                      <Text style={styles.detailGroupHeader}>{forTimeHeading(group.members[0].ex)}</Text>
+                      {group.members.map((m, mi) => coachExerciseLine(m.ex, mi, undefined, true))}
                     </View>
                   );
                 }
