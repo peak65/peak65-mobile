@@ -23,6 +23,7 @@ import { syncBadge } from '../../lib/badge';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { Colors, Fonts } from '../../lib/theme';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
+import { activeRoundReps, displayReps } from '../../lib/roundReps';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CoachAthleteDetail'>;
 
@@ -901,7 +902,12 @@ function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string) {
   const rest = displayRest(ex.rest);
 
   const parts: string[] = [];
-  if (ex.sets) parts.push(`${ex.sets}×${duration || (ex.reps ?? '')}`);
+  // A per-round ladder replaces sets×reps (lib/roundReps.ts); a duration still
+  // shows beside it.
+  if (activeRoundReps(ex).length > 0) {
+    parts.push(displayReps(ex));
+    if (duration) parts.push(duration);
+  } else if (ex.sets) parts.push(`${ex.sets}×${duration || (ex.reps ?? '')}`);
   if (ex.distance) parts.push(ex.distance);
   if (rest) parts.push(`${rest} rest`);
   if (load) parts.push(`Load: ${load}`);

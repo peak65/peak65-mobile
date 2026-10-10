@@ -81,6 +81,9 @@ export type ExerciseItem = {
   superset_id?: string | null;
   circuit_id?: string | null;
   circuit_rounds?: number | null;
+  // Per-round reps: one entry per round (circuit / EMOM) or per set. Read only
+  // through lib/roundReps.ts, which decides when it applies.
+  round_reps?: string[] | null;
   circuit_rest?: string | null;
   block_id?: string | null;
   block_name?: string | null;

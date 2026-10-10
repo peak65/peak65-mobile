@@ -37,6 +37,7 @@ import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
 import { weekCoveringToday } from '../../lib/weekSelection';
 import { perfLog, sinceAppStart } from '../../lib/perf';
 import { isRestRow } from '../../lib/exerciseNotes';
+import { activeRoundReps, displayReps } from '../../lib/roundReps';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
 import { Flags } from '../../lib/flags';
 
@@ -1263,7 +1264,9 @@ export default function HomeScreen() {
                         if (isRestRow(ex)) return '';
                         const parts: string[] = [];
                         const setsNum = ex.sets ? Number(ex.sets) : 0;
-                        if (!hideSets && setsNum > 1 && ex.reps) parts.push(`${ex.sets}×${ex.reps}`);
+                        // A per-round ladder replaces sets×reps (lib/roundReps.ts).
+                        if (activeRoundReps(ex).length > 0)      parts.push(displayReps(ex));
+                        else if (!hideSets && setsNum > 1 && ex.reps) parts.push(`${ex.sets}×${ex.reps}`);
                         else if (ex.reps && ex.reps !== '1')     parts.push(ex.reps);
                         if (ex.duration)                         parts.push(ex.duration);
                         else if (ex.distance)                    parts.push(ex.distance);

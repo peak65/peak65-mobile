@@ -25,6 +25,7 @@ import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
 import { formatWeekStart, weekCoveringToday, weekHasStarted, weekToOpen } from '../../lib/weekSelection';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
+import { activeRoundReps, displayReps } from '../../lib/roundReps';
 import HRDetailModal, { type HRDetail } from '../../components/HRDetailModal';
 
 function toHRDetail(log: any): HRDetail {
@@ -111,14 +112,22 @@ function SessionDocument({ session }: { session: ProgramSession }) {
 
     const parts: string[] = [];
 
-    // The interval value lives in either `duration` or `reps` — prefer duration.
-    // Sets are shown whenever sets > 1, regardless of `type` (unless hideSets).
-    const value = (duration && duration.trim() !== '') ? duration : ex.reps;
-    const setsNum = ex.sets ? Number(ex.sets) : 0;
-    if (value && setsNum > 1 && !hideSets) {
-      parts.push(`${ex.sets} × ${value}`);
-    } else if (value && value !== '1') {
-      parts.push(value);
+    // A per-round ladder reads "30-40-50" / "12-10-8-6", one entry per round or
+    // set, with no "sets ×" in front (lib/roundReps.ts). A duration still shows
+    // beside it, as on the web.
+    if (activeRoundReps(ex).length > 0) {
+      parts.push(displayReps(ex));
+      if (duration && duration.trim() !== '') parts.push(duration);
+    } else {
+      // The interval value lives in either `duration` or `reps` — prefer duration.
+      // Sets are shown whenever sets > 1, regardless of `type` (unless hideSets).
+      const value = (duration && duration.trim() !== '') ? duration : ex.reps;
+      const setsNum = ex.sets ? Number(ex.sets) : 0;
+      if (value && setsNum > 1 && !hideSets) {
+        parts.push(`${ex.sets} × ${value}`);
+      } else if (value && value !== '1') {
+        parts.push(value);
+      }
     }
 
     const rest = displayRest(ex.rest);
