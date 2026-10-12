@@ -23,6 +23,7 @@ import LoadFailedCard, { RefreshFailedLabel } from '../../components/LoadFailedC
 import { forTimeHeading, groupBySuperset } from '../../lib/programGrouping';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
+import { orderSessions, sessionLabel } from '../../lib/sessionOrder';
 import { formatWeekStart, weekCoveringToday, weekHasStarted, weekToOpen } from '../../lib/weekSelection';
 import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
 import { activeRoundReps, displayReps, extrasQualifier } from '../../lib/roundReps';
@@ -91,7 +92,8 @@ function isStrengthSession(session: ProgramSession): boolean {
 
 // ─── Session document (flat text view) ───────────────────────────────────────
 
-function SessionDocument({ session }: { session: ProgramSession }) {
+// `label` is the session's position label ("Session 1") — display only.
+function SessionDocument({ session, label }: { session: ProgramSession; label: string }) {
   const blocks = session.blocks ?? [];
 
   function renderExerciseLine(ex: ExerciseItem, index: number, prefix?: string, hideSets?: boolean, hideRest?: boolean): React.ReactNode {
@@ -297,7 +299,7 @@ function SessionDocument({ session }: { session: ProgramSession }) {
       <View style={pd.sessionHeader}>
         <Text style={pd.sessionName}>{session.name}</Text>
         <Text style={pd.sessionMeta}>
-          {[session.time, session.duration_minutes ? `${session.duration_minutes} min` : null]
+          {[label, session.duration_minutes ? `${session.duration_minutes} min` : null]
             .filter(Boolean).join(' · ')}
         </Text>
       </View>
@@ -553,6 +555,12 @@ function MarkCompleteCard({
 }
 
 // ─── Day card ─────────────────────────────────────────────────────────────────
+
+// The name-only fallback key for matching a log to its session (week + day +
+// name, no time). Prefixed so it can never equal a full week|day|name|time key.
+function sessionNameKey(week: number, day: string, name: string): string {
+  return `name:${week}|${day}|${name}`;
+}
 
 function DayCard({
   day, isToday, isComplete,
@@ -920,13 +928,20 @@ function DayCard({
         <TouchableOpacity style={pd.dayHeader} onPress={() => setExpanded(e => !e)}>{headerInner}</TouchableOpacity>
       )}
 
-      {expanded && !isRest && [...(day.sessions ?? [])].sort((a, b) => (a.time === 'PM' ? 1 : 0) - (b.time === 'PM' ? 1 : 0)).map((session, si) => {
+      {expanded && !isRest && orderSessions(day.sessions).map((session, si) => {
+        // Matched on week + day + name + stored time. When that misses, the name
+        // alone — only if no other session in the day has it — covers a session
+        // the coach moved after it was logged. Position never takes part.
         const sessionKey  = `${weekNumber}|${day.day}|${session.name}|${session.time ?? ''}`;
-        const hrDetail    = completedSessionKeys.get(sessionKey) ?? null;
-        const sessionDone = completedSessionKeys.has(sessionKey);
+        const nameKey     = sessionNameKey(weekNumber, day.day, session.name);
+        const nameUnique  = (day.sessions ?? []).filter(s => s.name === session.name).length === 1;
+        const matchKey    = completedSessionKeys.has(sessionKey) ? sessionKey
+                          : nameUnique && completedSessionKeys.has(nameKey) ? nameKey : null;
+        const hrDetail    = matchKey ? completedSessionKeys.get(matchKey) ?? null : null;
+        const sessionDone = matchKey !== null;
         return (
         <View key={`${session.name}|${session.time ?? ''}`}>
-          <SessionDocument session={session} />
+          <SessionDocument session={session} label={sessionLabel(si)} />
           {(session.log_result !== false) && (
             sessionDone ? (
               <TouchableOpacity
@@ -1155,6 +1170,7 @@ export default function ProgramScreen() {
             cMap[log.week_number].add(log.day_name);
             if (log.session_name) {
               sKeys.set(`${log.week_number}|${log.day_name}|${log.session_name}|${log.session_time ?? ''}`, toHRDetail(log));
+              sKeys.set(sessionNameKey(log.week_number, log.day_name, log.session_name), toHRDetail(log));
             }
             if (log.log_field) {
               if (!tMap[log.week_number]) tMap[log.week_number] = new Set();
@@ -1247,6 +1263,7 @@ export default function ProgramScreen() {
       const sTime = (log as any).session_time as string | null | undefined;
       if (sName) {
         sKeys.set(`${log.week_number}|${log.day_name}|${sName}|${sTime ?? ''}`, toHRDetail(log));
+        sKeys.set(sessionNameKey(log.week_number, log.day_name, sName), toHRDetail(log));
       }
       if (log.log_field) {
         if (!tMap[log.week_number]) tMap[log.week_number] = new Set();

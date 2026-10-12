@@ -19,6 +19,7 @@ import { supabase } from '../../lib/supabase';
 import type { MainStackParamList, ProgramDay, ProgramSession, ExerciseItem } from '../_layout';
 import TrendLineChart from '../components/TrendLineChart';
 import { forTimeHeading, groupBySuperset } from '../../lib/programGrouping';
+import { orderSessions, sessionLabel } from '../../lib/sessionOrder';
 import { syncBadge } from '../../lib/badge';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { Colors, Fonts } from '../../lib/theme';
@@ -594,7 +595,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
                       <View style={styles.sessionLeft}>
                         <Text style={styles.sessionDay}>{day.day}</Text>
                         <Text style={styles.sessionName} numberOfLines={1}>
-                          {day.sessions[0]?.name ?? (day.is_rest ? 'Rest' : '—')}
+                          {orderSessions(day.sessions)[0]?.name ?? (day.is_rest ? 'Rest' : '—')}
                         </Text>
                       </View>
                       <View style={styles.sessionRight}>
@@ -829,7 +830,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
                   <Text style={styles.overviewSession} numberOfLines={1}>
                     {day.is_rest
                       ? 'Rest'
-                      : day.sessions[0]?.name ?? '—'}
+                      : orderSessions(day.sessions)[0]?.name ?? '—'}
                   </Text>
                   <Text style={styles.overviewType}>{day.type === 'race' ? 'Race' : day.type}</Text>
                 </View>
@@ -938,13 +939,15 @@ function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string, fo
 }
 
 function SessionDetail({ day, logs }: { day: ProgramDay; logs: SessionLogRow[] }) {
-  const sessions: ProgramSession[] = day.sessions ?? [];
+  // AM-first by position, as the coach portal shows them (lib/sessionOrder.ts).
+  const sessions: ProgramSession[] = orderSessions(day.sessions);
   const completedLog = logs.find(l => l.completed);
 
   return (
     <View style={styles.sessionDetail}>
       {sessions.map((s, si) => (
         <View key={si} style={styles.detailSession}>
+          <Text style={styles.detailSessionLabel}>{sessionLabel(si).toUpperCase()}</Text>
           <Text style={styles.detailSessionName}>{s.name}</Text>
           {s.blocks?.map((block, bi) => (
             <View key={bi} style={styles.detailBlock}>
@@ -1244,6 +1247,12 @@ const styles = StyleSheet.create({
   },
   detailSession: {
     gap: 8,
+  },
+  detailSessionLabel: {
+    color: GREY,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
   detailSessionName: {
     color: YELLOW,

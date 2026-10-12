@@ -39,6 +39,7 @@ import { perfLog, sinceAppStart } from '../../lib/perf';
 import { isRestRow } from '../../lib/exerciseNotes';
 import { activeRoundReps, displayReps, extrasQualifier } from '../../lib/roundReps';
 import { forTimeHeading } from '../../lib/programGrouping';
+import { orderSessions, sessionLabel } from '../../lib/sessionOrder';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
 import { Flags } from '../../lib/flags';
 
@@ -718,6 +719,8 @@ export default function HomeScreen() {
         (l as any).completed === true
       ) {
         completedKeys.add(`${(l as any).session_name ?? ''}|${(l as any).session_time ?? ''}`);
+        // Name-only fallback, used only when the name is unique among today's sessions.
+        completedKeys.add(`name:${(l as any).session_name ?? ''}`);
       }
     }
     setCompletedTodayKeys(completedKeys);
@@ -993,7 +996,7 @@ export default function HomeScreen() {
     );
   }
 
-  const sessions  = [...(todayDay?.sessions ?? [])].sort((a, b) => (a.time === 'PM' ? 1 : 0) - (b.time === 'PM' ? 1 : 0));
+  const sessions  = orderSessions(todayDay?.sessions);
   const isRestDay = todayDay?.type !== 'race' && (todayDay?.type === 'rest' || sessions.length === 0);
 
   const dayIndex = program?.program_data?.days?.findIndex(d => d.day === todayDay?.day) ?? -1;
@@ -1243,9 +1246,8 @@ export default function HomeScreen() {
             {/* One block per session (doubles day shows AM + PM stacked) */}
             {sessions.map((session, si) => (
               <View key={si} style={styles.sessionBlock}>
-                {!!session.time && (
-                  <Text style={styles.sessionTimeLabel}>{session.time.toUpperCase()}</Text>
-                )}
+                {/* Position label, display only — never used for matching. */}
+                <Text style={styles.sessionTimeLabel}>{sessionLabel(si).toUpperCase()}</Text>
                 <Text style={styles.sessionName}>{session.name}</Text>
                 {!!session.description && (
                   <Text style={styles.sessionDesc}>{session.description}</Text>
@@ -1390,7 +1392,10 @@ export default function HomeScreen() {
                 ))}
 
                 {/* Log button (or completed state) — per-session via name|time key */}
-                {program && (completedTodayKeys.has(`${session.name}|${session.time}`) ? (
+                {program && (completedTodayKeys.has(`${session.name}|${session.time}`) ||
+                  // Name alone when name|time misses — only if no other session today has
+                  // that name (a moved session, or one with no stored time).
+                  (sessions.filter(s => s.name === session.name).length === 1 && completedTodayKeys.has(`name:${session.name}`)) ? (
                   <View style={[styles.viewWorkoutBtn, { backgroundColor: '#1a2a1a', marginTop: 12 }]}>
                     <Text style={[styles.viewWorkoutBtnText, { color: '#4aff78' }]}>SESSION COMPLETE ✓</Text>
                   </View>

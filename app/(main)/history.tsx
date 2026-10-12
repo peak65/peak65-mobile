@@ -11,6 +11,7 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { canShowUndo, confirmUndo, dropLogFromCaches, reportUndoResult, undoSessionLog } from '../../lib/sessionLogUndo';
+import { orderSessions, sessionLabel } from '../../lib/sessionOrder';
 import { authHeaders } from '../../lib/apiAuth';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable } from '../../lib/cachePolicy';
@@ -690,14 +691,16 @@ function WorkoutDetailModal({
             <ScrollView showsVerticalScrollIndicator={false}>
               {programs.map(prog => (
                 prog.program_data?.days?.flatMap(day =>
-                  (day.sessions ?? []).map(session => (
+                  // Same order and labels as the Program tab (lib/sessionOrder.ts).
+                  // Display only: assignTo still records the session by name.
+                  orderSessions(day.sessions).map((session, si) => (
                     <TouchableOpacity
                       key={`${prog.id}-${day.day}-${session.name}`}
                       style={[styles.detailCell, { width: '100%', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#222' }]}
                       onPress={() => assignTo(prog.id, prog.week_number, day.day, session.name)}
                       disabled={assigning}
                     >
-                      <Text style={[styles.detailCellLabel, { marginBottom: 2 }]}>Week {prog.week_number} · {day.day}</Text>
+                      <Text style={[styles.detailCellLabel, { marginBottom: 2 }]}>Week {prog.week_number} · {day.day} · {sessionLabel(si)}</Text>
                       <Text style={[styles.detailCellVal, { fontSize: 14 }]}>{session.name}</Text>
                     </TouchableOpacity>
                   ))
