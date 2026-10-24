@@ -65,6 +65,7 @@ export type ExerciseItem = {
   sets?: number;
   reps?: string;
   rest?: string;
+  rest_note?: string | null;
   rest_seconds?: number;
   distance?: string;
   zone?: string;
@@ -88,6 +89,7 @@ export type ExerciseItem = {
   // through lib/roundReps.ts (extrasQualifier / displayReps).
   extra_segments?: { reps: string; load?: string | null; on?: 'all' | 'last' | number[] | null }[] | null;
   circuit_rest?: string | null;
+  circuit_rest_note?: string | null;
   block_id?: string | null;
   block_name?: string | null;
   emom_id?: string | null;

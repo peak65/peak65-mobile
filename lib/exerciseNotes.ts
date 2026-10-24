@@ -35,13 +35,57 @@ export function parseExerciseNotes(raw: string | null | undefined): ExerciseNote
   return { pace, load, cue: cue.length > 0 ? cue.join(' · ') : null };
 }
 
-const NO_REST = ['none', '0', '0 min', '0:00', '00:00'];
+// Rest between sets, as every display prints it. Mirrors the web repo's
+// src/lib/rest.ts (as of 04f6fb0) — keep the two identical. Two fields each:
+//   rest / circuit_rest            HOW LONG — "60 sec", "3 min".
+//   rest_note / circuit_rest_note  WHAT — optional: "standing", "float @ 110-130W".
+// Printed everywhere as "rest 60 sec standing" — prefix, never suffix, the coach's
+// own words, nothing added or guessed. A rest written before the split is all in
+// HOW LONG ("60 Second Rest") and prints as "rest 60 Second Rest" until edited.
+//
+// A rest ROW (type 'rest', "REST — 2 min") is a break between Parts, not an
+// exercise's rest: it prints through restLabel below, and restText returns null
+// for one.
 
-// The rest value worth showing, or null when there is effectively none.
-export function displayRest(rest: string | null | undefined): string | null {
-  const trimmed = (rest ?? '').trim();
-  if (!trimmed || NO_REST.includes(trimmed.toLowerCase())) return null;
-  return trimmed;
+export type RestFields = {
+  type?: string | null;
+  rest?: string | null;
+  rest_note?: string | null;
+  circuit_rest?: string | null;
+  circuit_rest_note?: string | null;
+};
+
+// Stored values that mean "no rest". Real rows carry "none" and "null" as TEXT.
+const NO_REST = ['none', 'null', '0', '0 min', '0:00', '00:00'];
+
+// A stored value that isn't a string (a numeric 60) counts as nothing.
+function clean(v: string | null | undefined): string | null {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return s ? s : null;
+}
+
+/** HOW LONG worth showing, or null when there is effectively none. */
+export function restValue(v: string | null | undefined): string | null {
+  const s = clean(v);
+  return s && !NO_REST.includes(s.toLowerCase()) ? s : null;
+}
+
+/** "rest 60 sec standing" / "rest 90 sec" / null. WHAT alone still prints: "rest standing". */
+export function formatRest(howLong: string | null | undefined, what: string | null | undefined): string | null {
+  const parts = [restValue(howLong), clean(what)].filter((p): p is string => !!p);
+  return parts.length ? `rest ${parts.join(' ')}` : null;
+}
+
+/** An exercise's rest between sets. null for a rest row, or when there is none. */
+export function restText(ex: RestFields): string | null {
+  if (ex.type === 'rest') return null;
+  return formatRest(ex.rest, ex.rest_note);
+}
+
+/** A circuit's rest between rounds, read from its first member: "rest 90 sec between rounds". */
+export function circuitRestText(first: RestFields): string | null {
+  const r = formatRest(first.circuit_rest, first.circuit_rest_note);
+  return r ? `${r} between rounds` : null;
 }
 
 // Rest rows written by the web editor: a break between movements, not a movement.

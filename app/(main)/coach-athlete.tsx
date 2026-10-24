@@ -23,7 +23,7 @@ import { orderSessions, sessionLabel } from '../../lib/sessionOrder';
 import { syncBadge } from '../../lib/badge';
 import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { Colors, Fonts } from '../../lib/theme';
-import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
+import { parseExerciseNotes, restText, circuitRestText, isRestRow, restLabel } from '../../lib/exerciseNotes';
 import { activeRoundReps, displayReps, extrasQualifier } from '../../lib/roundReps';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CoachAthleteDetail'>;
@@ -902,7 +902,7 @@ function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string, fo
 
   const { pace, load, cue } = parseExerciseNotes(ex.notes || ex.note);
   const duration = ex.duration?.trim();
-  const rest = forTime ? null : displayRest(ex.rest);
+  const rest = forTime ? null : restText(ex);
 
   const parts: string[] = [];
   // A per-round ladder replaces sets×reps (lib/roundReps.ts); a duration still
@@ -923,7 +923,7 @@ function coachExerciseLine(ex: ExerciseItem, key: React.Key, prefix?: string, fo
     else if (extras) parts.push(printed);
   }
   if (ex.distance) parts.push(ex.distance);
-  if (rest) parts.push(`${rest} rest`);
+  if (rest) parts.push(rest);
   if (load) parts.push(`Load: ${load}`);
   if (pace) parts.push(`Pace: ${pace}`);
   if (ex.zone) parts.push(`Z${ex.zone}`);
@@ -957,6 +957,7 @@ function SessionDetail({ day, logs }: { day: ProgramDay; logs: SessionLogRow[] }
               {groupBySuperset(block.exercises ?? []).map((group, gi) => {
                 if (group.kind === 'circuit' || group.kind === 'part-circuit') {
                   const timeCap = (group.members[0]?.ex as any)?.time_cap;
+                  const rest = circuitRestText(group.members[0].ex);
                   return (
                     <View key={gi} style={styles.detailGroup}>
                       {group.kind === 'part-circuit' && group.blockName ? (
@@ -966,8 +967,8 @@ function SessionDetail({ day, logs }: { day: ProgramDay; logs: SessionLogRow[] }
                         {timeCap ? `${timeCap} AMRAP:` : `${group.rounds} Rounds:`}
                       </Text>
                       {group.members.map((m, mi) => coachExerciseLine(m.ex, mi))}
-                      {!!group.rest && (
-                        <Text style={styles.detailRest}>{group.rest} rest between rounds</Text>
+                      {!!rest && (
+                        <Text style={styles.detailRest}>{rest}</Text>
                       )}
                     </View>
                   );

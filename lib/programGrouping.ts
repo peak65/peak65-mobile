@@ -8,9 +8,9 @@ import type { ExerciseItem } from '../app/_layout';
 export type ExGroup =
   | { kind: 'single'; ex: ExerciseItem; origIdx: number }
   | { kind: 'superset'; members: { ex: ExerciseItem; origIdx: number }[] }
-  | { kind: 'circuit'; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number; rest: string | null }
+  | { kind: 'circuit'; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number }
   | { kind: 'block'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] }
-  | { kind: 'part-circuit'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number; rest: string | null }
+  | { kind: 'part-circuit'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; rounds: number }
   | { kind: 'part-superset'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[] }
   | { kind: 'emom'; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; rounds: number | null; totalMinutes: number | null }
   | { kind: 'part-emom'; blockName: string; members: { ex: ExerciseItem; origIdx: number }[]; label: string | null; rounds: number | null; totalMinutes: number | null }
@@ -73,7 +73,7 @@ export function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
       } else if (firstForTimeId && members.every((m) => m.ex.for_time_id === firstForTimeId)) {
         groups.push({ kind: 'part-fortime', blockName, members });
       } else if (firstCircuitId && members.every((m) => m.ex.circuit_id === firstCircuitId)) {
-        groups.push({ kind: 'part-circuit', blockName, members, rounds: members[0].ex.circuit_rounds ?? 4, rest: members[0].ex.circuit_rest ?? null });
+        groups.push({ kind: 'part-circuit', blockName, members, rounds: members[0].ex.circuit_rounds ?? 4 });
       } else {
         const firstSupersetId = members[0].ex.superset_id;
         if (firstSupersetId && members.every((m) => m.ex.superset_id === firstSupersetId)) {
@@ -143,7 +143,6 @@ export function groupBySuperset(exercises: ExerciseItem[]): ExGroup[] {
           kind: 'circuit',
           members,
           rounds: members[0].ex.circuit_rounds ?? 4,
-          rest: members[0].ex.circuit_rest ?? null,
         });
       }
     } else if (ex.superset_id) {

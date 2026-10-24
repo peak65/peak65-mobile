@@ -25,7 +25,7 @@ import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { cacheUsable, weekCoversToday } from '../../lib/cachePolicy';
 import { orderSessions, sessionLabel } from '../../lib/sessionOrder';
 import { formatWeekStart, weekCoveringToday, weekHasStarted, weekToOpen } from '../../lib/weekSelection';
-import { parseExerciseNotes, displayRest, isRestRow, restLabel } from '../../lib/exerciseNotes';
+import { parseExerciseNotes, restText, circuitRestText, isRestRow, restLabel } from '../../lib/exerciseNotes';
 import { activeRoundReps, displayReps, extrasQualifier } from '../../lib/roundReps';
 import HRDetailModal, { type HRDetail } from '../../components/HRDetailModal';
 
@@ -142,8 +142,8 @@ function SessionDocument({ session, label }: { session: ProgramSession; label: s
     }
 
     // A For Time has no prescribed rest, so a member's own rest is not shown.
-    const rest = hideRest ? null : displayRest(ex.rest);
-    if (rest) parts.push(`${rest} rest`);
+    const rest = hideRest ? null : restText(ex);
+    if (rest) parts.push(rest);
 
     if (load) parts.push(`Load: ${load}`);
     if (pace) parts.push(`Pace: ${pace}`);
@@ -175,7 +175,7 @@ function SessionDocument({ session, label }: { session: ProgramSession; label: s
             // Circuits / AMRAP: never numbered, never advance the counter.
             const members = group.members;
             const rounds = group.kind === 'circuit' ? group.rounds : group.rounds;
-            const rest = group.kind === 'circuit' ? group.rest : group.rest;
+            const rest = circuitRestText(members[0].ex);
             return (
               <View key={gi} style={pd.circuitSection}>
                 {group.kind === 'part-circuit' && group.blockName ? (
@@ -186,7 +186,7 @@ function SessionDocument({ session, label }: { session: ProgramSession; label: s
                 ); })()}
                 {members.map(({ ex }, mi) => renderExerciseLine(ex, mi, undefined, true))}
                 {!!rest && (
-                  <Text style={pd.exerciseDetail}>{'  '}{rest} rest between rounds</Text>
+                  <Text style={pd.exerciseDetail}>{'  '}{rest}</Text>
                 )}
               </View>
             );
