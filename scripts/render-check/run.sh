@@ -22,7 +22,7 @@ git -C "$REPO" archive "$REF" app lib components | tar -x -C "$OUT/base" || { ec
 node "$HERE/gen.cjs" "$OUT" || exit 1
 
 for tree in base new; do
-  for fx in structure structure-rest rest; do
+  for fx in structure structure-rest rest day; do
     node "$HERE/harness.cjs" "$OUT/$tree" "$OUT/$fx.json" > "$OUT/out-$tree-$fx.txt" 2> "$OUT/err-$tree-$fx.txt"
     code=$?
     if [ $code -ne 0 ]; then echo "FAIL harness $tree/$fx exited $code"; cat "$OUT/err-$tree-$fx.txt"; fail=1; fi
@@ -62,6 +62,14 @@ node "$HERE/check-rest.cjs" "$OUT" > "$OUT/check-rest.txt"
 code=$?
 grep -E '^(BAD|THREW)' "$OUT/check-rest.txt"
 tail -1 "$OUT/check-rest.txt"
+[ $code -ne 0 ] && fail=1
+
+echo
+echo "== 5. Day title and note vs the expectations in gen.cjs (working tree; coach detail also vs $REF)"
+node "$HERE/check-day.cjs" "$OUT" > "$OUT/check-day.txt"
+code=$?
+grep -A3 -E '^BAD' "$OUT/check-day.txt"
+tail -1 "$OUT/check-day.txt"
 [ $code -ne 0 ] && fail=1
 
 echo

@@ -137,6 +137,12 @@ export type ProgramDay = {
   session_type?: string;
   intensity?: 'easy' | 'moderate' | 'hard' | 'rest';
   is_rest?: boolean;
+  // The day's own title (one line) and note (paragraphs joined with "\n"), written by
+  // the coach on the web. Optional on any day type, including a race day with no
+  // sessions. Read only through lib/dayText.ts, which treats anything that isn't a
+  // non-blank string as absent.
+  title?: string;
+  note?: string;
   warm_up?: ExerciseItem[];
   main_work?: ExerciseItem[];
   cool_down?: ExerciseItem[];

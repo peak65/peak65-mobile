@@ -42,6 +42,8 @@ import { forTimeHeading } from '../../lib/programGrouping';
 import { orderSessions, sessionLabel } from '../../lib/sessionOrder';
 import { Colors, Fonts, scoreColor } from '../../lib/theme';
 import { Flags } from '../../lib/flags';
+import DayText from '../../components/DayText';
+import { dayTitle } from '../../lib/dayText';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -415,6 +417,47 @@ function PulsingRing() {
       position: 'absolute', alignSelf: 'center', backgroundColor: 'transparent',
       transform: [{ scale }],
     }} />
+  );
+}
+
+// ─── Today's day text ────────────────────────────────────────────────────────
+
+// Training and race days: the day's own title and note as one card in the session
+// card style, ahead of the session cards. A race day with nothing programmed and no
+// text says "Race day" on a quiet line instead of leaving the space empty.
+function TodayDayText({ day }: { day: ProgramDay }) {
+  return (
+    <DayText
+      day={day}
+      styles={{
+        container:     styles.sessionBlock,
+        title:         styles.sessionName,
+        note:          styles.sessionDesc,
+        raceLine:      styles.sessionDesc,
+        raceContainer: styles.todayDayRow,
+      }}
+    />
+  );
+}
+
+const REST_DAY_LINE = 'Recovery is where adaptation happens. Rest well.';
+
+// Rest days: the Moon and REST DAY as always. The coach's title, when there is one,
+// takes the generic line's place; the note follows in the same centred style.
+function RestDayCard({ day }: { day: ProgramDay | null }) {
+  return (
+    <View style={styles.restCard}>
+      <Moon color={Colors.accent} size={28} strokeWidth={1.5} />
+      <Text style={styles.restTitle}>REST DAY</Text>
+      {dayTitle(day) == null && <Text style={styles.restSub}>{REST_DAY_LINE}</Text>}
+      <DayText
+        day={day}
+        styles={{
+          title: [styles.restSub, { color: Colors.textPrimary }],
+          note:  styles.restSub,
+        }}
+      />
+    </View>
   );
 }
 
@@ -1216,11 +1259,7 @@ export default function HomeScreen() {
             )}
           </View>
         ) : isRestDay ? (
-          <View style={styles.restCard}>
-            <Moon color={Colors.accent} size={28} strokeWidth={1.5} />
-            <Text style={styles.restTitle}>REST DAY</Text>
-            <Text style={styles.restSub}>Recovery is where adaptation happens. Rest well.</Text>
-          </View>
+          <RestDayCard day={todayDay} />
         ) : (
           <View style={styles.todayWrap}>
             {/* Day label + type badge */}
@@ -1242,6 +1281,9 @@ export default function HomeScreen() {
                 </View>
               ) : null}
             </View>
+
+            {/* The day's own title and note, before its sessions */}
+            <TodayDayText day={todayDay!} />
 
             {/* One block per session (doubles day shows AM + PM stacked) */}
             {sessions.map((session, si) => (

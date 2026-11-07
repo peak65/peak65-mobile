@@ -20,8 +20,9 @@ const fixtures = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 // both trees render the stub and compare equal; stubbed project files are listed
 // on stderr so that shows.
 const REAL = new Set([
-  'app/(main)/program.tsx', 'app/(main)/coach-athlete.tsx',
+  'app/(main)/program.tsx', 'app/(main)/coach-athlete.tsx', 'app/(main)/home.tsx',
   'lib/exerciseNotes.ts', 'lib/programGrouping.ts', 'lib/roundReps.ts', 'lib/sessionOrder.ts',
+  'lib/dayText.ts', 'components/DayText.tsx', 'lib/theme.ts',
 ]);
 
 function stub(name) {
@@ -79,6 +80,16 @@ for (const ext of ['.ts', '.tsx']) {
     const rel = path.relative(root, filename);
     if (rel === 'app/(main)/program.tsx') src += '\nexport { SessionDocument as __SessionDocument };\n';
     if (rel === 'app/(main)/coach-athlete.tsx') src += '\nexport { SessionDetail as __SessionDetail };\n';
+    // Day text pieces (day fixtures only). Exported only where the tree has them, so an
+    // older ref without them still loads; those sections then print as absent.
+    const DAY_EXPORTS = {
+      'app/(main)/program.tsx': ['DayIntro'],
+      'app/(main)/coach-athlete.tsx': ['weekListLabel', 'overviewLabel'],
+      'app/(main)/home.tsx': ['TodayDayText', 'RestDayCard'],
+    };
+    for (const name of DAY_EXPORTS[rel] ?? []) {
+      if (new RegExp('function ' + name + '\\b').test(src)) src += `\nexport { ${name} as __${name} };\n`;
+    }
     const out = transform(src, { transforms: ['typescript', 'jsx', 'imports'], filePath: filename, production: true }).code;
     mod._compile(out, filename);
   };
@@ -115,6 +126,37 @@ function render(node, depth, out) {
 }
 
 const out = [];
+
+// Day fixtures (day.json): the day's own title and note on every screen piece that
+// shows them. Home is loaded only here, so the session fixtures never depend on it.
+if (fixtures[0]?.kind === 'day') {
+  const program = require(path.join(root, 'app/(main)/program.tsx'));
+  const coach = require(path.join(root, 'app/(main)/coach-athlete.tsx'));
+  const home = require(path.join(root, 'app/(main)/home.tsx'));
+  const pieces = [
+    ['program.tsx DayIntro', program.__DayIntro, 'el'],
+    ['home.tsx TodayDayText', home.__TodayDayText, 'el'],
+    ['home.tsx RestDayCard', home.__RestDayCard, 'el'],
+    ['coach-athlete.tsx SessionDetail', __SessionDetail, 'detail'],
+    ['coach-athlete.tsx weekListLabel', coach.__weekListLabel, 'label'],
+    ['coach-athlete.tsx overviewLabel', coach.__overviewLabel, 'label'],
+  ];
+  for (const fx of fixtures) {
+    for (const [name, fn, kind] of pieces) {
+      out.push('=== ' + fx.id + ' :: ' + name);
+      if (!fn) { out.push('(absent at this ref)'); continue; }
+      try {
+        if (kind === 'label') out.push('#label ' + JSON.stringify(fn(fx.day)));
+        else if (kind === 'detail') render(React.createElement(fn, { day: fx.day, logs: [] }), 0, out);
+        else render(React.createElement(fn, { day: fx.day }), 0, out);
+      } catch (e) { out.push('!! THREW ' + e.constructor.name + ': ' + e.message); }
+    }
+  }
+  process.stdout.write(out.join('\n') + '\n');
+  process.stderr.write('stubbed project files: ' + [...stubbed].sort().join(', ') + '\n');
+  process.exit(0);
+}
+
 for (const fx of fixtures) {
   out.push('=== ' + fx.id + ' :: program.tsx SessionDocument');
   orderSessions(fx.day.sessions).forEach((s, si) => {

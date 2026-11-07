@@ -25,6 +25,8 @@ import { excludeArchived, visiblePrograms } from '../../lib/programFilters';
 import { Colors, Fonts } from '../../lib/theme';
 import { parseExerciseNotes, restText, circuitRestText, isRestRow, restLabel } from '../../lib/exerciseNotes';
 import { activeRoundReps, displayReps, extrasQualifier } from '../../lib/roundReps';
+import DayText from '../../components/DayText';
+import { dayListLabel } from '../../lib/dayText';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CoachAthleteDetail'>;
 
@@ -595,7 +597,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
                       <View style={styles.sessionLeft}>
                         <Text style={styles.sessionDay}>{day.day}</Text>
                         <Text style={styles.sessionName} numberOfLines={1}>
-                          {orderSessions(day.sessions)[0]?.name ?? (day.is_rest ? 'Rest' : '—')}
+                          {weekListLabel(day)}
                         </Text>
                       </View>
                       <View style={styles.sessionRight}>
@@ -828,9 +830,7 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
                 <View key={i} style={styles.overviewRow}>
                   <Text style={styles.overviewDay} numberOfLines={1}>{day.day}</Text>
                   <Text style={styles.overviewSession} numberOfLines={1}>
-                    {day.is_rest
-                      ? 'Rest'
-                      : orderSessions(day.sessions)[0]?.name ?? '—'}
+                    {overviewLabel(day)}
                   </Text>
                   <Text style={styles.overviewType}>{day.type === 'race' ? 'Race' : day.type}</Text>
                 </View>
@@ -845,6 +845,17 @@ export default function CoachAthleteScreen({ route, navigation }: Props) {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+// The one-line day labels. Unchanged for a day with sessions or a rest day; where a
+// day without sessions used to read "—", it now reads the coach's title for that day,
+// or "Race day" for a race day without one (lib/dayText.ts dayListLabel).
+function weekListLabel(day: ProgramDay): string {
+  return orderSessions(day.sessions)[0]?.name ?? (day.is_rest ? 'Rest' : dayListLabel(day));
+}
+
+function overviewLabel(day: ProgramDay): string {
+  return day.is_rest ? 'Rest' : orderSessions(day.sessions)[0]?.name ?? dayListLabel(day);
+}
 
 function StatusBadge({ status }: { status: DayStatus }) {
   const config = {
@@ -945,6 +956,17 @@ function SessionDetail({ day, logs }: { day: ProgramDay; logs: SessionLogRow[] }
 
   return (
     <View style={styles.sessionDetail}>
+      {/* The day's own title and note, before its sessions. A race day with nothing
+          programmed and no text says "Race day" instead of an empty box. */}
+      <DayText
+        day={day}
+        styles={{
+          container: styles.detailSession,
+          title:     styles.detailSessionName,
+          note:      styles.detailRest,
+          raceLine:  styles.detailRest,
+        }}
+      />
       {sessions.map((s, si) => (
         <View key={si} style={styles.detailSession}>
           <Text style={styles.detailSessionLabel}>{sessionLabel(si).toUpperCase()}</Text>

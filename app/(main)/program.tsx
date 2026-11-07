@@ -28,6 +28,8 @@ import { formatWeekStart, weekCoveringToday, weekHasStarted, weekToOpen } from '
 import { parseExerciseNotes, restText, circuitRestText, isRestRow, restLabel } from '../../lib/exerciseNotes';
 import { activeRoundReps, displayReps, extrasQualifier } from '../../lib/roundReps';
 import HRDetailModal, { type HRDetail } from '../../components/HRDetailModal';
+import DayText from '../../components/DayText';
+import { hasDayText } from '../../lib/dayText';
 
 function toHRDetail(log: any): HRDetail {
   return {
@@ -562,6 +564,27 @@ function sessionNameKey(week: number, day: string, name: string): string {
   return `name:${week}|${day}|${name}`;
 }
 
+// The day's own title and note, first under the day header and before the sessions.
+// Laid out as a session's opening lines: the title where a session's name sits, each
+// note paragraph in the session description style. The last paragraph drops its
+// margin, since the section's own padding already closes it. A race day with nothing
+// programmed and no text says "Race day" instead of opening on an empty card.
+function DayIntro({ day }: { day: ProgramDay }) {
+  return (
+    <DayText
+      day={day}
+      styles={{
+        container: pd.sessionDoc,
+        titleWrap: pd.sessionHeader,
+        title:     pd.sessionName,
+        note:      pd.sessionDesc,
+        lastNote:  { marginBottom: 0 },
+        raceLine:  [pd.sessionDesc, { marginBottom: 0 }],
+      }}
+    />
+  );
+}
+
 function DayCard({
   day, isToday, isComplete,
   userId, programId, weekNumber, weekStartDate, savedTrials,
@@ -583,6 +606,9 @@ function DayCard({
   completedSessionKeys: Map<string, HRDetail>;
 }) {
   const isRest = day.type !== 'race' && (day.type === 'rest' || !day.sessions?.length);
+  // A rest day opens only when the coach has written it a title or note; one with
+  // neither stays a closed header, as it always has.
+  const openable = day.type !== 'rest' || hasDayText(day);
   const [expanded, setExpanded] = React.useState(isToday);
   const [openHR, setOpenHR] = useState<HRDetail | null>(null);
   console.log('[today check]', day.day, isToday);
@@ -915,18 +941,20 @@ function DayCard({
       }]}>
         {(day.type ?? 'rest').toUpperCase()}
       </Text>
-      {day.type !== 'rest' && <Feather name={expanded ? 'chevron-up' : 'chevron-down'} color='#8a877f' size={16} />}
+      {openable && <Feather name={expanded ? 'chevron-up' : 'chevron-down'} color='#8a877f' size={16} />}
     </>
   );
 
   return (
     <>
     <View style={[styles.dayCard, isToday && styles.dayCardToday, { borderLeftWidth: isToday ? 2 : 0, borderLeftColor: '#e8ff47' }]}>
-      {day.type === 'rest' ? (
+      {!openable ? (
         <View style={pd.dayHeader}>{headerInner}</View>
       ) : (
         <TouchableOpacity style={pd.dayHeader} onPress={() => setExpanded(e => !e)}>{headerInner}</TouchableOpacity>
       )}
+
+      {expanded && openable && <DayIntro day={day} />}
 
       {expanded && !isRest && orderSessions(day.sessions).map((session, si) => {
         // Matched on week + day + name + stored time. When that misses, the name

@@ -95,7 +95,57 @@ function restFixtures() {
   });
 }
 
+// A day's own title and note (lib/dayText.ts, components/DayText.tsx). Each fixture
+// carries its expected result, written by hand rather than computed from the code:
+//   title  - the title line, or null
+//   notes  - the note paragraphs, in order
+//   race   - true when the "Race day" line shows instead
+//   list / overview - the coach view's one-line labels
+// check-day.cjs compares every screen piece against these.
+const GENERIC_REST = 'Recovery is where adaptation happens. Rest well.';
+function dayFixtures() {
+  const run = sess('Easy Run', [{ block_name: 'MAIN', exercises: [{ name: 'Run', type: 'cardio', duration: '40 min', zone: '2' }] }]);
+  const d = (type, sessions, fields) => ({ day: 'Saturday', type, sessions, ...fields });
+  const RACE_NOTE = 'Breakfast 3h out: oats, banana, coffee.\nWarm up 20 min easy, 3 x 30 sec at race pace.\n\nRun the first 1 km 10 sec slower than goal.';
+  const RACE_PARAS = ['Breakfast 3h out: oats, banana, coffee.', 'Warm up 20 min easy, 3 x 30 sec at race pace.', 'Run the first 1 km 10 sec slower than goal.'];
+  const cases = [
+    // Training days
+    ['training no fields',        d('training', [run], {}),                                            null, [], false, 'Easy Run', 'Easy Run'],
+    ['training title only',       d('training', [run], { title: 'Long run week' }),                  'Long run week', [], false, 'Easy Run', 'Easy Run'],
+    ['training note only',        d('training', [run], { note: 'Keep it conversational.' }),         null, ['Keep it conversational.'], false, 'Easy Run', 'Easy Run'],
+    ['training both',             d('training', [run], { title: 'Deload', note: 'Half the usual load.' }), 'Deload', ['Half the usual load.'], false, 'Easy Run', 'Easy Run'],
+    ['training multi-paragraph',  d('training', [run], { title: '  Padded title  ', note: 'Para one.\n\nPara two.\r\n  Para three.  \r\n   \n' }),
+                                  'Padded title', ['Para one.', 'Para two.', 'Para three.'], false, 'Easy Run', 'Easy Run'],
+    ['training non-string',       d('training', [run], { title: 42, note: { text: 'x' } }),           null, [], false, 'Easy Run', 'Easy Run'],
+    ['training non-string 2',     d('training', [run], { title: ['Array title'], note: true }),       null, [], false, 'Easy Run', 'Easy Run'],
+    ['training null fields',      d('training', [run], { title: null, note: null }),                  null, [], false, 'Easy Run', 'Easy Run'],
+    ['training blank strings',    d('training', [run], { title: '   ', note: '\n \n\t' }),            null, [], false, 'Easy Run', 'Easy Run'],
+    ['training no sessions title', d('easy', [], { title: 'Mobility on your own' }),                  'Mobility on your own', [], false, 'Mobility on your own', 'Mobility on your own'],
+    ['training no sessions none', d('easy', [], {}),                                                  null, [], false, '—', '—'],
+    // Rest days
+    ['rest no fields',            d('rest', [], { is_rest: true }),                                   null, [], false, 'Rest', 'Rest'],
+    ['rest title only',           d('rest', [], { is_rest: true, title: 'Travel day' }),              'Travel day', [], false, 'Rest', 'Rest'],
+    ['rest note only',            d('rest', [], { is_rest: true, note: 'Walk 30 min.\nSleep early.' }), null, ['Walk 30 min.', 'Sleep early.'], false, 'Rest', 'Rest'],
+    ['rest both, no is_rest',     d('rest', [], { title: 'Travel day', note: 'Hydrate on the flight.' }), 'Travel day', ['Hydrate on the flight.'], false, 'Travel day', 'Travel day'],
+    ['rest non-string',           d('rest', [], { is_rest: true, title: 7, note: '  ' }),             null, [], false, 'Rest', 'Rest'],
+    // Race days
+    ['race no fields',            d('race', [], {}),                                                  null, [], true, 'Race day', 'Race day'],
+    ['race no fields, no sessions key', (() => { const x = d('race', [], {}); delete x.sessions; return x; })(),
+                                                                                                      null, [], true, 'Race day', 'Race day'],
+    ['race title only',           d('race', [], { title: 'HYROX Berlin — Elite 15' }),                'HYROX Berlin — Elite 15', [], false, 'HYROX Berlin — Elite 15', 'HYROX Berlin — Elite 15'],
+    ['race note only',            d('race', [], { note: RACE_NOTE }),                                 null, RACE_PARAS, false, 'Race day', 'Race day'],
+    ['race both multi-paragraph', d('race', [], { title: 'HYROX Berlin — Elite 15', note: RACE_NOTE }), 'HYROX Berlin — Elite 15', RACE_PARAS, false, 'HYROX Berlin — Elite 15', 'HYROX Berlin — Elite 15'],
+    ['race non-string and blank', d('race', [], { title: 0, note: '' }),                              null, [], true, 'Race day', 'Race day'],
+    ['race with a session',       d('race', [sess('Race Warm-up', [{ block_name: 'MAIN', exercises: [{ name: 'Jog', duration: '10 min' }] }])], {}),
+                                                                                                      null, [], false, 'Race Warm-up', 'Race Warm-up'],
+  ];
+  return cases.map(([id, day, title, notes, race, list, overview]) => ({
+    kind: 'day', id: 'day: ' + id, day, expect: { title, notes, race, list, overview, genericRest: GENERIC_REST },
+  }));
+}
+
 const st = structure();
 fs.writeFileSync(dir + '/structure.json', JSON.stringify(st));
 fs.writeFileSync(dir + '/structure-rest.json', JSON.stringify(withRests(st)));
 fs.writeFileSync(dir + '/rest.json', JSON.stringify(restFixtures()));
+fs.writeFileSync(dir + '/day.json', JSON.stringify(dayFixtures()));
